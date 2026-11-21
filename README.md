@@ -4,6 +4,8 @@
 
 # Colab Playground
 
+**English** | [简体中文](README.zh-CN.md)
+
 **A desktop app for the Google Colab CLI: accounts, GPU sessions with cost guards, port forwarding and plugins.**
 
 [Download](https://github.com/scarletkc/colab-playground/releases/latest) | [Usage](docs/USAGE.md) | [Plugins](docs/PLUGINS.md) | [Roadmap](docs/ROADMAP.md)
@@ -25,7 +27,8 @@ Which file to pick, what the first launch asks and how updates work: [Install a 
 
 **What it is:** a front end for the Google Colab CLI (`colab`, package `google-colab-cli`). It keeps
 several Google accounts, starts and stops Colab runtimes under cost limits, forwards ports from a
-runtime to your computer and runs plugins on the runtime. Written in Rust with GPUI and
+runtime to your computer, and runs plugins on the runtime, such as serving a GGUF model with
+llama.cpp. Written in Rust with GPUI and
 [Ely GPUI Components](https://github.com/ELY-Open-Source/Ely-GPUI-Components).
 
 **What it is not:** a notebook editor or a replacement for the CLI; everything goes through
@@ -45,10 +48,16 @@ runtime to your computer and runs plugins on the runtime. Written in Rust with G
   rate and time left are shown live.
 - **Port forwarding.** Connect a runtime port to `127.0.0.1` on your computer.
 - **Plugins.** A manifest plus one script that runs only on the Colab runtime, never on your
-  computer. Bundled: "Deploy a GGUF model" serves a Hugging Face GGUF model with llama.cpp
-  (OpenAI-compatible API plus web chat) and picks the best quantisation that fits the GPU it gets.
-  It can keep the model on your Google Drive, so deploying it again downloads nothing. Every
-  deployment is listed, to start again with the same settings. Write your own with [docs/PLUGINS.md](docs/PLUGINS.md).
+  computer. Write your own with [docs/PLUGINS.md](docs/PLUGINS.md).
+- **Deploy a GGUF model** (bundled plugin). Search Hugging Face, and the app serves the model with
+  llama.cpp: an OpenAI-compatible API and a web chat, forwarded to your computer. It picks the best
+  quantisation that fits the GPU it gets.
+- **Models kept on Google Drive.** Turn Google Drive on for a deployment and the model is kept in
+  My Drive › Colab Playground and read from there, so deploying it again downloads nothing.
+- **Deployments.** Every deployment you start is listed on a page of its own, to start again with
+  the same settings. Secrets such as API keys are not kept.
+- **Updates.** The app checks for a newer release and installs it when you ask, after checking its
+  signature.
 - **Languages and theme.** English (the default) and 简体中文; light, dark or follow the system.
 
 Every limit and default is editable in Settings and can be overridden for a single session or
@@ -76,8 +85,11 @@ Requirements, backend flags, demo scenarios and where settings are stored:
 
 - Colab bills compute units for as long as a runtime **exists**, busy or idle. Closing a forward or
   the app does not stop billing; only a stop, an auto-stop or Colab itself does.
-- Stopping wipes the runtime: files, downloaded models, anything not saved elsewhere. Each
-  provisioning attempt that is given back is billed for the short time it ran.
+- Stopping wipes the runtime: files, downloaded models, anything not kept on Google Drive or
+  elsewhere. Each provisioning attempt that is given back is billed for the short time it ran.
+- Google Drive is off unless you turn it on for a deployment. While it is mounted, code on the
+  runtime, the plugin included, can read and change your whole Drive. Each new runtime asks for
+  consent in the browser again.
 - The spending cap and the balance floor only work while the app runs. Auto-stop and idle stop run
   on the runtime, and only if its watchdog started (the app says so when it could not).
 - The CLI has one signed-in account for the whole machine. Switching in the app switches it for
