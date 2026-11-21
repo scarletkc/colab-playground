@@ -1,6 +1,6 @@
 api = 1
 id = "llama-cpp"
-version = "0.2.1"
+version = "0.2.2"
 # Optional: a saved Hugging Face token is passed for private / gated repos.
 needs = ["hf_token", "drive"]
 

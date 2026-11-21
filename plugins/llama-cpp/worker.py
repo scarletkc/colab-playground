@@ -238,7 +238,9 @@ def redact(text):
     return text
 
 
-def status(state, stage=None, message="", progress=None, outputs=None):
+def status(state, stage=None, message="", progress=None, outputs=None, log=True):
+    """Writes status.json. With log=False the update is not printed to run.log (for a stage
+    message refreshed every few seconds, which would fill the log with near-copies)."""
     if stage:
         _current_stage[0] = stage
     doc = {"state": state, "stage": _current_stage[0], "message": redact(message)}
@@ -246,7 +248,8 @@ def status(state, stage=None, message="", progress=None, outputs=None):
         doc["progress"] = max(0.0, min(1.0, float(progress)))
     if outputs is not None:
         doc["outputs"] = outputs
-    print("[%s] %s/%s: %s" % (time.strftime("%H:%M:%S"), state, doc["stage"], doc["message"]), flush=True)
+    if log:
+        print("[%s] %s/%s: %s" % (time.strftime("%H:%M:%S"), state, doc["stage"], doc["message"]), flush=True)
     tmp = STATUS_FILE + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(doc, fh)
@@ -603,6 +606,10 @@ def start_server(bindir, model, mm, alias, ctx, kv, mtp):
         cmd += ["--mmproj", mm]
     if mtp:
         cmd += ["--spec-type", "draft-mtp"]
+    if DRIVE_DIR:
+        # Mapping the file reads it in small scattered pieces, each a round trip on the Drive
+        # mount; reading it through once in order loads it far sooner.
+        cmd += ["--no-mmap"]
     if API_KEY:
         cmd += ["--api-key", API_KEY]
     cmd += shlex.split(EXTRA)
@@ -627,7 +634,10 @@ def last_server_line():
     except OSError:
         return ""
     for line in reversed(lines):
-        line = line.strip()
+        # llama.cpp prefixes its lines with a time, a level letter and often a component
+        # ("0.04.519.222 I srv    load_model: ..."); only the message helps the reader.
+        line = re.sub(r"^[\d.]+\s+[A-Z]\s+", "", line.strip())
+        line = re.sub(r"^(srv|slot|que|main)\s+", "", line)
         if line.strip(". "):
             line = redact(line)
             return line if len(line) <= 140 else line[:137] + "..."
@@ -656,7 +666,8 @@ def wait_healthy(p, label, timeout=1200):
         if time.time() - shown >= SERVER_PROGRESS_EVERY:
             shown = time.time()
             line = last_server_line()
-            status("running", "server", "%s, %s so far%s" % (label, elapsed(shown - t0), ": " + line if line else ""))
+            status("running", "server", "%s, %s so far%s" % (label, elapsed(shown - t0), ": " + line if line else ""),
+                   log=False)
         time.sleep(3)
     p.kill()
     return False
