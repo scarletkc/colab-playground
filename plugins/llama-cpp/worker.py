@@ -615,8 +615,35 @@ def start_server(bindir, model, mm, alias, ctx, kv, mtp):
     return p
 
 
-def wait_healthy(p, timeout=1200):
+SERVER_PROGRESS_EVERY = 15  # seconds between updates of the "server" stage while it loads
+
+
+def last_server_line():
+    """The last line of the server's log that says something (llama.cpp prints rows of dots
+    while it loads tensors), redacted and shortened."""
+    try:
+        with open(SERVER_LOG, errors="replace") as fh:
+            lines = fh.readlines()[-40:]
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        line = line.strip()
+        if line.strip(". "):
+            line = redact(line)
+            return line if len(line) <= 140 else line[:137] + "..."
+    return ""
+
+
+def elapsed(seconds):
+    seconds = int(seconds)
+    return "%d min %02d s" % divmod(seconds, 60) if seconds >= 60 else "%d s" % seconds
+
+
+def wait_healthy(p, label, timeout=1200):
+    """Waits for the server's /health. Loading a large model, above all from Google Drive, takes
+    minutes; the stage message shows how long it has waited and what the server last logged."""
     t0 = time.time()
+    shown = t0
     while time.time() - t0 < timeout:
         if p.poll() is not None:
             return False
@@ -626,6 +653,10 @@ def wait_healthy(p, timeout=1200):
         except Exception:  # noqa: BLE001
             pass
         touch_heartbeat()
+        if time.time() - shown >= SERVER_PROGRESS_EVERY:
+            shown = time.time()
+            line = last_server_line()
+            status("running", "server", "%s, %s so far%s" % (label, elapsed(shown - t0), ": " + line if line else ""))
         time.sleep(3)
     p.kill()
     return False
@@ -804,9 +835,11 @@ def main():
     ok, kv, mtp = False, kv_opts[0], False
     for mtp in mtp_opts:
         for kv in kv_opts:
-            status("running", "server", "starting llama-server (KV %s, MTP %s)" % (kv, "on" if mtp else "off"))
+            label = "starting llama-server (KV %s, MTP %s%s)" % (kv, "on" if mtp else "off",
+                                                                 ", reading the model from Google Drive" if DRIVE_DIR else "")
+            status("running", "server", label)
             p = start_server(bindir, model, mm, alias, choice["ctx"], kv, mtp)
-            if wait_healthy(p):
+            if wait_healthy(p, label):
                 ok = True
                 break
             print("start failed: %s" % log_tail(), flush=True)
