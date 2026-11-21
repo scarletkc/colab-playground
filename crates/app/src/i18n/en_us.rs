@@ -56,9 +56,6 @@ pub(super) const MESSAGES: Messages = &[
     (SETTINGS_LANGUAGE_SYSTEM, "System ({language})"),
     (LANG_EN_US, "English"),
     (LANG_ZH_CN, "简体中文"),
-    (LANG_ZH_TW, "繁體中文"),
-    (LANG_JA_JP, "日本語"),
-    (LANG_KO_KR, "한국어"),
     (SETTINGS_APPEARANCE_TITLE, "Appearance"),
     (
         SETTINGS_APPEARANCE_DESCRIPTION,
@@ -481,6 +478,10 @@ pub(super) const MESSAGES: Messages = &[
     ),
     (ERR_LOGIN_CANCELLED, "The sign-in was cancelled."),
     (ERR_LOGIN_INVALID_CODE, "That code didn't work."),
+    (
+        ERR_LOGIN_SCOPES_DENIED,
+        "Google didn't grant every permission Colab needs. Start again and tick every box on Google's permission page.",
+    ),
     (
         ERR_LOGIN_UNVERIFIED,
         "The new sign-in couldn't be verified.",

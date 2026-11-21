@@ -2,17 +2,14 @@
 //!
 //! Ely's `I18n` holds the app's catalogs and the shown locale. Ely's own components read
 //! `ely_gpui_component::i18n::text`, which looks in the app's catalog first and then in Ely's
-//! built-in table for the same locale tag, so registering `en-US`, `zh-CN`, `zh-TW`, `ja-JP` and
-//! `ko-KR` here, each a tag Ely has a table for, keeps every Ely string translated too. App keys
+//! built-in table for the same locale tag, so registering `en-US` and `zh-CN` here, each a tag
+//! Ely has a table for, keeps every Ely string translated too. App keys
 //! all start with `app.` so they never shadow one of Ely's (`theme.system`, `select.placeholder`,
 //! ...). A missing key panics in Ely, so code names keys only through the constants in [`keys`],
 //! and the tests check that every key resolves in every locale.
 
 mod en_us;
-mod ja_jp;
-mod ko_kr;
 mod zh_cn;
-mod zh_tw;
 
 use ely_gpui_component::i18n::I18n;
 use gpui::{App, SharedString};
@@ -62,9 +59,6 @@ catalog_keys! {
     SETTINGS_LANGUAGE_SYSTEM => "app.settings.language.system",
     LANG_EN_US => "app.language.en_us",
     LANG_ZH_CN => "app.language.zh_cn",
-    LANG_ZH_TW => "app.language.zh_tw",
-    LANG_JA_JP => "app.language.ja_jp",
-    LANG_KO_KR => "app.language.ko_kr",
     SETTINGS_APPEARANCE_TITLE => "app.settings.appearance.title",
     SETTINGS_APPEARANCE_DESCRIPTION => "app.settings.appearance.description",
     SETTINGS_ABOUT_TITLE => "app.settings.about.title",
@@ -304,6 +298,7 @@ catalog_keys! {
     ERR_LEGACY_TOKEN => "app.err.legacy_token",
     ERR_LOGIN_CANCELLED => "app.err.login_cancelled",
     ERR_LOGIN_INVALID_CODE => "app.err.login_invalid_code",
+    ERR_LOGIN_SCOPES_DENIED => "app.err.login_scopes_denied",
     ERR_LOGIN_UNVERIFIED => "app.err.login_unverified",
     ERR_CANCELLED => "app.err.cancelled",
     ERR_UNSUPPORTED => "app.err.unsupported",
@@ -693,42 +688,25 @@ catalog_keys! {
 pub type Messages = &'static [(&'static str, &'static str)];
 
 /// The app's catalogs, `en-US` first (Ely checks every later catalog against the first).
-pub const CATALOGS: [(&str, Messages); 5] = [
-    ("en-US", en_us::MESSAGES),
-    ("zh-CN", zh_cn::MESSAGES),
-    ("zh-TW", zh_tw::MESSAGES),
-    ("ja-JP", ja_jp::MESSAGES),
-    ("ko-KR", ko_kr::MESSAGES),
-];
+pub const CATALOGS: [(&str, Messages); 2] =
+    [("en-US", en_us::MESSAGES), ("zh-CN", zh_cn::MESSAGES)];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Language {
     EnUs,
+    /// Simplified Chinese.
     ZhCn,
-    /// Traditional Chinese, Taiwan wording.
-    ZhTw,
-    JaJp,
-    KoKr,
 }
 
 impl Language {
     /// Every language, in catalog order.
-    pub const ALL: [Language; 5] = [
-        Language::EnUs,
-        Language::ZhCn,
-        Language::ZhTw,
-        Language::JaJp,
-        Language::KoKr,
-    ];
+    pub const ALL: [Language; 2] = [Language::EnUs, Language::ZhCn];
 
     /// The BCP 47 tag Ely's `I18n` knows it by.
     pub fn tag(self) -> &'static str {
         match self {
             Language::EnUs => "en-US",
             Language::ZhCn => "zh-CN",
-            Language::ZhTw => "zh-TW",
-            Language::JaJp => "ja-JP",
-            Language::KoKr => "ko-KR",
         }
     }
 
@@ -737,47 +715,21 @@ impl Language {
         match self {
             Language::EnUs => keys::LANG_EN_US,
             Language::ZhCn => keys::LANG_ZH_CN,
-            Language::ZhTw => keys::LANG_ZH_TW,
-            Language::JaJp => keys::LANG_JA_JP,
-            Language::KoKr => keys::LANG_KO_KR,
         }
     }
 
-    /// The language for an OS locale such as `zh-Hant-TW`, `zh_HK.UTF-8`, `ja_JP.UTF-8` or
-    /// `en-GB`: Japanese for any `ja` locale and Korean for any `ko` one; Traditional Chinese for
-    /// a `Hant` script or a TW/HK/MO region, Simplified for any other Chinese; English otherwise.
-    /// An explicit script wins over the region (`zh-Hans-HK` is Simplified).
+    /// The language for an OS locale such as `zh_CN.UTF-8`, `zh-Hant-TW` or `en-GB`: Simplified
+    /// Chinese for any Chinese locale, Traditional ones included, since it is the only Chinese
+    /// the app ships; English otherwise.
     pub fn from_os_locale(locale: &str) -> Language {
-        let tag = locale
-            .split(['.', '@'])
+        let language = locale
+            .split(['.', '@', '_', '-'])
             .next()
-            .unwrap_or_default()
-            .replace('_', "-");
-        let mut parts = tag.split('-').filter(|part| !part.is_empty());
-        let language = parts.next().unwrap_or_default().to_ascii_lowercase();
-        match language.as_str() {
-            "ja" => return Language::JaJp,
-            "ko" => return Language::KoKr,
-            "zh" => {}
-            _ => return Language::EnUs,
-        }
-        let (mut script, mut region) = (None, None);
-        for part in parts {
-            if part.len() == 4 && part.chars().all(|c| c.is_ascii_alphabetic()) {
-                script.get_or_insert(part.to_ascii_lowercase());
-            } else if part.len() == 2
-                || (part.len() == 3 && part.chars().all(|c| c.is_ascii_digit()))
-            {
-                region.get_or_insert(part.to_ascii_uppercase());
-            }
-        }
-        match script.as_deref() {
-            Some("hant") => Language::ZhTw,
-            Some("hans") => Language::ZhCn,
-            _ => match region.as_deref() {
-                Some("TW" | "HK" | "MO") => Language::ZhTw,
-                _ => Language::ZhCn,
-            },
+            .unwrap_or_default();
+        if language.eq_ignore_ascii_case("zh") {
+            Language::ZhCn
+        } else {
+            Language::EnUs
         }
     }
 }
@@ -788,9 +740,6 @@ pub fn resolve(pref: LanguagePref, os_locale: Option<&str>) -> Language {
         LanguagePref::System => os_locale.map_or(Language::EnUs, Language::from_os_locale),
         LanguagePref::EnUs => Language::EnUs,
         LanguagePref::ZhCn => Language::ZhCn,
-        LanguagePref::ZhTw => Language::ZhTw,
-        LanguagePref::JaJp => Language::JaJp,
-        LanguagePref::KoKr => Language::KoKr,
     }
 }
 

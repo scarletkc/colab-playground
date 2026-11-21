@@ -23,16 +23,13 @@ use gpui::{
 };
 
 /// Words from each language's UI; the English UI shows Chinese only in language names.
-const SAMPLES: [(Language, &str); 5] = [
-    (Language::EnUs, "Language: 简体中文 / 繁體中文"),
+const SAMPLES: [(Language, &str); 2] = [
+    (Language::EnUs, "Language: 简体中文"),
     (Language::ZhCn, "设置 · 会话 · 账号 · 简体中文"),
-    (Language::ZhTw, "設定 · 工作階段 · 帳號 · 繁體中文"),
-    (Language::JaJp, "設定 · セッション · アカウント · 日本語"),
-    (Language::KoKr, "설정 · 세션 · 계정 · 한국어 · 日本語"),
 ];
 
 /// The language select's choices, each in its own script, shown under every language.
-const LANGUAGE_NAMES: &str = "English / 简体中文 / 繁體中文 / 日本語 / 한국어";
+const LANGUAGE_NAMES: &str = "English / 简体中文";
 
 fn font(family: &str, fallbacks: Option<FontFallbacks>) -> Font {
     Font {

@@ -43,7 +43,8 @@ Goals
   Platform-specific code is isolated behind `cfg` and one `Host` abstraction.
 - UI built from [Ely GPUI Components](https://github.com/ELY-Open-Source/Ely-GPUI-Components).
   Never hand-roll a widget Ely already ships. Layout glue with `div()` is fine.
-- English, 简体中文, 繁體中文, 日本語, 한국어. Light, dark and follow-system appearance.
+- English (the default, whatever the OS language) and 简体中文. Light, dark and follow-system
+  appearance.
 - Colab core: CLI install, accounts (login / switch / remove), sessions (create with hardware
   targeting + retry, list, stop), port forwarding, cost guards.
 - Plugins: everything beyond the Colab core is a plugin. `llama-cpp` is bundled.

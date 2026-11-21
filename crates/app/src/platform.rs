@@ -217,9 +217,9 @@ pub fn system() -> String {
     format!("{}, {}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
-/// CJK families to try for `language`, best first: the language's own faces lead (Simplified
-/// ones for English, whose UI still shows Chinese names and user data), and the rest follow in
-/// the order Simplified, Traditional, Japanese, Korean. Every language gets every family.
+/// CJK families to try for `language`, best first: Simplified, Traditional, Japanese, Korean.
+/// Both languages get every family, since user data (session names, model ids, plugin labels)
+/// can be in any of them.
 pub fn cjk_font_candidates(language: Language) -> Vec<&'static str> {
     let CjkFonts {
         simplified,
@@ -229,9 +229,6 @@ pub fn cjk_font_candidates(language: Language) -> Vec<&'static str> {
     } = CJK_FONTS;
     let order = match language {
         Language::EnUs | Language::ZhCn => [simplified, traditional, japanese, korean],
-        Language::ZhTw => [traditional, simplified, japanese, korean],
-        Language::JaJp => [japanese, simplified, traditional, korean],
-        Language::KoKr => [korean, simplified, traditional, japanese],
     };
     order.into_iter().flatten().copied().collect()
 }
@@ -287,17 +284,15 @@ mod tests {
     }
 
     #[test]
-    fn each_language_leads_with_its_own_faces() {
-        let leads = [
-            (Language::EnUs, CJK_FONTS.simplified),
-            (Language::ZhCn, CJK_FONTS.simplified),
-            (Language::ZhTw, CJK_FONTS.traditional),
-            (Language::JaJp, CJK_FONTS.japanese),
-            (Language::KoKr, CJK_FONTS.korean),
-        ];
-        for (language, own) in leads {
+    fn simplified_faces_lead_for_both_languages() {
+        for language in Language::ALL {
             let candidates = cjk_font_candidates(language);
-            assert_eq!(&candidates[..own.len()], own, "{}", language.tag());
+            assert_eq!(
+                &candidates[..CJK_FONTS.simplified.len()],
+                CJK_FONTS.simplified,
+                "{}",
+                language.tag()
+            );
         }
         let cn = cjk_font_candidates(Language::ZhCn);
         assert_eq!(cjk_font_candidates(Language::EnUs), cn);
@@ -336,12 +331,12 @@ mod tests {
     #[test]
     fn only_installed_families_are_listed() {
         assert!(font_fallbacks(Language::ZhCn, &[]).is_none());
-        let candidates = cjk_font_candidates(Language::ZhTw);
+        let candidates = cjk_font_candidates(Language::EnUs);
         let Some(last) = candidates.last() else {
             return;
         };
         let installed = vec!["Inter".to_owned(), (*last).to_owned()];
-        let fallbacks = font_fallbacks(Language::ZhTw, &installed).expect("one is installed");
+        let fallbacks = font_fallbacks(Language::EnUs, &installed).expect("one is installed");
         assert_eq!(fallbacks.fallback_list(), [(*last).to_owned()]);
     }
 }

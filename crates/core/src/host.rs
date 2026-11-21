@@ -130,6 +130,10 @@ pub const BOOTSTRAP: &str = r#"eval "$(printf %s "$0" | { base64 -d 2>/dev/null 
 
 /// Decoder run by [`BOOTSTRAP`]. Positional layout after `$0`:
 /// `$1` script (b64), `$2` job flag, `$3` env count, then env pairs and args (b64).
+///
+/// Job control is on only while the job starts, which gives it its own process group. Left on,
+/// bash would print a job notice such as `[1]+ Exit 1 ( eval "$__cpg_s" )` on stderr when the
+/// job ends, and that line would reach the error details the app shows.
 const BOOT_BODY: &str = r#"__cpg_d() { printf '%s' "$1" | { base64 -d 2>/dev/null || base64 -D; } && printf x; }
 __cpg_s=$(__cpg_d "$1") || exit 125
 __cpg_s=${__cpg_s%x}
@@ -154,6 +158,7 @@ if [ "$__cpg_j" = 1 ]; then
   set -m
   ( eval "$__cpg_s" ) &
   __cpg_p=$!
+  set +m
   printf '\036CPG-PGID %s\n' "$__cpg_p" >&2
   wait "$__cpg_p"
   exit $?
@@ -1573,6 +1578,7 @@ mod tests {
         assert!(out.stdout.contains("env=[v=1 ñ\n]"), "{}", out.stdout);
         assert!(out.stdout.contains("from stdin ✓"));
         assert!(!out.stderr.contains("CPG-PGID"));
+        assert!(!out.stderr.contains("Exit 7"), "job notice: {}", out.stderr);
     }
 
     #[test]

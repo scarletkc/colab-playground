@@ -53,9 +53,6 @@ pub(super) const MESSAGES: Messages = &[
     (SETTINGS_LANGUAGE_SYSTEM, "跟随系统（{language}）"),
     (LANG_EN_US, "English"),
     (LANG_ZH_CN, "简体中文"),
-    (LANG_ZH_TW, "繁體中文"),
-    (LANG_JA_JP, "日本語"),
-    (LANG_KO_KR, "한국어"),
     (SETTINGS_APPEARANCE_TITLE, "外观"),
     (
         SETTINGS_APPEARANCE_DESCRIPTION,
@@ -403,6 +400,10 @@ pub(super) const MESSAGES: Messages = &[
     ),
     (ERR_LOGIN_CANCELLED, "登录已取消。"),
     (ERR_LOGIN_INVALID_CODE, "授权码无效。"),
+    (
+        ERR_LOGIN_SCOPES_DENIED,
+        "Google 没有授予 Colab 所需的全部权限。请重新开始，并在 Google 授权页上勾选所有权限。",
+    ),
     (ERR_LOGIN_UNVERIFIED, "无法验证新的登录。"),
     (ERR_CANCELLED, "已取消。"),
     (ERR_UNSUPPORTED, "此电脑不支持该操作。"),

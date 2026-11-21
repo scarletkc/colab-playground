@@ -55,33 +55,6 @@ fn picking_a_language_redraws_in_it_and_saves_it(cx: &mut TestAppContext) {
         Some(LanguagePref::ZhCn)
     );
 
-    app.pick_option(LANGUAGE_SELECTOR, index(LanguagePref::ZhTw), LANGUAGES);
-    assert_eq!(app.language(), Language::ZhTw);
-    assert!(app.shown("page settings 設定"));
-    assert_eq!(app.text(keys::NAV_SESSIONS), "工作階段");
-
-    app.pick_option(LANGUAGE_SELECTOR, index(LanguagePref::JaJp), LANGUAGES);
-    assert_eq!(app.language(), Language::JaJp);
-    assert!(app.shown("page settings 設定"));
-    assert_eq!(
-        app.text(keys::NAV_SESSIONS),
-        "セッション",
-        "Japanese, not the Traditional Chinese that also titles the page 設定"
-    );
-    assert_eq!(
-        app.saved_settings().map(|settings| settings.language),
-        Some(LanguagePref::JaJp)
-    );
-
-    app.pick_option(LANGUAGE_SELECTOR, index(LanguagePref::KoKr), LANGUAGES);
-    assert_eq!(app.language(), Language::KoKr);
-    assert!(app.shown("page settings 설정"));
-    assert_eq!(app.text(keys::NAV_SESSIONS), "세션");
-    assert_eq!(
-        app.saved_settings().map(|settings| settings.language),
-        Some(LanguagePref::KoKr)
-    );
-
     app.pick_option(LANGUAGE_SELECTOR, index(LanguagePref::EnUs), LANGUAGES);
     assert_eq!(app.language(), Language::EnUs);
     assert!(app.shown("page settings Settings"));
@@ -92,27 +65,39 @@ fn picking_a_language_redraws_in_it_and_saves_it(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn english_is_the_default_whatever_the_os_speaks(cx: &mut TestAppContext) {
+    let options = Options {
+        os_locale: Some("zh-CN".into()),
+        ..Options::default()
+    };
+    let mut app = open_settings(cx, options);
+    assert_eq!(
+        app.read(|state, _| state.settings().language),
+        LanguagePref::EnUs
+    );
+    assert_eq!(app.language(), Language::EnUs);
+    assert!(app.shown("page settings Settings"));
+}
+
+#[gpui::test]
 fn system_language_follows_the_os_locale(cx: &mut TestAppContext) {
     let options = Options {
         os_locale: Some("zh-HK".into()),
         ..Options::default()
     };
     let mut app = open_settings(cx, options);
-    assert_eq!(
-        app.read(|state, _| state.settings().language),
-        LanguagePref::System
-    );
+    app.pick_option(LANGUAGE_SELECTOR, index(LanguagePref::System), LANGUAGES);
     assert_eq!(
         app.language(),
-        Language::ZhTw,
-        "zh-HK resolves to Traditional Chinese"
+        Language::ZhCn,
+        "zh-HK shows Simplified Chinese, the only Chinese the app ships"
     );
-    assert!(app.shown("page settings 設定"));
+    assert!(app.shown("page settings 设置"));
 
     app.pick_option(LANGUAGE_SELECTOR, index(LanguagePref::EnUs), LANGUAGES);
     assert_eq!(app.language(), Language::EnUs);
     app.pick_option(LANGUAGE_SELECTOR, index(LanguagePref::System), LANGUAGES);
-    assert_eq!(app.language(), Language::ZhTw);
+    assert_eq!(app.language(), Language::ZhCn);
     assert_eq!(
         app.saved_settings().map(|settings| settings.language),
         Some(LanguagePref::System)
@@ -129,12 +114,6 @@ fn ely_component_strings_follow_the_app_language(cx: &mut TestAppContext) {
     assert_eq!(ely(&mut app, "theme.light"), "Light");
     app.update(|state, cx| state.set_language(LanguagePref::ZhCn, cx));
     assert_eq!(ely(&mut app, "theme.light"), "浅色");
-    app.update(|state, cx| state.set_language(LanguagePref::ZhTw, cx));
-    assert_eq!(ely(&mut app, "theme.light"), "淺色");
-    app.update(|state, cx| state.set_language(LanguagePref::JaJp, cx));
-    assert_eq!(ely(&mut app, "theme.light"), "ライト");
-    app.update(|state, cx| state.set_language(LanguagePref::KoKr, cx));
-    assert_eq!(ely(&mut app, "theme.light"), "밝게");
 }
 
 #[gpui::test]
@@ -203,9 +182,24 @@ fn saved_settings_apply_at_startup(cx: &mut TestAppContext) {
         ..Options::default()
     };
     let mut app = TestApp::with(cx, options);
-    assert_eq!(app.language(), Language::ZhTw);
+    assert_eq!(
+        app.language(),
+        Language::ZhCn,
+        "Traditional Chinese, no longer shipped, reads as Simplified"
+    );
     assert_eq!(app.mode(), Mode::Dark);
-    assert!(app.shown("page overview 總覽"));
+    assert!(app.shown("page overview 概览"));
+    assert!(app.toasts().is_empty());
+}
+
+#[gpui::test]
+fn a_saved_language_no_longer_shipped_falls_back_to_english(cx: &mut TestAppContext) {
+    let options = Options {
+        config: ConfigDir::TempWith(r#"{ "language": "ja-JP" }"#.into()),
+        ..Options::default()
+    };
+    let mut app = TestApp::with(cx, options);
+    assert_eq!(app.language(), Language::EnUs);
     assert!(app.toasts().is_empty());
 }
 

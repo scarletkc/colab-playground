@@ -61,6 +61,9 @@ pub enum ErrorKind {
     LoginCancelled,
     /// The authorisation code was rejected.
     LoginInvalidCode,
+    /// Google granted fewer permissions than the CLI asked for: a box on its consent page was
+    /// left unticked, or the account's administrator blocks the permission.
+    LoginScopesDenied,
     /// The new credential could not be verified (no email, refresh failed).
     LoginVerificationFailed,
     /// The operation was cancelled through its [`crate::CancelToken`].
@@ -133,7 +136,9 @@ impl ErrorKind {
             K::AuthRequired | K::LoginVerificationFailed | K::LegacyTokenPresent => {
                 NextStep::SignInAgain
             }
-            K::LoginInvalidCode | K::LoginCancelled | K::AddInProgress => NextStep::TryAgain,
+            K::LoginInvalidCode | K::LoginScopesDenied | K::LoginCancelled | K::AddInProgress => {
+                NextStep::TryAgain
+            }
             K::NotEntitled | K::ProvisionExhausted | K::AllocationTimeout => {
                 NextStep::ChooseOtherAccelerator
             }
@@ -420,6 +425,7 @@ mod tests {
             ErrorKind::NotEntitled,
             ErrorKind::SshBusy,
             ErrorKind::LoginInvalidCode,
+            ErrorKind::LoginScopesDenied,
             ErrorKind::AllocationTimeout,
         ] {
             assert_eq!(ErrorKind::from_str_lossy(kind.as_str()), kind);

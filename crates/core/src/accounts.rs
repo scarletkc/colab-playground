@@ -626,6 +626,9 @@ pub fn classify_login_failure(stdout: &str, stderr: &str) -> Error {
         || all.contains("Malformed auth code")
     {
         ErrorKind::LoginInvalidCode
+    } else if all.contains("Scope has changed from") {
+        // oauthlib refuses a token whose scopes differ from the ones requested.
+        ErrorKind::LoginScopesDenied
     } else if all.contains("Could not save the OAuth token to the OS keyring")
         || all.contains("Could not read the OAuth token from the OS keyring")
     {
@@ -744,6 +747,14 @@ mod tests {
             .is(ErrorKind::LoginInvalidCode)
         );
         assert!(classify_login_failure("", "EOFError").is(ErrorKind::LoginCancelled));
+        assert!(
+            classify_login_failure(
+                "",
+                "Warning: Scope has changed from \"https://www.googleapis.com/auth/colaboratory \
+                 openid\" to \"openid\"."
+            )
+            .is(ErrorKind::LoginScopesDenied)
+        );
         assert_eq!(
             auth_url_from_line("  https://accounts.google.com/o/oauth2/auth?x=1  ").as_deref(),
             Some("https://accounts.google.com/o/oauth2/auth?x=1")

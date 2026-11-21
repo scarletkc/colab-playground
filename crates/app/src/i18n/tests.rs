@@ -110,30 +110,14 @@ fn os_locales_resolve_to_the_shipped_languages() {
         ("zh", Language::ZhCn),
         ("zh-SG", Language::ZhCn),
         ("zh-Hans-CN", Language::ZhCn),
-        ("zh-Hans-HK", Language::ZhCn),
-        ("zh-TW", Language::ZhTw),
-        ("zh_TW.Big5", Language::ZhTw),
-        ("zh-HK", Language::ZhTw),
-        ("zh_HK.UTF-8", Language::ZhTw),
-        ("zh-MO", Language::ZhTw),
-        ("zh-Hant", Language::ZhTw),
-        ("zh-Hant-TW", Language::ZhTw),
-        ("ZH-hant-cn", Language::ZhTw),
-        ("ja-JP", Language::JaJp),
-        ("ja_JP.UTF-8", Language::JaJp),
-        ("ja_JP.eucJP", Language::JaJp),
-        ("JA-jp", Language::JaJp),
-        ("ja", Language::JaJp),
-        ("ko-KR", Language::KoKr),
-        ("ko_KR.UTF-8", Language::KoKr),
-        ("ko_KR.euckr", Language::KoKr),
-        ("KO-kr", Language::KoKr),
-        ("ko-Kore-KR", Language::KoKr),
-        ("ko", Language::KoKr),
+        ("zh-TW", Language::ZhCn),
+        ("zh_HK.UTF-8", Language::ZhCn),
+        ("ZH-hant-cn", Language::ZhCn),
+        ("ja-JP", Language::EnUs),
+        ("ko_KR.UTF-8", Language::EnUs),
         ("en-US", Language::EnUs),
         ("en-GB", Language::EnUs),
-        ("jv-ID", Language::EnUs),
-        ("kok-IN", Language::EnUs),
+        ("zha-CN", Language::EnUs),
         ("C", Language::EnUs),
         ("POSIX", Language::EnUs),
         ("", Language::EnUs),
@@ -145,13 +129,14 @@ fn os_locales_resolve_to_the_shipped_languages() {
 
 #[test]
 fn a_preference_resolves_with_the_os_locale_only_for_system() {
-    assert_eq!(resolve(LanguagePref::System, Some("zh-HK")), Language::ZhTw);
+    assert_eq!(resolve(LanguagePref::System, Some("zh-HK")), Language::ZhCn);
+    assert_eq!(resolve(LanguagePref::System, Some("ja-JP")), Language::EnUs);
     assert_eq!(resolve(LanguagePref::System, None), Language::EnUs);
     assert_eq!(resolve(LanguagePref::EnUs, Some("zh-CN")), Language::EnUs);
     assert_eq!(resolve(LanguagePref::ZhCn, Some("en-US")), Language::ZhCn);
-    assert_eq!(resolve(LanguagePref::ZhTw, None), Language::ZhTw);
-    assert_eq!(resolve(LanguagePref::System, Some("ja-JP")), Language::JaJp);
-    assert_eq!(resolve(LanguagePref::System, Some("ko-KR")), Language::KoKr);
-    assert_eq!(resolve(LanguagePref::JaJp, Some("ko-KR")), Language::JaJp);
-    assert_eq!(resolve(LanguagePref::KoKr, Some("ja-JP")), Language::KoKr);
+}
+
+#[test]
+fn english_is_the_default_preference() {
+    assert_eq!(LanguagePref::default(), LanguagePref::EnUs);
 }

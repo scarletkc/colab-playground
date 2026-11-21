@@ -23,14 +23,12 @@ pub const CORRUPT_SUFFIX: &str = ".corrupt";
 /// Declares [`LanguagePref`] from one list, so the settings file (serde) and the select read
 /// the same value for each choice.
 macro_rules! language_prefs {
-    ($first:ident => $first_value:literal, $($variant:ident => $value:literal),+ $(,)?) => {
+    ($($(#[$meta:meta])* $variant:ident => $value:literal),+ $(,)?) => {
         /// The language the user picked; `System` resolves through the OS locale.
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
         pub enum LanguagePref {
-            #[default]
-            #[serde(rename = $first_value)]
-            $first,
             $(
+                $(#[$meta])*
                 #[serde(rename = $value)]
                 $variant,
             )+
@@ -38,13 +36,11 @@ macro_rules! language_prefs {
 
         impl LanguagePref {
             /// Every choice, in the order the settings page offers them.
-            pub const ALL: [LanguagePref; [$first_value, $($value),+].len()] =
-                [LanguagePref::$first, $(LanguagePref::$variant),+];
+            pub const ALL: [LanguagePref; [$($value),+].len()] = [$(LanguagePref::$variant),+];
 
             /// The stable value used in the settings file and as the select's value.
             pub fn value(self) -> &'static str {
                 match self {
-                    LanguagePref::$first => $first_value,
                     $(LanguagePref::$variant => $value,)+
                 }
             }
@@ -52,13 +48,15 @@ macro_rules! language_prefs {
     };
 }
 
+// English is the default whatever the OS speaks. A language the app no longer ships reads as the
+// nearest one it does: Traditional Chinese as Simplified, Japanese and Korean (not listed) as the
+// default.
 language_prefs! {
     System => "system",
+    #[default]
     EnUs => "en-US",
+    #[serde(alias = "zh-TW")]
     ZhCn => "zh-CN",
-    ZhTw => "zh-TW",
-    JaJp => "ja-JP",
-    KoKr => "ko-KR",
 }
 
 impl LanguagePref {
@@ -421,7 +419,7 @@ mod tests {
         assert_eq!(loaded.outcome, LoadOutcome::Missing);
         assert_eq!(loaded.settings, Settings::default());
         let settings = Settings {
-            language: LanguagePref::ZhTw,
+            language: LanguagePref::ZhCn,
             appearance: AppearancePref::Dark,
             defaults: colab_playground_core::Defaults {
                 max_attempts: 5,
@@ -434,7 +432,7 @@ mod tests {
         store.save(&settings).expect("saved");
         let text = fs::read_to_string(store.file().expect("a file")).expect("written");
         assert!(
-            text.contains("\"zh-TW\"") && text.contains("\"dark\"") && text.contains("Debian"),
+            text.contains("\"zh-CN\"") && text.contains("\"dark\"") && text.contains("Debian"),
             "{text}"
         );
         let again = store.load();
@@ -482,7 +480,7 @@ mod tests {
     fn a_bad_field_falls_back_alone_and_unknown_fields_are_ignored() {
         let settings = Settings::from_json(r#"{"language":"fr-FR","appearance":"dark","later":1}"#)
             .expect("an object");
-        assert_eq!(settings.language, LanguagePref::System);
+        assert_eq!(settings.language, LanguagePref::EnUs);
         assert_eq!(settings.appearance, AppearancePref::Dark);
         assert!(Settings::from_json("[1,2]").is_err());
         assert_eq!(
