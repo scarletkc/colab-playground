@@ -24,6 +24,7 @@
 
 pub mod app;
 pub mod backend;
+pub mod deployments;
 pub mod errors;
 pub mod format;
 pub mod i18n;

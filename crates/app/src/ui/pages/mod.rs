@@ -3,6 +3,7 @@
 
 pub mod accounts;
 pub mod defaults;
+pub mod deployments;
 pub mod overview;
 pub mod plugins;
 pub mod sessions;
@@ -39,6 +40,7 @@ pub fn render(
         Route::Overview => overview::render(state, handle, cx),
         Route::Sessions => sessions::render(state, handle, cx),
         Route::Plugins => plugins::render(state, handle, inputs, cx),
+        Route::Deployments => deployments::render(state, handle, cx),
         Route::Accounts => accounts::render(state, handle, cx),
         Route::Settings => settings::render(state, handle, inputs, cx),
     };

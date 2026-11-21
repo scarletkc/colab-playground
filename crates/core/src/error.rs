@@ -96,6 +96,9 @@ pub enum ErrorKind {
     PluginRunFailed,
     /// A plugin's endpoint did not answer its health probe.
     HealthCheckFailed,
+    /// Google Drive could not be mounted on the runtime (access not granted, or the mount
+    /// failed).
+    DriveMountFailed,
     /// `git clone` failed. Param: `url`.
     GitFailed,
     /// Installing the CLI failed. Param: `exit_code`.
@@ -136,9 +139,11 @@ impl ErrorKind {
             K::AuthRequired | K::LoginVerificationFailed | K::LegacyTokenPresent => {
                 NextStep::SignInAgain
             }
-            K::LoginInvalidCode | K::LoginScopesDenied | K::LoginCancelled | K::AddInProgress => {
-                NextStep::TryAgain
-            }
+            K::LoginInvalidCode
+            | K::LoginScopesDenied
+            | K::LoginCancelled
+            | K::AddInProgress
+            | K::DriveMountFailed => NextStep::TryAgain,
             K::NotEntitled | K::ProvisionExhausted | K::AllocationTimeout => {
                 NextStep::ChooseOtherAccelerator
             }

@@ -240,9 +240,15 @@ def simulate(code, env, s, ep, a):
         return watchdog_reply(wd if wd is not None else {"cancelled": True, "runtime_addr": False}, now)
     if "PLUGIN_RUN_DIR" in code:
         run_id = env["CPG_RUN_ID"]
+        run_dir = "/root/.colab-playground/runs/" + run_id
+        run = s["runs"].get(run_id)
+        if run is not None and not run["killed"] and not run.get("exited"):
+            # Like the launch snippet: a run whose script is alive is not started again.
+            run["sent_again"] = run.get("sent_again", 0) + 1
+            return {"pid": 4242, "run_dir": run_dir, "again": True}
         s["runs"][run_id] = {"endpoint": ep, "polls": 0, "killed": False,
                              "env": {k: v for k, v in env.items() if k.startswith("PLUGIN_")}}
-        return {"pid": 4242, "run_dir": "/root/.colab-playground/runs/" + run_id}
+        return {"pid": 4242, "run_dir": run_dir}
     if "CPG_LOG_OFFSET" in code:
         run = s["runs"].get(env.get("CPG_RUN_ID", ""))
         if run is None:
@@ -304,6 +310,31 @@ def cmd_exec(state_path, args):
     code = sys.stdin.read()
     if not code.strip():
         return 0
+    lost = s["knobs"].get("exec_conn_lost")
+    if lost and lost["code_has"] in code and lost["times"] > 0:
+        # The connection drops: before the cell reaches the kernel, or after it ran.
+        lost["times"] -= 1
+        if lost.get("after_run"):
+            simulate(code, env, s, ep, a)
+        fc.save_server(s)
+        err("Traceback (most recent call last):\nRuntimeError: Connection was lost.")
+        return 1
+    hang = fc.knob("exec_hang")
+    if hang and hang["code_has"] in code:
+        if hang["after"] == "error":
+            # The kernel-preparing command failed: the CLI raises without closing its connection,
+            # so its threads keep the process alive after the traceback.
+            err("Traceback (most recent call last):\n  File \"colab\", line 1, in <module>\n"
+                "RuntimeError: Connection was lost.")
+            sys.stderr.flush()
+            time.sleep(3600)
+            return 1
+        result = simulate(code, env, s, ep, a)
+        fc.save_server(s)
+        out(MARK + json.dumps(result))
+        sys.stdout.flush()
+        time.sleep(3600)
+        return 0
     try:
         compile(code, "<cell>", "exec")
     except SyntaxError as exc:
@@ -332,6 +363,37 @@ def record_history(session, env, code, result):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(event) + "\n")
+
+
+DRIVE_CONSENT_URL = "https://accounts.google.com/o/oauth2/auth?client_id=fake&scope=drive"
+
+
+def cmd_drivemount(state_path, args):
+    """Like `colab drivemount`: a runtime not granted Drive access yet prints the consent URL
+    and waits for Enter, read from the terminal when there is one, else from stdin."""
+    name = require_account()
+    session = opt(args, "-s", "--session")
+    path = [a for a in args if not a.startswith("-") and a != session][-1:] or ["/content/drive"]
+    s, ep, a = lookup(state_path, name, session)
+    out("[colab] Mounting Google Drive to '%s' on %s..." % (path[0], session))
+    if not a.get("drive_granted"):
+        out("\n[colab] REQUIRED: Google Drive Authorization needed.\nPlease visit:\n\n%s\n" % DRIVE_CONSENT_URL)
+        sys.stdout.write("Press Enter after you have granted access... ")
+        sys.stdout.flush()
+        try:
+            with open("/dev/tty") as tty:
+                tty.readline()
+        except OSError:
+            sys.stdin.readline()
+        if fc.knob("drive_denied"):
+            out("[colab] Error propagating: 403 access not granted")
+            err("MessageError: Error: credential propagation was unsuccessful")
+            return 0
+        a["drive_granted"] = True
+        fc.save_server(s)
+        out("[colab] Credentials propagated. Resuming mount...")
+    out("Mounted at %s" % path[0])
+    return 0
 
 
 def cmd_stop(state_path, args):
@@ -406,6 +468,9 @@ def main():
     if argv[:1] == ["--config"]:
         state_path = argv[1]
         argv = argv[2:]
+        # The real CLI opens a lock file next to the state file before reading it, and fails
+        # with FileNotFoundError when that folder does not exist.
+        open(state_path + ".lock", "a").close()
     if not argv:
         err("Usage: colab [OPTIONS] COMMAND [ARGS]...")
         return 2
@@ -414,7 +479,7 @@ def main():
         out("Version: 0.8.0-fake")
         return 0
     handlers = {"sessions": cmd_sessions, "usage": cmd_usage, "new": cmd_new, "exec": cmd_exec,
-                "stop": cmd_stop, "whoami": cmd_whoami, "ssh": cmd_ssh}
+                "stop": cmd_stop, "whoami": cmd_whoami, "ssh": cmd_ssh, "drivemount": cmd_drivemount}
     if cmd not in handlers:
         err("Error: No such command '%s'." % cmd)
         return 2

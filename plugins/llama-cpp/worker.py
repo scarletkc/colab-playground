@@ -9,7 +9,8 @@ MTP on -> off fallbacks) -> verify it really uses the GPU -> warm up -> report
 
 Protocol (see docs/PLUGINS.md):
   * inputs arrive as ``PLUGIN_INPUT_<ID>``; a saved Hugging Face token as
-    ``PLUGIN_HF_TOKEN`` (optional);
+    ``PLUGIN_HF_TOKEN`` (optional); with Google Drive on, the plugin's Drive
+    folder as ``PLUGIN_DRIVE_DIR``, where the models are kept and read from;
   * progress is written atomically to ``$PLUGIN_STATUS_FILE``;
   * activity touches ``$PLUGIN_HEARTBEAT`` (read by the VM watchdog).
 
@@ -27,6 +28,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import socket
 import struct
@@ -42,7 +44,6 @@ E = os.environ.get
 RUN_DIR = E("PLUGIN_RUN_DIR", "/root/.colab-playground/runs/manual")
 STATUS_FILE = E("PLUGIN_STATUS_FILE", os.path.join(RUN_DIR, "status.json"))
 HEARTBEAT = E("PLUGIN_HEARTBEAT", "")
-MODELS = "/content/models"
 BIN_ROOT = "/content/llama-bin"
 SERVER_LOG = os.path.join(RUN_DIR, "server.log")
 FALLBACK_TAG = "b12430"  # verified build, used when no newer one can be fetched
@@ -58,6 +59,11 @@ MMPROJ = (E("PLUGIN_INPUT_MMPROJ", "auto") or "auto").strip()
 MTP = (E("PLUGIN_INPUT_MTP", "auto") or "auto").strip()
 TAG = (E("PLUGIN_INPUT_LLAMA_TAG", "latest") or "latest").strip()
 API_KEY = E("PLUGIN_INPUT_API_KEY", "")
+# With Google Drive turned on for the run, the model files are kept in this plugin's Drive
+# folder, one folder per repository, and llama-server reads them from there: a later run of the
+# same model downloads nothing. Without it they go to the runtime's disk, wiped when it stops.
+DRIVE_DIR = E("PLUGIN_DRIVE_DIR", "")
+MODELS = os.path.join(DRIVE_DIR, "models", *REPO.split("/")) if DRIVE_DIR and REPO else "/content/models"
 EXTRA = E("PLUGIN_INPUT_EXTRA_ARGS", "")
 HF_TOKEN = E("PLUGIN_HF_TOKEN", "")
 SECRETS = [s for s in (API_KEY, HF_TOKEN) if s]
@@ -527,6 +533,26 @@ def dir_size(path):
     return total
 
 
+def have_file(name, size):
+    """The file is already in MODELS with the size the repository lists (an earlier run's
+    download, kept on Drive). A file of another size is downloaded again."""
+    try:
+        return size > 0 and os.path.getsize(os.path.join(MODELS, name)) == size
+    except OSError:
+        return False
+
+
+def check_drive_space(need):
+    os.makedirs(MODELS, exist_ok=True)
+    try:
+        free = shutil.disk_usage(MODELS).free
+    except OSError:
+        return
+    if free < need:
+        fail("Google Drive has %.1f GB free; this model needs %.1f GB. Free some space or turn "
+             "Google Drive off for this deployment." % (free / 1e9, need / 1e9))
+
+
 def download(files, total):
     run([sys.executable, "-m", "pip", "install", "-q", "-U", "huggingface_hub[hf_xet]"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -660,12 +686,19 @@ def monitor():
 # ------------------------------------------------------------- main
 
 
-def plan(variants, mmproj_bytes, vram, gguf):
+def plan(variants, mmproj_bytes, vram, gguf, kept=()):
+    """kept: the variants whose files are already in MODELS (on Drive). With quant = auto the
+    best of them that fits is used, so a deployment run again downloads nothing even when it got
+    another GPU; only when none of them fits is the best variant overall chosen."""
     kvb, model_ctx, _ = kv_params(gguf)
     inp = {"vram_mib": vram, "ctx": CTX, "model_ctx": model_ctx, "kv_bytes_per_token": kvb,
            "mmproj_bytes": mmproj_bytes, "kv": None if KV == "auto" else KV}
     if QUANT.lower() == "auto":
-        choice, _ = fit_auto(variants, inp)
+        choice = fit_auto(list(kept), inp)[0] if kept else None
+        if choice:
+            choice["kept"] = True
+        else:
+            choice, _ = fit_auto(variants, inp)
         if not choice:
             fail("no quantisation of %s fits in %d MiB of GPU memory" % (REPO, vram))
     else:
@@ -675,6 +708,8 @@ def plan(variants, mmproj_bytes, vram, gguf):
         if choice is None:
             fail("%s does not fit in %d MiB; quantisations that would fit: %s" % (QUANT, vram, ", ".join(fitting) or "none"))
     reasons = []
+    if choice.get("kept"):
+        reasons.append("already on Google Drive")
     reasons.append("estimated %d of %d MiB" % (choice["estimate_mib"], choice["budget_mib"]))
     if choice["kv_reduced"]:
         reasons.append("KV cache quantised to fit")
@@ -686,10 +721,11 @@ def plan(variants, mmproj_bytes, vram, gguf):
     return choice
 
 
-def cpu_plan(variants):
+def cpu_plan(variants, kept=()):
     normal = [v for v in variants if v["quant"] not in FULL_PRECISION and not is_low_bit(v)] or variants
     if QUANT.lower() == "auto":
         v = next((x for x in normal if x["quant"] == "Q4_K_M"), normal[-1])
+        v = next((x for x in normal if x in kept), v)
     else:
         v = next((x for x in variants if x["quant"].lower() == QUANT.lower()), None)
         if v is None:
@@ -726,13 +762,23 @@ def main():
     mm_size = dict(mmproj).get(mm_file, 0) if mm_file else 0
     smallest = variants[-1]["files"][0]
     gguf = read_gguf_header(REPO, smallest)
-    choice = plan(variants, mm_size, vram, gguf) if gpu else cpu_plan(variants)
+    kept = [v for v in variants if all(have_file(f, sizes.get(f, 0)) for f in v["files"])] if DRIVE_DIR else []
+    choice = plan(variants, mm_size, vram, gguf, kept) if gpu else cpu_plan(variants, kept)
     status("running", "plan", "%s, KV %s, context %d (%s)" % (choice["quant"], choice["kv"], choice["ctx"], choice["reason"]))
 
     files = choice["files"] + ([mm_file] if mm_file else [])
-    total = sum(sizes.get(f, 0) for f in files)
-    status("running", "download", "downloading %.1f GB" % (total / 1e9), progress=0.0)
-    download(files, total)
+    missing = [f for f in files if not have_file(f, sizes.get(f, 0))]
+    total = sum(sizes.get(f, 0) for f in missing)
+    where = "on Google Drive" if DRIVE_DIR else "on the runtime"
+    if not missing:
+        status("running", "download", "already %s, nothing to download" % where, progress=1.0)
+    else:
+        if DRIVE_DIR:
+            check_drive_space(total)
+        kept = len(files) - len(missing)
+        status("running", "download", "downloading %.1f GB%s" % (
+            total / 1e9, " (%d file(s) already %s)" % (kept, where) if kept else ""), progress=0.0)
+        download(missing, total)
     installer.join()
     if "error" in llama:
         fail(llama["error"])

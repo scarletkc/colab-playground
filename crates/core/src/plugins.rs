@@ -211,13 +211,18 @@ pub enum Capability {
     /// The user's saved Hugging Face token, passed as `PLUGIN_HF_TOKEN`
     /// when one is stored (optional for the plugin).
     HfToken,
+    /// Google Drive, mounted on the runtime for the runs the user turns it on for. The script
+    /// gets a folder of its own as `PLUGIN_DRIVE_DIR`, but the mount gives code on the runtime
+    /// the whole Drive.
+    Drive,
 }
 
 impl Capability {
-    /// Vault secret name holding the value.
-    pub fn secret_name(self) -> &'static str {
+    /// Vault secret name holding the value, for a capability that is a secret.
+    pub fn secret_name(self) -> Option<&'static str> {
         match self {
-            Capability::HfToken => "hf_token",
+            Capability::HfToken => Some("hf_token"),
+            Capability::Drive => None,
         }
     }
 
@@ -225,8 +230,17 @@ impl Capability {
     pub fn env_key(self) -> &'static str {
         match self {
             Capability::HfToken => "PLUGIN_HF_TOKEN",
+            Capability::Drive => "PLUGIN_DRIVE_DIR",
         }
     }
+}
+
+/// Where `colab drivemount` mounts Google Drive on the runtime.
+pub const DRIVE_MOUNT_POINT: &str = "/content/drive";
+
+/// The Drive folder a plugin's runs share: `My Drive/Colab Playground/<plugin id>`.
+pub fn drive_dir(plugin: &str) -> String {
+    format!("{DRIVE_MOUNT_POINT}/MyDrive/Colab Playground/{plugin}")
 }
 
 /// A parsed, validated `plugin.toml`.

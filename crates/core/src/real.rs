@@ -34,8 +34,9 @@ use crate::hostfs::HostFs;
 use crate::http::HttpClient;
 use crate::paths::{DataLayout, HostPath};
 use crate::plugins::{
-    PluginInfo, PluginOrigin, PluginPreview, PluginStore, clear_staging, clone_git,
-    contains_secret, discard_preview, redact, redact_json, resolve_endpoints, resolve_inputs,
+    Capability, PluginInfo, PluginOrigin, PluginPreview, PluginStore, clear_staging, clone_git,
+    contains_secret, discard_preview, drive_dir, redact, redact_json, resolve_endpoints,
+    resolve_inputs,
 };
 use crate::provision::{
     self, Hardware, ProvisionEvent, ProvisionOps, ProvisionOutcome, ProvisionSpec,
@@ -66,6 +67,8 @@ pub struct RealConfig {
     pub http: Arc<dyn HttpClient>,
     pub defaults: Defaults,
     pub run_poll_interval: Duration,
+    /// How long `colab exec` may take to exit after its last output ([`crate::cli::EXIT_GRACE`]).
+    pub cli_exit_grace: Duration,
 }
 
 #[cfg(test)]
@@ -351,6 +354,7 @@ impl RealConfig {
             http: crate::http::default_client(),
             defaults,
             run_poll_interval: Duration::from_secs(10),
+            cli_exit_grace: crate::cli::EXIT_GRACE,
         })
     }
 }
@@ -442,6 +446,8 @@ struct Inner {
     state: Mutex<State>,
     tunnels: TunnelManager,
     login_active: AtomicBool,
+    /// Set by [`Backend::confirm_drive_consent`]; read (and cleared) by a waiting Drive mount.
+    drive_consent: AtomicBool,
     /// Keeps WSL up between commands, so its keyring stays unlocked (see [`HostKeepalive`]).
     keepalive: HostKeepalive,
 }
@@ -467,6 +473,10 @@ const COPY_DEFAULT_STATE: &str = r#"src="$HOME/.config/colab-cli/sessions.json"
 umask 077
 mkdir -p -- "$(dirname -- "$1")" && cp -- "$src" "$1""#;
 const SLOT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Times the plugin script's launch is sent when the connection to the runtime is lost.
+const LAUNCH_ATTEMPTS: u32 = 3;
+/// Wait before sending a launch again.
+const LAUNCH_RETRY_DELAY: Duration = Duration::from_secs(3);
 
 impl RealBackend {
     /// Loads app-side files and removes what an earlier run left in the plugin staging
@@ -498,6 +508,7 @@ impl RealBackend {
                 state: Mutex::new(state),
                 tunnels: TunnelManager::new(),
                 login_active: AtomicBool::new(false),
+                drive_consent: AtomicBool::new(false),
             }),
         })
     }
@@ -566,11 +577,10 @@ impl Inner {
     fn cli(&self) -> Result<Cli> {
         let colab = self.toolchain()?.colab;
         self.keepalive.ensure();
-        Ok(Cli::new(
-            self.cfg.host.clone(),
-            colab,
-            self.cfg.base_env.clone(),
-        ))
+        Ok(
+            Cli::new(self.cfg.host.clone(), colab, self.cfg.base_env.clone())
+                .with_exit_grace(self.cfg.cli_exit_grace),
+        )
     }
 
     fn helper(&self) -> Result<Helper> {
@@ -1891,8 +1901,17 @@ impl Backend for RealBackend {
             .map(|i| i.env_key())
             .collect();
         let helper = self.inner.helper()?;
+        if spec.drive && !manifest.needs.contains(&crate::plugins::Capability::Drive) {
+            return Err(
+                Error::invalid("drive", "the plugin does not use Google Drive")
+                    .with("plugin", &spec.plugin),
+            );
+        }
         for need in &manifest.needs {
-            if let Ok(Some(v)) = helper.secret_get(need.secret_name(), cancel) {
+            let Some(secret) = need.secret_name() else {
+                continue;
+            };
+            if let Ok(Some(v)) = helper.secret_get(secret, cancel) {
                 env.push((need.env_key().to_owned(), v.clone()));
                 secret_keys.push(need.env_key().to_owned());
                 secrets.push(v);
@@ -1932,9 +1951,21 @@ impl Backend for RealBackend {
                 name: Some(session.clone()),
             }
         };
-        let result = self.run_on(
-            &plugin, &account, &session, env, &secrets, &endpoints, &events, cancel,
-        );
+        let mounted = if spec.drive {
+            self.mount_drive(&account, &session, &events, cancel)
+                .map(|()| drive_dir(&manifest.id))
+        } else {
+            Ok(String::new())
+        };
+        let result = mounted.and_then(|dir| {
+            if spec.drive {
+                env.push((Capability::Drive.env_key().to_owned(), dir.clone()));
+                let _ = events.send(PluginRunEvent::DriveMounted { dir });
+            }
+            self.run_on(
+                &plugin, &account, &session, env, &secrets, &endpoints, &events, cancel,
+            )
+        });
         // A cancelled run always gives back the runtime it provisioned.
         if let Err(e) = &result
             && provisioned
@@ -1949,6 +1980,10 @@ impl Backend for RealBackend {
             );
         }
         result
+    }
+
+    fn confirm_drive_consent(&self) {
+        self.inner.drive_consent.store(true, Ordering::SeqCst);
     }
 
     fn set_secret(&self, name: &str, value: &str, cancel: &CancelToken) -> Result<()> {
@@ -2182,6 +2217,30 @@ impl RealBackend {
         }
     }
 
+    /// Mounts Google Drive on `session`, asking for consent through `events` when the CLI needs
+    /// it and waiting for [`Backend::confirm_drive_consent`].
+    fn mount_drive(
+        &self,
+        account: &AccountId,
+        session: &str,
+        events: &Events<PluginRunEvent>,
+        cancel: &CancelToken,
+    ) -> Result<()> {
+        let (_g, cli, state) = self.inner.cli_for(account, cancel)?;
+        self.inner.drive_consent.store(false, Ordering::SeqCst);
+        cli.drive_mount(
+            &state,
+            session,
+            &mut |url| {
+                let _ = events.send(PluginRunEvent::DriveConsentNeeded {
+                    url: url.to_owned(),
+                });
+            },
+            &|| self.inner.drive_consent.swap(false, Ordering::SeqCst),
+            cancel,
+        )
+    }
+
     /// Runs the plugin on `session`, then scrubs the CLI history once more,
     /// however the run ended (ready, failed, cancelled or error).
     #[allow(clippy::too_many_arguments)]
@@ -2231,23 +2290,34 @@ impl RealBackend {
         env.push(("PLUGIN_RUN_ID".into(), run_id.clone()));
         env.push((vm::ENV_RUN_ID.into(), run_id.clone()));
         env.push((vm::ENV_SCRIPT_NAME.into(), script_name));
-        let launched = cli
-            .exec_json(
-                &state,
-                session,
-                &env,
-                &vm::plugin_launch_snippet(&plugin.script),
-                120,
-                cancel,
-            )
-            .map_err(|e| Error {
-                detail: redact(&e.detail, secrets),
-                ..e
-            });
-        // The CLI recorded the cell (with its --env prelude) in its local
-        // history; scrub the secrets from it right away, success or not.
-        self.scrub_history(session, secrets, events);
-        launched?;
+        let launch = vm::plugin_launch_snippet(&plugin.script);
+        let mut attempt = 1;
+        loop {
+            let launched = cli
+                .exec_json(&state, session, &env, &launch, 120, cancel)
+                .map_err(|e| Error {
+                    detail: redact(&e.detail, secrets),
+                    ..e
+                });
+            // The CLI recorded the cell (with its --env prelude) in its local
+            // history; scrub the secrets from it right away, success or not.
+            self.scrub_history(session, secrets, events);
+            match launched {
+                Ok(_) => break,
+                // The cell may or may not have run. Sending it again is safe: a launch for
+                // a run id whose script is alive starts nothing.
+                Err(e) if e.kind == ErrorKind::ConnectionLost && attempt < LAUNCH_ATTEMPTS => {
+                    attempt += 1;
+                    let _ = events.send(PluginRunEvent::Log {
+                        lines: vec![format!(
+                            "[colab-playground] the connection was lost while starting the script; trying again ({attempt} of {LAUNCH_ATTEMPTS})"
+                        )],
+                    });
+                    self.inner.cfg.clock.sleep(LAUNCH_RETRY_DELAY, cancel)?;
+                }
+                Err(e) => return Err(e),
+            }
+        }
         let _ = events.send(PluginRunEvent::Launched {
             session: session.to_owned(),
             run_id: run_id.clone(),

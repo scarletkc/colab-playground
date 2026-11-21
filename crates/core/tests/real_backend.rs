@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use colab_playground_core::accounts::{Account, AccountId, Helper};
 use colab_playground_core::backend::{
-    Backend, PluginRunEvent, RunTarget, Runtime, RuntimeRef, StopOptions,
+    Backend, PluginRunEvent, PluginRunOutcome, RunTarget, Runtime, RuntimeRef, StopOptions,
 };
 use colab_playground_core::cli::Cli;
 use colab_playground_core::guard::GuardPolicy;
@@ -110,6 +110,7 @@ fn fixture() -> Fixture {
         http: Arc::new(NoHttp),
         defaults: Defaults::default(),
         run_poll_interval: Duration::from_secs(1),
+        cli_exit_grace: Duration::from_secs(2),
     };
     let b = RealBackend::new(cfg.clone()).unwrap();
     Fixture {
@@ -311,6 +312,11 @@ fn per_account_state_files_switching_and_cross_account_stop() {
     let alice = f.adopt_alice();
     let bob = f.add_bob();
     f.provision("bob-t4", Accelerator::T4);
+    // The CLI found no folder for bob's state file, so the app made one, owner-only.
+    let folder = f.state_file(&bob.id).parent().unwrap().to_owned();
+    let mode =
+        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&folder).unwrap().permissions());
+    assert_eq!(mode & 0o777, 0o700, "{}", folder.display());
     let impact = f.b.switch_impact(&alice.id).unwrap();
     assert_eq!(impact.sessions_left_running.len(), 1);
     f.b.switch_account(&alice.id, &nc()).unwrap();
@@ -839,6 +845,244 @@ fn plugin_run_shows_the_whole_log_without_waiting_for_what_is_already_written() 
     let mut rest = whole(3);
     rest.push("exiting after the failure".into());
     assert_eq!(lines[1..], rest, "a failed run shows its last lines");
+}
+
+/// Runs the llama-cpp plugin with Google Drive on, granting Drive access whenever the run asks.
+fn run_with_drive(
+    f: &Fixture,
+    target: Option<RunTarget>,
+) -> (
+    Result<PluginRunOutcome, colab_playground_core::Error>,
+    Vec<PluginRunEvent>,
+) {
+    let mut spec = f.b.plugin_run_template("llama-cpp").unwrap();
+    spec.inputs.insert(
+        "repo".into(),
+        InputValue::Text("unsloth/Qwen3-0.6B-GGUF".into()),
+    );
+    spec.drive = true;
+    if let Some(target) = target {
+        spec.target = target;
+    }
+    let (tx, rx) = channel();
+    let b = f.b.clone();
+    let watcher = std::thread::spawn(move || {
+        let mut seen = Vec::new();
+        for event in rx {
+            if matches!(event, PluginRunEvent::DriveConsentNeeded { .. }) {
+                b.confirm_drive_consent();
+            }
+            seen.push(event);
+        }
+        seen
+    });
+    let result = f.b.run_plugin(spec, tx, &nc());
+    (result, watcher.join().unwrap())
+}
+
+#[test]
+fn drive_is_mounted_after_consent_and_its_folder_reaches_the_script() {
+    let f = fixture();
+    f.adopt_alice();
+    let (result, events) = run_with_drive(&f, None);
+    let out = result.unwrap();
+    assert_eq!(out.status.state, RunState::Ready);
+    let dir = "/content/drive/MyDrive/Colab Playground/llama-cpp";
+    assert!(events.iter().any(|e| matches!(e,
+        PluginRunEvent::DriveConsentNeeded { url } if url.starts_with("https://accounts.google.com/"))));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, PluginRunEvent::DriveMounted { dir: d } if d == dir))
+    );
+    let argv =
+        |call: &Value| -> Vec<String> { serde_json::from_value(call["argv"].clone()).unwrap() };
+    let calls = f.calls();
+    assert!(calls.iter().any(|c| {
+        let a = argv(c);
+        a[2..] == ["drivemount", "-s", out.session.as_str(), "/content/drive"]
+    }));
+    let launch = calls
+        .iter()
+        .map(argv)
+        .find(|a| a.iter().any(|x| x.starts_with("CPG_SCRIPT_NAME=")))
+        .expect("the script was started");
+    assert!(
+        launch.contains(&format!("PLUGIN_DRIVE_DIR={dir}")),
+        "{launch:?}"
+    );
+
+    // The runtime keeps the access it was granted: a second run asks nothing.
+    let (result, events) = run_with_drive(
+        &f,
+        Some(RunTarget::Existing {
+            name: out.session.clone(),
+        }),
+    );
+    result.unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, PluginRunEvent::DriveConsentNeeded { .. }))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, PluginRunEvent::DriveMounted { .. }))
+    );
+
+    // A mount that fails after the consent fails the run before the script starts.
+    let f = fixture();
+    f.adopt_alice();
+    f.knob("drive_denied", json!(true));
+    let (result, events) = run_with_drive(&f, None);
+    let err = result.unwrap_err();
+    assert!(err.is(ErrorKind::DriveMountFailed), "{err:?}");
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, PluginRunEvent::Launched { .. }))
+    );
+}
+
+#[test]
+fn a_launch_that_loses_its_connection_is_sent_again_and_never_starts_twice() {
+    let run = |times: u32, after_run: bool| {
+        let f = fixture();
+        f.adopt_alice();
+        f.knob(
+            "exec_conn_lost",
+            json!({"code_has": "PLUGIN_RUN_DIR", "times": times, "after_run": after_run}),
+        );
+        let mut spec = f.b.plugin_run_template("llama-cpp").unwrap();
+        spec.inputs.insert(
+            "repo".into(),
+            InputValue::Text("unsloth/Qwen3-0.6B-GGUF".into()),
+        );
+        let (tx, rx) = channel();
+        let result = f.b.run_plugin(spec, tx, &nc());
+        let retries = rx
+            .try_iter()
+            .filter(|e| {
+                matches!(e, PluginRunEvent::Log { lines }
+                if lines.iter().any(|l| l.contains("trying again")))
+            })
+            .count();
+        let runs = f.server()["runs"].clone();
+        (result, retries, runs)
+    };
+
+    // Lost before the cell ran: sent again, started once.
+    let (result, retries, runs) = run(1, false);
+    let out = result.unwrap();
+    assert_eq!(out.status.state, RunState::Ready);
+    assert_eq!(retries, 1);
+    assert!(runs[&out.run_id]["sent_again"].is_null());
+
+    // Lost after the cell ran: the second send finds the script alive and starts nothing.
+    let (result, retries, runs) = run(1, true);
+    let out = result.unwrap();
+    assert_eq!(out.status.state, RunState::Ready);
+    assert_eq!(retries, 1);
+    assert_eq!(runs[&out.run_id]["sent_again"], 1);
+    assert_eq!(runs.as_object().unwrap().len(), 1, "one run");
+
+    // Lost every time: the run fails after the last attempt.
+    let (result, retries, _) = run(3, false);
+    assert!(result.unwrap_err().is(ErrorKind::ConnectionLost));
+    assert_eq!(retries, 2);
+}
+
+/// The real launch snippet sent twice for one run id, in one Python process standing in for
+/// the kernel: the second starts nothing while the first one's script is alive.
+#[test]
+fn a_launch_sent_again_starts_nothing_while_its_script_runs() {
+    use colab_playground_core::{vm, watchdog};
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("vm").to_string_lossy().into_owned();
+    let launch = tmp.path().join("launch.py");
+    std::fs::write(
+        &launch,
+        vm::plugin_launch_snippet(b"import time\ntime.sleep(30)\n")
+            .replace(watchdog::VM_BASE, &base),
+    )
+    .unwrap();
+    let driver = tmp.path().join("driver.py");
+    std::fs::write(
+        &driver,
+        r#"import contextlib, io, json, os, signal, sys
+g = {"__name__": "__main__"}
+results = []
+for _ in range(2):
+    os.environ.update({"CPG_RUN_ID": "r1", "CPG_SCRIPT_NAME": "w.py", "PLUGIN_INPUT_X": "1"})
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        exec(open(sys.argv[1]).read(), g)
+    assert "PLUGIN_INPUT_X" not in os.environ
+    results.append(json.loads(buf.getvalue().split("__CPG_RESULT__ ", 1)[1]))
+os.killpg(results[0]["pid"], signal.SIGTERM)
+print("RESULTS " + json.dumps(results))
+"#,
+    )
+    .unwrap();
+    let out = Host::Local
+        .run_program(
+            "python3",
+            &[
+                "-B".to_owned(),
+                driver.to_string_lossy().into_owned(),
+                launch.to_string_lossy().into_owned(),
+            ],
+            &[],
+            &nc(),
+            Some(Duration::from_secs(60)),
+        )
+        .unwrap();
+    assert!(out.success(), "{}\n{}", out.stdout, out.stderr);
+    let line = out
+        .stdout
+        .lines()
+        .find(|l| l.starts_with("RESULTS "))
+        .unwrap();
+    let v: Value = serde_json::from_str(line.trim_start_matches("RESULTS ")).unwrap();
+    assert_eq!(v[0]["pid"], v[1]["pid"], "the same script");
+    assert!(v[0]["again"].is_null());
+    assert_eq!(v[1]["again"], true);
+}
+
+#[test]
+fn an_exec_that_does_not_exit_after_its_last_output_is_stopped_after_the_grace() {
+    let run = |after: &str| {
+        let f = fixture();
+        f.adopt_alice();
+        // Only the call that starts the plugin's script hangs.
+        f.knob(
+            "exec_hang",
+            json!({"code_has": "PLUGIN_RUN_DIR", "after": after}),
+        );
+        let mut spec = f.b.plugin_run_template("llama-cpp").unwrap();
+        spec.inputs.insert(
+            "repo".into(),
+            InputValue::Text("unsloth/Qwen3-0.6B-GGUF".into()),
+        );
+        let (tx, _rx) = channel();
+        let started = std::time::Instant::now();
+        let result = f.b.run_plugin(spec, tx, &nc());
+        (result, started.elapsed())
+    };
+
+    let (result, took) = run("result");
+    let out = result.expect("the script started; only the CLI failed to exit");
+    assert_eq!(out.status.state, RunState::Ready);
+    assert!(took < Duration::from_secs(60), "took {took:?}");
+
+    let (result, took) = run("error");
+    let err = result.expect_err("the script was never started");
+    assert!(err.is(ErrorKind::ConnectionLost), "{err:?}");
+    assert!(
+        took < Duration::from_secs(60),
+        "the error shows after the grace, not the 10-minute timeout: took {took:?}"
+    );
 }
 
 #[test]

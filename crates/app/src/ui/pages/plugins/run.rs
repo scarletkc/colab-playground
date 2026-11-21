@@ -27,7 +27,7 @@ use gpui::{
 
 use crate::{
     i18n::{keys, tr, tr_args},
-    state::{AppState, Load, Op, PluginRun, RunPhase},
+    state::{AppState, DriveStep, Load, Op, PluginRun, RunPhase},
     ui::{
         error_view, metrics,
         parts::{cancel_work_button, step_icon, step_spinner},
@@ -82,6 +82,9 @@ pub(super) fn render(state: &AppState, handle: &Entity<AppState>, cx: &App) -> P
                 .w_full(),
         );
     }
+    if let Some(card) = drive(run, handle, cx) {
+        page = page.child(card);
+    }
     if let Some(info) = info {
         page = page.child(stages(run, info, state, cx));
     }
@@ -125,6 +128,58 @@ pub(super) fn render(state: &AppState, handle: &Entity<AppState>, cx: &App) -> P
         );
     }
     page.child(log(run, cx))
+}
+
+/// Selector of "Continue" once Drive access is granted.
+pub const RUN_DRIVE_CONTINUE: &str = "run-drive-continue";
+/// Selector of the note that Drive is mounted.
+pub const RUN_DRIVE_MOUNTED: &str = "run-drive-mounted";
+
+/// Mounting Google Drive: the consent to give in the browser, then where the files are kept.
+fn drive(run: &PluginRun, handle: &Entity<AppState>, cx: &App) -> Option<AnyElement> {
+    let running = matches!(run.phase, RunPhase::Running);
+    let card = match &run.drive {
+        DriveStep::None => return None,
+        DriveStep::Consent { url, confirmed } if running => {
+            let open = url.clone();
+            let go = handle.clone();
+            let buttons = div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_2()
+                .child(
+                    Button::new("run-drive-open", tr(cx, keys::RUN_DRIVE_OPEN))
+                        .icon(IconName::ExternalLink)
+                        .on_click(move |_, _, cx| cx.open_url(&open)),
+                )
+                .child(tagged(
+                    RUN_DRIVE_CONTINUE,
+                    Button::new(RUN_DRIVE_CONTINUE, tr(cx, keys::RUN_DRIVE_CONTINUE))
+                        .primary()
+                        .loading(*confirmed)
+                        .disabled(*confirmed)
+                        .on_click(move |_, _, cx| {
+                            go.update(cx, |state, cx| state.confirm_drive_consent(cx))
+                        }),
+                ));
+            Card::new()
+                .header(
+                    CardHeader::new(tr(cx, keys::RUN_DRIVE_CONSENT_TITLE))
+                        .description(tr(cx, keys::RUN_DRIVE_CONSENT_HINT)),
+                )
+                .child(buttons)
+        }
+        DriveStep::Consent { .. } => return None,
+        DriveStep::Mounted { dir } => Card::new().child(tagged(
+            RUN_DRIVE_MOUNTED,
+            InlineMessage::new(
+                Severity::Info,
+                tr_args(cx, keys::RUN_DRIVE_MOUNTED, &[("dir", dir)]),
+            ),
+        )),
+    };
+    Some(card.w_full().into_any_element())
 }
 
 fn stages(run: &PluginRun, info: &PluginInfo, state: &AppState, cx: &App) -> AnyElement {

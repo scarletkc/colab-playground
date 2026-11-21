@@ -682,6 +682,23 @@ catalog_keys! {
     FEEDBACK_ALSO_IN_ABOUT => "app.b12.feedback_also_in_about",
     SETTINGS_FEEDBACK_TITLE => "app.b12.settings_feedback_title",
     SETTINGS_FEEDBACK_DESCRIPTION => "app.b12.settings_feedback_description",
+    PLUGIN_NEEDS_DRIVE => "app.plugin.needs_drive",
+    ERR_DRIVE_MOUNT_FAILED => "app.err.drive_mount_failed",
+    RUN_DRIVE_TITLE => "app.run.drive.title",
+    RUN_DRIVE_LABEL => "app.run.drive.label",
+    RUN_DRIVE_HINT => "app.run.drive.hint",
+    RUN_DRIVE_WARNING => "app.run.drive.warning",
+    RUN_DRIVE_CONSENT_TITLE => "app.run.drive.consent_title",
+    RUN_DRIVE_CONSENT_HINT => "app.run.drive.consent_hint",
+    RUN_DRIVE_OPEN => "app.run.drive.open",
+    RUN_DRIVE_CONTINUE => "app.run.drive.continue",
+    RUN_DRIVE_MOUNTED => "app.run.drive.mounted",
+    NAV_DEPLOYMENTS => "app.nav.deployments",
+    DEPLOYMENTS_EMPTY => "app.deployments.empty",
+    DEPLOYMENTS_HINT => "app.deployments.hint",
+    DEPLOYMENT_AGAIN => "app.deployments.again",
+    DEPLOYMENT_EXISTING => "app.deployments.existing",
+    DEPLOYMENT_DRIVE => "app.deployments.drive",
 }
 
 /// A message table: `(key, message)` pairs; `{name}` marks an argument.

@@ -119,6 +119,7 @@ map to the same name are rejected. Missing optional inputs are simply absent.
 | `PLUGIN_STATUS_FILE` | `$PLUGIN_RUN_DIR/status.json` |
 | `PLUGIN_HEARTBEAT` | heartbeat file read by the VM watchdog |
 | `PLUGIN_HF_TOKEN` | the user's saved Hugging Face token, only with `needs = ["hf_token"]` and only if one is saved |
+| `PLUGIN_DRIVE_DIR` | the plugin's folder on Google Drive, `/content/drive/MyDrive/Colab Playground/<plugin id>`, only with `needs = ["drive"]` and only for runs the user turned Google Drive on for; it may not exist yet |
 
 `.py` scripts run with the VM's Python (`python -u`), `.sh` scripts with
 `bash`. stdout and stderr go to `$PLUGIN_RUN_DIR/run.log`, which the app
@@ -134,6 +135,7 @@ from the kernel, so it survives dropped connections.
 | name | effect |
 |---|---|
 | `hf_token` | `PLUGIN_HF_TOKEN` is set when the user has saved a Hugging Face token on the Plugins page. Treat it as optional. |
+| `drive` | The run form offers to keep the plugin's files on Google Drive, off by default. When the user turns it on, the app mounts Drive at `/content/drive` before the script starts (the user grants access in the browser when the runtime needs it) and sets `PLUGIN_DRIVE_DIR`. Keep what should outlive the runtime there, and write nowhere else on Drive. |
 
 Unknown capability names are rejected.
 
@@ -205,6 +207,9 @@ then whenever `/slots` reports a request in progress.
     failure is shown as a warning in the run log without stopping the run.
   - On the VM the value is in your script's environment. Do not print it, and do
     not pass it on the command line of child processes.
+- **Google Drive.** Only a plugin that declares `drive` can be given Drive, and only for the runs the
+  user turns it on for. The form says that while Drive is mounted, code on the runtime can read and
+  change the user's whole Drive, not only `PLUGIN_DRIVE_DIR`.
 - **Validation.** Manifests are validated strictly (types, ids, ports, paths),
   and so are input values (types, options, ranges, `owner/name` repo ids).
 - **No privileges.** A plugin gets no access to the user's accounts, tokens or

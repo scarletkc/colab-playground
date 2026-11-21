@@ -206,6 +206,10 @@ pub struct PluginRunSpec {
     /// Stop a session provisioned for this run when the run fails. (A
     /// cancelled run always stops the session it provisioned.)
     pub stop_on_failure: bool,
+    /// Mount Google Drive on the runtime first and give the script its Drive folder (only for
+    /// plugins that declare the `drive` capability).
+    #[serde(default)]
+    pub drive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -231,6 +235,11 @@ pub enum PluginRunEvent {
         /// The whole log, a file on the runtime.
         path: String,
     },
+    /// Mounting Google Drive needs the user's consent in the browser. The mount waits until
+    /// [`Backend::confirm_drive_consent`] (or the run is cancelled).
+    DriveConsentNeeded { url: String },
+    /// Google Drive is mounted; the script's folder on it.
+    DriveMounted { dir: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -377,6 +386,9 @@ pub trait Backend: Send + Sync {
     fn set_plugin_enabled(&self, id: &str, enabled: bool) -> Result<()>;
     /// Removes a user plugin.
     fn remove_plugin(&self, id: &str) -> Result<()>;
+    /// Tells a run waiting on [`PluginRunEvent::DriveConsentNeeded`] that the user granted
+    /// access in the browser. Does nothing when no run is waiting.
+    fn confirm_drive_consent(&self);
     /// Runs a plugin until it reports `ready` (or fails / is cancelled).
     fn run_plugin(
         &self,
@@ -487,6 +499,7 @@ pub fn run_template(info: &PluginInfo, defaults: &Defaults, taken: &[String]) ->
         inputs,
         target: RunTarget::Provision(spec),
         stop_on_failure: true,
+        drive: false,
     }
 }
 

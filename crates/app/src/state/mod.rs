@@ -7,6 +7,7 @@
 
 mod accounts;
 mod defaults;
+mod deployments;
 mod environment;
 mod feedback;
 mod ops;
@@ -52,8 +53,8 @@ pub use plugins::{HF_TOKEN, InstallPrompt, RemovePrompt, is_git_source};
 pub use provision::{LimitReached, NewSession, ProvisionPhase, ProvisionProgress};
 pub use quit::{Billing, QuitPrompt};
 pub use runs::{
-    HF_RESULTS, HfLookup, PluginRun, PluginView, RUN_LOG_LINES_KEPT, RunForm, RunLog, RunPhase,
-    TargetLost,
+    DriveStep, HF_RESULTS, HfLookup, PluginRun, PluginView, RUN_LOG_LINES_KEPT, RunForm, RunLog,
+    RunPhase, TargetLost,
 };
 pub use sessions::{EndReason, Ended, StopPrompt, runtime_label};
 pub use tunnels::{FORWARD_START_PORT, ForwardForm, local_url};
@@ -125,6 +126,10 @@ pub struct AppState {
     route: Route,
     settings: Settings,
     store: SettingsStore,
+    /// Saved deployments, the most recently used first ([`crate::deployments`]).
+    deployments: Vec<crate::deployments::Deployment>,
+    deployment_store: crate::deployments::DeploymentStore,
+    deployments_save: Option<Task<()>>,
     os_locale: Option<String>,
     language: Language,
     system_mode: Mode,
@@ -250,11 +255,16 @@ impl AppState {
             log::error!("app: the backend failed to start: {error}");
         }
         let flavor = options.source.flavor();
+        let deployment_store = crate::deployments::DeploymentStore::new(options.store.dir());
+        let deployments = deployment_store.load();
         let state = cx.new(|cx| {
             let mut state = AppState {
                 route: Route::default(),
                 settings: loaded.settings.clone(),
                 store: options.store,
+                deployments,
+                deployment_store,
+                deployments_save: None,
                 os_locale: options.os_locale,
                 language,
                 system_mode,

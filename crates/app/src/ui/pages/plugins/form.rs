@@ -6,7 +6,7 @@
 use std::rc::Rc;
 
 use colab_playground_core::{
-    plugins::{InputKind, InputSpec, InputValue, PluginInfo},
+    plugins::{Capability, InputKind, InputSpec, InputValue, PluginInfo},
     quant::{self, FitInput, GgufListing},
 };
 use ely_gpui_component::{
@@ -81,6 +81,9 @@ pub(super) fn render(
             _ => tr(cx, keys::RUN_HF_TOKEN_NONE),
         };
         page = page.child(InlineMessage::new(Severity::Info, text));
+    }
+    if info.manifest.needs.contains(&Capability::Drive) {
+        page = page.child(drive_card(form, &info.manifest.id, handle, cx));
     }
     page = page.child(target_card(form, state, handle, inputs, cx));
     if let Some(error) = &form.error {
@@ -415,6 +418,39 @@ fn quant_preview(
 }
 
 /// Where to run: a new session (its options and name) or an existing one.
+/// Selector of the run form's Google Drive switch.
+pub const RUN_DRIVE: &str = "run-drive";
+
+/// Keeping the plugin's files on Google Drive: off unless turned on for this run, since the
+/// mount gives code on the runtime the whole Drive.
+fn drive_card(form: &RunForm, plugin: &str, handle: &Entity<AppState>, cx: &App) -> AnyElement {
+    let toggle = handle.clone();
+    let mut card = Card::new()
+        .header(CardHeader::new(tr(cx, keys::RUN_DRIVE_TITLE)))
+        .child(tagged(
+            RUN_DRIVE,
+            Switch::new(RUN_DRIVE, form.drive)
+                .label(tr(cx, keys::RUN_DRIVE_LABEL))
+                .on_change(move |on, _, cx| {
+                    toggle.update(cx, |state, cx| {
+                        state.edit_run_form(|form| form.drive = on, cx)
+                    })
+                }),
+        ))
+        .child(Caption::new(tr_args(
+            cx,
+            keys::RUN_DRIVE_HINT,
+            &[("plugin", plugin)],
+        )));
+    if form.drive {
+        card = card.child(InlineMessage::new(
+            Severity::Warning,
+            tr(cx, keys::RUN_DRIVE_WARNING),
+        ));
+    }
+    card.w_full().into_any_element()
+}
+
 fn target_card(
     form: &RunForm,
     state: &AppState,

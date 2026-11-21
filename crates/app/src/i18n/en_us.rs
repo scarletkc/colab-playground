@@ -1256,4 +1256,45 @@ pub(super) const MESSAGES: Messages = &[
         SETTINGS_FEEDBACK_DESCRIPTION,
         "Report a problem or suggest an idea on GitHub. The issue form opens with the app's version and your operating system filled in.",
     ),
+    (
+        PLUGIN_NEEDS_DRIVE,
+        "Google Drive, for the deployments you turn it on for",
+    ),
+    (
+        ERR_DRIVE_MOUNT_FAILED,
+        "Google Drive could not be mounted on the runtime.",
+    ),
+    (RUN_DRIVE_TITLE, "Google Drive"),
+    (RUN_DRIVE_LABEL, "Keep files on Google Drive"),
+    (
+        RUN_DRIVE_HINT,
+        "Files this plugin keeps, such as downloaded models, go to My Drive › Colab Playground › {plugin} and are read from there, so they are not downloaded again next time. Reading them from Drive is slower than from the runtime's disk.",
+    ),
+    (
+        RUN_DRIVE_WARNING,
+        "While Drive is mounted, code on the runtime, this plugin included, can read and change everything in your Google Drive. Turn this on only for plugins you trust.",
+    ),
+    (RUN_DRIVE_CONSENT_TITLE, "Allow access to Google Drive"),
+    (
+        RUN_DRIVE_CONSENT_HINT,
+        "The deployment waits until you allow Colab to use Google Drive on Google's page. If the page did not open by itself, open it here; once access is allowed, continue.",
+    ),
+    (RUN_DRIVE_OPEN, "Open Google's page"),
+    (RUN_DRIVE_CONTINUE, "Continue"),
+    (
+        RUN_DRIVE_MOUNTED,
+        "Google Drive is mounted. Files are kept in {dir}.",
+    ),
+    (NAV_DEPLOYMENTS, "Deployments"),
+    (
+        DEPLOYMENTS_EMPTY,
+        "Nothing deployed yet. Deployments you start on the Plugins page are listed here.",
+    ),
+    (
+        DEPLOYMENTS_HINT,
+        "Every deployment you started, to start again with the same settings. API keys and other secrets are not kept.",
+    ),
+    (DEPLOYMENT_AGAIN, "Deploy again"),
+    (DEPLOYMENT_EXISTING, "On a running session"),
+    (DEPLOYMENT_DRIVE, "Google Drive"),
 ];

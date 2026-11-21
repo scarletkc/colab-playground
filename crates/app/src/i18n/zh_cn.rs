@@ -1061,4 +1061,36 @@ pub(super) const MESSAGES: Messages = &[
         SETTINGS_FEEDBACK_DESCRIPTION,
         "在 GitHub 上报告问题或提出建议。打开的表单会预先填好本应用的版本和你的操作系统。",
     ),
+    (PLUGIN_NEEDS_DRIVE, "Google Drive（仅在你为某次部署开启时）"),
+    (ERR_DRIVE_MOUNT_FAILED, "无法在运行时上挂载 Google Drive。"),
+    (RUN_DRIVE_TITLE, "Google Drive"),
+    (RUN_DRIVE_LABEL, "把文件保存到 Google Drive"),
+    (
+        RUN_DRIVE_HINT,
+        "这个插件要保存的文件（例如下载的模型）会放在“我的云端硬盘 › Colab Playground › {plugin}”，并直接从那里读取，下次部署不用重新下载。从 Drive 读取比从运行时本地磁盘慢。",
+    ),
+    (
+        RUN_DRIVE_WARNING,
+        "Drive 挂载期间，运行时上的代码（包括这个插件）可以读取和修改你 Google Drive 里的所有内容。只对你信任的插件开启。",
+    ),
+    (RUN_DRIVE_CONSENT_TITLE, "允许访问 Google Drive"),
+    (
+        RUN_DRIVE_CONSENT_HINT,
+        "部署会一直等到你在 Google 的页面上允许 Colab 使用 Google Drive。如果页面没有自动打开，请在这里打开；允许访问后，点“继续”。",
+    ),
+    (RUN_DRIVE_OPEN, "打开授权页面"),
+    (RUN_DRIVE_CONTINUE, "继续"),
+    (RUN_DRIVE_MOUNTED, "Google Drive 已挂载，文件保存在 {dir}。"),
+    (NAV_DEPLOYMENTS, "部署记录"),
+    (
+        DEPLOYMENTS_EMPTY,
+        "还没有部署记录。在插件页启动的部署会列在这里。",
+    ),
+    (
+        DEPLOYMENTS_HINT,
+        "你启动过的每次部署，可用同样的设置再部署一次。API 密钥等机密信息不会保存。",
+    ),
+    (DEPLOYMENT_AGAIN, "再次部署"),
+    (DEPLOYMENT_EXISTING, "在已有会话上"),
+    (DEPLOYMENT_DRIVE, "Google Drive"),
 ];

@@ -27,6 +27,10 @@ A stopped runtime is wiped, and the guards stop runtimes on their own. A session
 - Tokens: the CLI already passes values to the VM with `colab exec --env KEY=VALUE` (in memory,
   not on disk); that is how a Hugging Face token reaches a plugin. Colab's notebook "Secrets"
   (`google.colab.userdata`) are not exposed by the CLI.
+- Built: the `drive` plugin capability. A run the user turns Drive on for mounts it (consent in the
+  browser) and gives the script `PLUGIN_DRIVE_DIR`; the bundled llama.cpp plugin keeps its models
+  there and reads them from there. The rest of the keep plan (other targets, triggers, pulling to
+  a local folder) is not built.
 - v1 ships only the hook points: the watchdog's wind-down phase, `[[keep]]` and `needs` in the
   plugin manifest, secret slots in the keyring vault, and `StopOptions` on the stop path, where a
   pre-stop step will be added.

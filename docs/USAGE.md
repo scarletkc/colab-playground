@@ -145,6 +145,9 @@ another folder to keep experiments apart.
   `${XDG_CONFIG_HOME:-~/.config}/colab-playground` on Linux. `COLAB_PLAYGROUND_CONFIG_DIR` replaces
   that folder (empty means unset). An unreadable file is moved aside as `settings.json.corrupt`.
   Settings → About shows the file and opens its folder.
+- **Deployments list:** `deployments.json` next to `settings.json`: each deployment's plugin, its
+  input values without secrets, the GPU it asked for and whether Google Drive was on. An
+  unreadable file reads as an empty list.
 - **Real-mode data** (not moved by that variable): `accounts.json` (no secrets), `ledger.json`
   (sessions the app started) and user plugins in `<OS data dir>/colab-playground` (the same folder
   as the settings on Windows and macOS, `${XDG_DATA_HOME:-~/.local/share}/colab-playground` on

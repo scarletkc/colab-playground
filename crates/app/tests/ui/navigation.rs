@@ -11,6 +11,7 @@ fn every_sidebar_entry_opens_its_page(cx: &mut TestAppContext) {
     for route in [
         Route::Sessions,
         Route::Plugins,
+        Route::Deployments,
         Route::Accounts,
         Route::Settings,
         Route::Overview,

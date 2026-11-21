@@ -12,6 +12,7 @@ mod support;
 mod accounts;
 mod counts;
 mod defaults;
+mod deployments;
 mod feedback;
 mod fonts;
 mod harness;

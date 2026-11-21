@@ -54,36 +54,73 @@ pub fn run_dir(run_id: &str) -> String {
 
 /// Code that writes the plugin script into its run directory and starts it
 /// detached (own session), passing `PLUGIN_*` variables only to the child.
+///
+/// The script travels zlib-compressed: the launch is the largest cell the app sends, and large
+/// cells lost their connection far more often than small ones (see `docs/COLAB_NOTES.md`).
+///
+/// Running it again for the same run id starts nothing when that run's script is alive, and
+/// prints the same result with `"again": true`. So a launch whose connection was lost can be
+/// sent again without knowing whether the first one got through.
 pub fn plugin_launch_snippet(script: &[u8]) -> String {
-    let b64 = B64.encode(script);
+    let b64 = B64.encode(compress(script));
     format!(
-        r#"import base64, json, os, subprocess, sys
+        r#"import base64, json, os, subprocess, sys, zlib
 _rid = os.environ.pop("{ENV_RUN_ID}")
 _name = os.environ.pop("{ENV_SCRIPT_NAME}")
 _d = "{VM_BASE}/runs/" + _rid
 os.makedirs(_d, exist_ok=True)
 _path = _d + "/" + _name
-with open(_path, "wb") as _fh:
-    _fh.write(base64.b64decode("{b64}"))
 _keys = [k for k in os.environ if k.startswith("PLUGIN_")]
 _seckeys = [k for k in os.environ.pop("{ENV_SECRET_KEYS}", "").split(",") if k]
 globals().setdefault("_cpg_redact", {{}})[_rid] = sorted(
     {{os.environ[k] for k in _seckeys if len(os.environ.get(k, "")) >= 4}}, key=len, reverse=True)
-_env = dict(os.environ)
-_env.update({{"PLUGIN_RUN_DIR": _d, "PLUGIN_STATUS_FILE": _d + "/status.json",
-             "PLUGIN_HEARTBEAT": "{HEARTBEAT_PATH}", "PYTHONUNBUFFERED": "1"}})
-for _k in _keys:
-    os.environ.pop(_k, None)
-_cmd = [sys.executable, "-u", _path] if _name.endswith(".py") else ["bash", _path]
-_log = open(_d + "/run.log", "ab")
-_p = subprocess.Popen(_cmd, cwd=_d, env=_env, stdin=subprocess.DEVNULL, stdout=_log,
-                      stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
-del _env
-with open(_d + "/pid", "w") as _fh:
-    _fh.write(str(_p.pid))
-print("__CPG_RESULT__ " + json.dumps({{"pid": _p.pid, "run_dir": _d}}))
+def _cpg_alive(pid):
+    try:
+        with open("/proc/%d/stat" % pid) as fh:
+            return fh.read().split(") ", 1)[1][:1] not in ("Z", "X")
+    except FileNotFoundError:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    except Exception:
+        return False
+try:
+    _old = int(open(_d + "/pid").read().strip())
+except Exception:
+    _old = None
+if _old is not None and _cpg_alive(_old):
+    for _k in _keys:
+        os.environ.pop(_k, None)
+    print("__CPG_RESULT__ " + json.dumps({{"pid": _old, "run_dir": _d, "again": True}}))
+else:
+    with open(_path, "wb") as _fh:
+        _fh.write(zlib.decompress(base64.b64decode("{b64}")))
+    _env = dict(os.environ)
+    _env.update({{"PLUGIN_RUN_DIR": _d, "PLUGIN_STATUS_FILE": _d + "/status.json",
+                 "PLUGIN_HEARTBEAT": "{HEARTBEAT_PATH}", "PYTHONUNBUFFERED": "1"}})
+    for _k in _keys:
+        os.environ.pop(_k, None)
+    _cmd = [sys.executable, "-u", _path] if _name.endswith(".py") else ["bash", _path]
+    _log = open(_d + "/run.log", "ab")
+    _p = subprocess.Popen(_cmd, cwd=_d, env=_env, stdin=subprocess.DEVNULL, stdout=_log,
+                          stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+    del _env
+    with open(_d + "/pid", "w") as _fh:
+        _fh.write(str(_p.pid))
+    print("__CPG_RESULT__ " + json.dumps({{"pid": _p.pid, "run_dir": _d}}))
 "#
     )
+}
+
+/// `bytes` zlib-compressed at the best level (what Python's `zlib.decompress` reads).
+fn compress(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    // Writing to a Vec cannot fail.
+    let _ = encoder.write_all(bytes);
+    encoder.finish().unwrap_or_default()
 }
 
 /// Log bytes one poll returns at most: what a poll prints comes back through one `colab exec`
@@ -285,6 +322,7 @@ mod tests {
     fn launch_snippet_embeds_base64_only() {
         let s = plugin_launch_snippet(b"print('\"; import os; os.system(\"x\")')");
         assert!(!s.contains("os.system"));
+        assert!(s.contains("zlib.decompress(base64.b64decode("));
         assert!(s.contains("start_new_session=True"));
         assert!(s.contains("os.environ.pop(_k, None)"));
         assert!(s.contains(ENV_SECRET_KEYS) && s.contains("_cpg_redact"));

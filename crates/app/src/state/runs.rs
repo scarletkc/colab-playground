@@ -12,7 +12,7 @@ use colab_playground_core::{
     accounts::AccountId,
     backend::{Backend, PluginRunEvent, PluginRunOutcome, PluginRunSpec, RunTarget, Runtime},
     hf::HfModel,
-    plugins::{InputKind, InputValue, PluginInfo},
+    plugins::{Capability, InputKind, InputValue, PluginInfo},
     provision::ProvisionSpec,
     quant::GgufListing,
     tunnel::TunnelSpec,
@@ -21,6 +21,7 @@ use colab_playground_core::{
 use gpui::{App, AppContext, Context};
 
 use super::{AppState, InputSlot, Load, Op, ProvisionProgress, ops::key_of};
+use crate::deployments::Deployment;
 use crate::{
     i18n::{keys, tr_args},
     route::Route,
@@ -71,6 +72,8 @@ pub struct RunForm {
     pub target_lost: Option<TargetLost>,
     /// Stop a session provisioned for this run when the run fails.
     pub stop_on_failure: bool,
+    /// Keep the plugin's files on Google Drive (plugins with the `drive` capability only).
+    pub drive: bool,
     pub hf: HfLookup,
     pub error: Option<Error>,
 }
@@ -97,6 +100,19 @@ pub struct PluginRun {
     pub status: Option<RunStatus>,
     pub log: RunLog,
     pub phase: RunPhase,
+    pub drive: DriveStep,
+}
+
+/// Where a run that uses Google Drive is with mounting it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum DriveStep {
+    /// Drive is not used, or the mount has not started.
+    #[default]
+    None,
+    /// Access has to be granted on `url`; `confirmed` once the user said it is.
+    Consent { url: String, confirmed: bool },
+    /// Mounted; the plugin's folder on it.
+    Mounted { dir: String },
 }
 
 /// Lines of a run's log the app keeps, the newest ones. The log view builds every line it has
@@ -157,6 +173,23 @@ impl AppState {
     }
 
     pub fn open_run_form(&mut self, plugin: String, cx: &mut Context<Self>) {
+        self.open_run_form_with(plugin, None, cx);
+    }
+
+    /// Opens the run form filled with a saved deployment's settings.
+    pub fn redeploy(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(record) = self.deployments.iter().find(|d| d.id == id).cloned() else {
+            return;
+        };
+        self.open_run_form_with(record.plugin.clone(), Some(record), cx);
+    }
+
+    fn open_run_form_with(
+        &mut self,
+        plugin: String,
+        record: Option<Deployment>,
+        cx: &mut Context<Self>,
+    ) {
         self.navigate(Route::Plugins, cx);
         let work_plugin = plugin.clone();
         self.run_backend(
@@ -165,7 +198,12 @@ impl AppState {
             move |backend, _| backend.plugin_run_template(&work_plugin),
             move |state, result, cx| {
                 match result {
-                    Ok(template) => state.fill_run_form(template, cx),
+                    Ok(mut template) => {
+                        if let (Some(record), Some(info)) = (&record, state.plugin(&plugin)) {
+                            record.apply(&mut template, &info.manifest);
+                        }
+                        state.fill_run_form(template, cx)
+                    }
                     Err(error) => state.toast_error(&error, cx),
                 }
                 cx.notify();
@@ -208,6 +246,7 @@ impl AppState {
             existing_account: None,
             target_lost: None,
             stop_on_failure: template.stop_on_failure,
+            drive: template.drive,
             hf: HfLookup::default(),
             error: None,
         });
@@ -447,6 +486,7 @@ impl AppState {
             inputs,
             target,
             stop_on_failure: form.stop_on_failure,
+            drive: form.drive && info.manifest.needs.contains(&Capability::Drive),
         };
         self.plugin_run = Some(PluginRun {
             plugin: form.plugin.clone(),
@@ -457,8 +497,10 @@ impl AppState {
             status: None,
             log: RunLog::default(),
             phase: RunPhase::Running,
+            drive: DriveStep::None,
         });
         self.plugin_view = PluginView::Run;
+        self.record_deployment(&spec, &info, cx);
         self.run_backend_streaming(
             Op::PluginRun,
             cx,
@@ -491,6 +533,27 @@ impl AppState {
                 run.log
                     .extend([tr_args(cx, keys::RUN_LOG_SKIPPED, &[("path", &path)]).into()])
             }
+            PluginRunEvent::DriveConsentNeeded { url } => {
+                run.drive = DriveStep::Consent {
+                    url,
+                    confirmed: false,
+                }
+            }
+            PluginRunEvent::DriveMounted { dir } => run.drive = DriveStep::Mounted { dir },
+        }
+    }
+
+    /// The user granted Drive access in the browser: the waiting mount goes on.
+    pub fn confirm_drive_consent(&mut self, cx: &mut Context<Self>) {
+        let Some(run) = &mut self.plugin_run else {
+            return;
+        };
+        if let DriveStep::Consent { confirmed, .. } = &mut run.drive {
+            *confirmed = true;
+            if let Ok(backend) = &self.backend {
+                backend.confirm_drive_consent();
+            }
+            cx.notify();
         }
     }
 

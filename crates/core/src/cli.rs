@@ -50,6 +50,9 @@ pub enum CliCommand {
         /// Idle timeout in seconds (0 = none).
         timeout_secs: u32,
     },
+    /// `colab drivemount -s NAME /content/drive` (waits for Enter on stdin when Drive access
+    /// has to be granted in the browser).
+    DriveMount { name: String },
     /// `colab stop -s NAME`.
     Stop {
         /// Session name.
@@ -115,6 +118,15 @@ pub fn build_argv(state_file: Option<&HostPath>, cmd: &CliCommand) -> Result<Vec
         CliCommand::Stop { name } => {
             validate_session_name(name)?;
             argv.extend(["stop".into(), "-s".into(), name.clone()]);
+        }
+        CliCommand::DriveMount { name } => {
+            validate_session_name(name)?;
+            argv.extend([
+                "drivemount".into(),
+                "-s".into(),
+                name.clone(),
+                crate::plugins::DRIVE_MOUNT_POINT.into(),
+            ]);
         }
     }
     Ok(argv)
@@ -286,9 +298,64 @@ pub struct Cli {
     pub colab: String,
     /// Environment added to every invocation (tests isolate `HOME` here).
     pub base_env: Vec<(String, String)>,
+    /// How long `exec` may take to exit after its last output; see [`ended_exec_output`].
+    pub exit_grace: Duration,
 }
 
-const RUN_COLAB: &str = r#"exec "$CPG_COLAB" "$@""#;
+/// How long a Drive mount may take, consent in the browser included (the CLI's own limit for
+/// it is 10 minutes).
+pub const DRIVE_MOUNT_TIMEOUT: Duration = Duration::from_secs(11 * 60);
+
+/// What `google.colab.drive.mount` prints once Drive is mounted (or was already).
+fn is_mount_report(line: &str) -> bool {
+    let line = line.trim();
+    line.starts_with("Mounted at ") || line.starts_with("Drive already mounted at ")
+}
+
+/// Default [`Cli::exit_grace`]. After its last output the CLI only records the cell in its
+/// history, saves its state file and closes the connection, which takes a second or two.
+pub const EXIT_GRACE: Duration = Duration::from_secs(20);
+
+/// Whether `line` is the last thing `colab exec` writes before it exits: the result line our
+/// snippets print, or the last line of a traceback (`RuntimeError: Connection was lost.`).
+///
+/// CLI 0.8.0 does not always exit after that. When the command that prepares the kernel fails,
+/// it raises without closing its connection, whose threads then keep the process alive, and the
+/// app would wait for the whole timeout before showing the error.
+pub fn ended_exec_output(line: &Line) -> bool {
+    let text = line.text.trim_end();
+    match line.stream {
+        Stream::Stdout => text.starts_with(RESULT_MARKER.trim_end()),
+        Stream::Stderr => is_exception_line(text),
+    }
+}
+
+/// `SomeError: message`, `pkg.module.SomeException`, `KeyboardInterrupt`: a line that names an
+/// exception at the start of the line, as the last line of a Python traceback does.
+fn is_exception_line(text: &str) -> bool {
+    let name = text.split_once(':').map_or(text, |(name, _)| name);
+    let last = name.rsplit('.').next().unwrap_or_default();
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        && (last.ends_with("Error") || last.ends_with("Exception") || last == "KeyboardInterrupt")
+}
+
+/// Runs `colab` with the given arguments. The CLI opens a lock file next to its `--config`
+/// state file and fails when that folder is missing, which it is for an account added before the
+/// CLI ever saved a state of its own, so the folder is made first (owner-only, like the rest of
+/// the app's data).
+///
+/// `drivemount` reads the Enter it waits for from the terminal when there is one, and only
+/// otherwise from stdin. The script runs in a background process group, where reading the
+/// terminal would stop it; with SIGTTIN ignored the read fails instead and the CLI falls back to
+/// stdin, which the app writes.
+const RUN_COLAB: &str = r#"trap '' TTIN TTOU
+if [ "$1" = --config ]; then
+  (umask 077 && mkdir -p -- "$(dirname -- "$2")") || exit 1
+fi
+exec "$CPG_COLAB" "$@""#;
 
 impl Cli {
     pub fn new(host: Host, colab: impl Into<String>, base_env: Vec<(String, String)>) -> Self {
@@ -296,7 +363,13 @@ impl Cli {
             host,
             colab: colab.into(),
             base_env,
+            exit_grace: EXIT_GRACE,
         }
+    }
+
+    pub fn with_exit_grace(mut self, grace: Duration) -> Self {
+        self.exit_grace = grace;
+        self
     }
 
     pub fn request(&self, state: Option<&HostPath>, cmd: &CliCommand) -> Result<ScriptRequest> {
@@ -322,17 +395,26 @@ impl Cli {
         req.stdin = stdin;
         req.timeout = timeout;
         let interactive = matches!(cmd, CliCommand::Whoami);
-        let out = self.host.run(req, cancel, &mut |line| {
+        let exec = matches!(cmd, CliCommand::Exec { .. });
+        let grace = self.exit_grace;
+        let mut out = self.host.run(req, cancel, &mut |line| {
             on_line(line);
             if !interactive
                 && line.stream == Stream::Stderr
                 && line.text.contains(AUTH_PROMPT_MARKER)
             {
                 LineAction::Kill
+            } else if exec && ended_exec_output(line) {
+                LineAction::Ended { grace }
             } else {
                 LineAction::Continue
             }
         })?;
+        // A result line means the code ran to its end; the CLI only failed to exit afterwards.
+        // Without one, the output is classified like any failure (its traceback is the detail).
+        if out.hung && find_result(&out.stdout).is_some() {
+            out.code = Some(0);
+        }
         if out.killed {
             let mut e = classify_failure(&out);
             if !matches!(e.kind, ErrorKind::KeyringUnavailable) {
@@ -410,6 +492,84 @@ impl Cli {
 
     /// `colab exec` with `code` on stdin (prefixed by [`EXEC_PREAMBLE`]).
     ///
+    /// `colab drivemount` on session `name`. When Drive access has to be granted, the CLI
+    /// prints a consent URL: `on_consent` gets it, and the CLI is told to go on once `granted`
+    /// returns true. Succeeds only when the CLI reports the mount.
+    pub fn drive_mount(
+        &self,
+        state: &HostPath,
+        name: &str,
+        on_consent: &mut dyn FnMut(&str),
+        granted: &dyn Fn() -> bool,
+        cancel: &CancelToken,
+    ) -> Result<()> {
+        let mut req = self.request(Some(state), &CliCommand::DriveMount { name: name.into() })?;
+        req.stdin = StdinMode::Pipe;
+        let mut child = self.host.spawn(req)?;
+        let started = std::time::Instant::now();
+        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+        let mut waiting = false;
+        let mut mounted_at: Option<std::time::Instant> = None;
+        loop {
+            match child.recv_line(Duration::from_millis(100)) {
+                Ok(line) => {
+                    if line.stream == Stream::Stderr && line.text.contains(AUTH_PROMPT_MARKER) {
+                        child.kill();
+                        return Err(Error::new(ErrorKind::AuthRequired));
+                    }
+                    if line.stream == Stream::Stdout {
+                        if let Some(url) = crate::accounts::auth_url_from_line(&line.text) {
+                            waiting = true;
+                            on_consent(&url);
+                        }
+                        if is_mount_report(&line.text) {
+                            mounted_at.get_or_insert_with(std::time::Instant::now);
+                        }
+                    }
+                    match line.stream {
+                        Stream::Stdout => stdout.push(line.text),
+                        Stream::Stderr => stderr.push(line.text),
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+            if waiting && granted() {
+                waiting = false;
+                child.write_stdin(b"\n")?;
+            }
+            // The mount is in place; a CLI that does not exit after it is stopped (see
+            // [`ended_exec_output`]).
+            if mounted_at.is_some_and(|at| at.elapsed() > self.exit_grace) {
+                child.kill();
+                return Ok(());
+            }
+            if cancel.is_cancelled() {
+                child.kill();
+                return Err(Error::cancelled());
+            }
+            if started.elapsed() > DRIVE_MOUNT_TIMEOUT {
+                child.kill();
+                return Err(Error::new(ErrorKind::Timeout).detail(tail(&stderr.join("\n"), 400)));
+            }
+        }
+        let out = ScriptOutput {
+            code: child.wait(),
+            stdout: stdout.join("\n"),
+            stderr: stderr.join("\n"),
+            ..ScriptOutput::default()
+        };
+        if out.stdout.lines().any(is_mount_report) {
+            return Ok(());
+        }
+        let error = classify_failure(&out);
+        Err(if error.kind == ErrorKind::Other {
+            error.with_kind(ErrorKind::DriveMountFailed)
+        } else {
+            error
+        })
+    }
+
     /// Fails only for CLI-level problems (session gone, connection lost, idle
     /// timeout, auth); a Python exception in `code` returns `Ok` with the
     /// traceback in `stderr` and no `result`.
@@ -544,6 +704,7 @@ mod tests {
             stdout: stdout.into(),
             stderr: stderr.into(),
             killed: false,
+            hung: false,
         }
     }
 
@@ -768,5 +929,38 @@ Read timed out. (read timeout=120)";
             ErrorKind::Other,
             "only `colab new` turns it into AllocationTimeout"
         );
+    }
+
+    #[test]
+    fn the_last_output_of_exec_is_a_result_or_the_end_of_a_traceback() {
+        let line = |stream, text: &str| Line {
+            stream,
+            text: text.to_owned(),
+        };
+        for text in [
+            "RuntimeError: Connection was lost.",
+            "requests.exceptions.ConnectionError: ('Connection aborted.')",
+            "FileNotFoundError: [Errno 2] No such file or directory: '/x.lock'",
+            "KeyboardInterrupt",
+        ] {
+            assert!(ended_exec_output(&line(Stream::Stderr, text)), "{text}");
+        }
+        for text in [
+            "Traceback (most recent call last):",
+            "  File \"colab\", line 1, in <module>",
+            "    raise RuntimeError(\"x\")",
+            "[colab] Session 'llm' appears to be lost (404/401). Cleaning up.",
+            "",
+        ] {
+            assert!(!ended_exec_output(&line(Stream::Stderr, text)), "{text}");
+        }
+        assert!(ended_exec_output(&line(
+            Stream::Stdout,
+            "__CPG_RESULT__ {\"pid\": 1}"
+        )));
+        assert!(!ended_exec_output(&line(
+            Stream::Stdout,
+            "RuntimeError: printed by the code"
+        )));
     }
 }

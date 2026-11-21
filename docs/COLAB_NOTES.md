@@ -82,10 +82,28 @@ when changing either.
   Immediately after such a call it redacts them from that history file (best
   effort) and removes them from the kernel's environment. The app itself never
   writes them anywhere. See the security notes in `docs/PLUGINS.md`.
+- **Large cells lose their connection.** On 2026-11-21 the plugin launch, then a 42 KB cell (the
+  base64 of the script), failed with "Connection was lost." three times in four runs, while
+  every cell of 15 KB or less went through. Whether the cell ran is then unknown. The launch
+  is now sent zlib-compressed (about 14 KB) and is safe to send again: it starts nothing for a
+  run id whose script is alive.
 - Long or flaky work must not run *inside* `exec`. Running a server with
   `%%bash` through `exec` ended in "RuntimeError: Connection was lost." with
   nothing started. Start work with `subprocess.Popen(..., start_new_session=True)`;
   the `exec` call returns in seconds and the host polls with short `exec` calls.
+
+## `colab drivemount`
+
+- `colab drivemount -s NAME PATH` runs `google.colab.drive.mount(PATH)` on the runtime. When the
+  runtime has no Drive access yet, it prints a consent URL on its own line (and tries to open it in
+  a browser), then waits for Enter: from `/dev/tty` when it can open it, else from stdin. A process
+  in a background process group that reads the terminal is stopped by SIGTTIN, so the app ignores
+  SIGTTIN and the read falls back to stdin, which the app writes once the user says access is
+  granted.
+- It exits 0 whether or not the mount worked. Only the kernel's `Mounted at PATH` (or `Drive
+  already mounted at PATH`) on stdout means it did.
+- The access stays with the runtime: a second mount on the same runtime asks nothing.
+- The mount exposes the whole Drive to everything that runs on the runtime.
 
 ## `colab ssh`
 

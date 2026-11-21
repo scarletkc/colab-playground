@@ -47,7 +47,8 @@ runtime to your computer and runs plugins on the runtime. Written in Rust with G
 - **Plugins.** A manifest plus one script that runs only on the Colab runtime, never on your
   computer. Bundled: "Deploy a GGUF model" serves a Hugging Face GGUF model with llama.cpp
   (OpenAI-compatible API plus web chat) and picks the best quantisation that fits the GPU it gets.
-  Write your own with [docs/PLUGINS.md](docs/PLUGINS.md).
+  It can keep the model on your Google Drive, so deploying it again downloads nothing. Every
+  deployment is listed, to start again with the same settings. Write your own with [docs/PLUGINS.md](docs/PLUGINS.md).
 - **Languages and theme.** English (the default) and 简体中文; light, dark or follow the system.
 
 Every limit and default is editable in Settings and can be overridden for a single session or

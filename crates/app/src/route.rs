@@ -11,6 +11,8 @@ pub enum Route {
     Sessions,
     /// Installed plugins and their runs.
     Plugins,
+    /// Deployments started before, to start again.
+    Deployments,
     /// Google accounts.
     Accounts,
     Settings,
@@ -18,10 +20,11 @@ pub enum Route {
 
 impl Route {
     /// Every route, in sidebar order.
-    pub const ALL: [Route; 5] = [
+    pub const ALL: [Route; 6] = [
         Route::Overview,
         Route::Sessions,
         Route::Plugins,
+        Route::Deployments,
         Route::Accounts,
         Route::Settings,
     ];
@@ -32,6 +35,7 @@ impl Route {
             Route::Overview => "overview",
             Route::Sessions => "sessions",
             Route::Plugins => "plugins",
+            Route::Deployments => "deployments",
             Route::Accounts => "accounts",
             Route::Settings => "settings",
         }
@@ -43,6 +47,7 @@ impl Route {
             Route::Overview => keys::NAV_OVERVIEW,
             Route::Sessions => keys::NAV_SESSIONS,
             Route::Plugins => keys::NAV_PLUGINS,
+            Route::Deployments => keys::NAV_DEPLOYMENTS,
             Route::Accounts => keys::NAV_ACCOUNTS,
             Route::Settings => keys::NAV_SETTINGS,
         }
@@ -53,6 +58,7 @@ impl Route {
             Route::Overview => IconName::LayoutDashboard,
             Route::Sessions => IconName::Server,
             Route::Plugins => IconName::Puzzle,
+            Route::Deployments => IconName::History,
             Route::Accounts => IconName::Users,
             Route::Settings => IconName::Settings,
         }
@@ -64,6 +70,7 @@ impl Route {
             Route::Overview => "nav-overview",
             Route::Sessions => "nav-sessions",
             Route::Plugins => "nav-plugins",
+            Route::Deployments => "nav-deployments",
             Route::Accounts => "nav-accounts",
             Route::Settings => "nav-settings",
         }

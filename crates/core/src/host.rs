@@ -266,6 +266,11 @@ pub enum LineAction {
     Continue,
     /// Kill the process tree now (e.g. an unexpected interactive prompt).
     Kill,
+    /// The program has written all it will: give it `grace` to exit, then kill it and keep what
+    /// it wrote ([`ScriptOutput::hung`]). Later lines are still collected.
+    Ended {
+        grace: Duration,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -278,6 +283,9 @@ pub struct ScriptOutput {
     pub stderr: String,
     /// True when a line callback requested a kill.
     pub killed: bool,
+    /// True when the program did not exit within the grace a line callback gave it after its
+    /// last output ([`LineAction::Ended`]) and was killed. `code` is then `None`.
+    pub hung: bool,
 }
 
 impl ScriptOutput {
@@ -1238,6 +1246,7 @@ fn collect(
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let mut drain_deadline: Option<Instant> = None;
+    let mut exit_deadline: Option<Instant> = None;
     loop {
         match child.recv_line(Duration::from_millis(50)) {
             Ok(line) => {
@@ -1250,10 +1259,16 @@ fn collect(
                     Stream::Stdout => stdout.push(line.text),
                     Stream::Stderr => stderr.push(line.text),
                 }
-                if action == LineAction::Kill {
-                    out.killed = true;
-                    child.kill();
-                    drain_deadline = Some(Instant::now() + Duration::from_secs(2));
+                match action {
+                    LineAction::Kill => {
+                        out.killed = true;
+                        child.kill();
+                        drain_deadline = Some(Instant::now() + Duration::from_secs(2));
+                    }
+                    LineAction::Ended { grace } => {
+                        exit_deadline.get_or_insert(Instant::now() + grace);
+                    }
+                    LineAction::Continue => {}
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -1264,6 +1279,11 @@ fn collect(
                 break;
             }
             continue;
+        }
+        if exit_deadline.is_some_and(|d| Instant::now() > d) {
+            out.hung = true;
+            child.kill();
+            break;
         }
         if cancel.is_cancelled() {
             child.kill();
@@ -1276,7 +1296,9 @@ fn collect(
             return Err(Error::new(ErrorKind::Timeout).detail(tail(&stderr.join("\n"), 400)));
         }
     }
-    out.code = if out.killed {
+    out.code = if out.hung {
+        None
+    } else if out.killed {
         child.try_wait().flatten()
     } else {
         child.wait()
@@ -1710,5 +1732,43 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.is(ErrorKind::Timeout));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_does_not_exit_after_its_last_output_is_stopped_after_the_grace() {
+        let started = Instant::now();
+        let out = Host::Local
+            .run(
+                ScriptRequest::new("echo done; echo late >&2; sleep 30"),
+                &CancelToken::new(),
+                &mut |line| {
+                    if line.text == "done" {
+                        LineAction::Ended {
+                            grace: Duration::from_millis(500),
+                        }
+                    } else {
+                        LineAction::Continue
+                    }
+                },
+            )
+            .unwrap();
+        assert!(out.hung && !out.killed);
+        assert_eq!(out.code, None);
+        assert_eq!(out.stdout, "done");
+        assert_eq!(out.stderr, "late", "lines within the grace are kept");
+        assert!(started.elapsed() < Duration::from_secs(10));
+
+        let out = Host::Local
+            .run(
+                ScriptRequest::new("echo done; exit 3"),
+                &CancelToken::new(),
+                &mut |_| LineAction::Ended {
+                    grace: Duration::from_secs(30),
+                },
+            )
+            .unwrap();
+        assert!(!out.hung, "a program that exits in time is not marked");
+        assert_eq!(out.code, Some(3));
     }
 }

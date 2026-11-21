@@ -93,6 +93,7 @@ pub fn kind_key(kind: ErrorKind) -> Option<&'static str> {
         K::PluginExists => keys::ERR_PLUGIN_EXISTS,
         K::PluginNotFound => keys::ERR_PLUGIN_NOT_FOUND,
         K::PluginRunFailed => keys::ERR_PLUGIN_RUN_FAILED,
+        K::DriveMountFailed => keys::ERR_DRIVE_MOUNT_FAILED,
         K::HealthCheckFailed => keys::ERR_HEALTH_CHECK_FAILED,
         K::GitFailed => keys::ERR_GIT_FAILED,
         K::InstallFailed => keys::ERR_INSTALL_FAILED,

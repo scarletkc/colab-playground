@@ -1,8 +1,8 @@
 api = 1
 id = "llama-cpp"
-version = "0.1.0"
+version = "0.2.0"
 # Optional: a saved Hugging Face token is passed for private / gated repos.
-needs = ["hf_token"]
+needs = ["hf_token", "drive"]
 
 [name]
 en = "Deploy a GGUF model"
@@ -52,11 +52,11 @@ zh-TW = "量化"
 ja = "量子化"
 ko = "양자화"
 [inputs.help]
-en = "auto picks the highest-quality quantised file that fits the GPU memory. Full-precision files (F16, BF16, F32) are used only when the repository has nothing else."
-zh-CN = "auto 会选择显存放得下的最高质量量化文件；只有仓库里没有其他文件时才会使用全精度文件（F16、BF16、F32）。"
-zh-TW = "auto 會選擇顯示記憶體放得下的最高品質量化檔案；只有儲存庫裡沒有其他檔案時才會使用全精度檔案（F16、BF16、F32）。"
-ja = "auto は GPU メモリに収まる最高品質の量子化ファイルを選びます。フル精度のファイル（F16、BF16、F32）は、リポジトリにほかのファイルがない場合にのみ使用します。"
-ko = "auto는 GPU 메모리에 들어가는 가장 품질이 높은 양자화 파일을 선택합니다. 전체 정밀도 파일(F16, BF16, F32)은 저장소에 다른 파일이 없을 때만 사용합니다."
+en = "auto picks the highest-quality quantised file that fits the GPU memory. Full-precision files (F16, BF16, F32) are used only when the repository has nothing else. With Google Drive on, a file already on Drive that fits is used first, so nothing is downloaded again."
+zh-CN = "auto 会选择显存放得下的最高质量量化文件；只有仓库里没有其他文件时才会使用全精度文件（F16、BF16、F32）。开启 Google Drive 时，优先使用 Drive 里已有且放得下的文件，不会重新下载。"
+zh-TW = "auto 會選擇顯示記憶體放得下的最高品質量化檔案；只有儲存庫裡沒有其他檔案時才會使用全精度檔案（F16、BF16、F32）。開啟 Google Drive 時，優先使用 Drive 裡已有且放得下的檔案，不會重新下載。"
+ja = "auto は GPU メモリに収まる最高品質の量子化ファイルを選びます。フル精度のファイル（F16、BF16、F32）は、リポジトリにほかのファイルがない場合にのみ使用します。Google Drive を有効にすると、Drive にすでにあり収まるファイルを優先して使うため、再ダウンロードしません。"
+ko = "auto는 GPU 메모리에 들어가는 가장 품질이 높은 양자화 파일을 선택합니다. 전체 정밀도 파일(F16, BF16, F32)은 저장소에 다른 파일이 없을 때만 사용합니다. Google Drive를 켜면 Drive에 이미 있고 들어가는 파일을 먼저 사용하므로 다시 다운로드하지 않습니다."
 
 [[inputs]]
 id = "ctx"

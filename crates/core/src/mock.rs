@@ -28,8 +28,8 @@ use crate::guard::{Decision, GuardPolicy, SpendMeter, evaluate};
 use crate::hf::HfModel;
 use crate::host::{Host, Line, ProbeReport, Stream};
 use crate::plugins::{
-    PluginInfo, PluginOrigin, PluginPreview, PluginStore, discard_preview, resolve_endpoints,
-    resolve_inputs,
+    Capability, PluginInfo, PluginOrigin, PluginPreview, PluginStore, discard_preview, drive_dir,
+    resolve_endpoints, resolve_inputs,
 };
 use crate::provision::{
     self, Hardware, ProvisionEvent, ProvisionOps, ProvisionOutcome, ProvisionSpec,
@@ -633,6 +633,8 @@ impl World {
 pub struct MockBackend {
     cfg: Arc<MockConfig>,
     world: Arc<Mutex<World>>,
+    /// Set by [`Backend::confirm_drive_consent`].
+    drive_consent: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl std::fmt::Debug for MockBackend {
@@ -732,6 +734,7 @@ impl MockBackend {
         MockBackend {
             cfg: Arc::new(cfg),
             world: Arc::new(Mutex::new(world)),
+            drive_consent: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -1186,6 +1189,9 @@ impl MockBackend {
         })
     }
 }
+
+/// The consent page the mock's Drive mount asks for (a placeholder, like its sign-in URL).
+pub const MOCK_DRIVE_CONSENT_URL: &str = "https://accounts.google.com/o/oauth2/auth?client_id=mock&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive";
 
 impl Backend for MockBackend {
     fn kind(&self) -> BackendKind {
@@ -1789,6 +1795,11 @@ impl Backend for MockBackend {
         self.w().plugins.remove(id)
     }
 
+    fn confirm_drive_consent(&self) {
+        self.drive_consent
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     fn run_plugin(
         &self,
         spec: PluginRunSpec,
@@ -1848,6 +1859,31 @@ impl Backend for MockBackend {
                 );
             }
         };
+        if spec.drive {
+            if !plugin.manifest.needs.contains(&Capability::Drive) {
+                return Err(
+                    Error::invalid("drive", "the plugin does not use Google Drive")
+                        .with("plugin", &spec.plugin),
+                );
+            }
+            // Like a runtime that has not been granted Drive access yet: ask, then wait.
+            use std::sync::atomic::Ordering;
+            self.drive_consent.store(false, Ordering::SeqCst);
+            let _ = events.send(PluginRunEvent::DriveConsentNeeded {
+                url: MOCK_DRIVE_CONSENT_URL.into(),
+            });
+            while !self.drive_consent.swap(false, Ordering::SeqCst) {
+                if self.step(cancel).is_err() {
+                    if provisioned {
+                        stop_it(self);
+                    }
+                    return Err(Error::cancelled());
+                }
+            }
+            let _ = events.send(PluginRunEvent::DriveMounted {
+                dir: drive_dir(&plugin.manifest.id),
+            });
+        }
         let run_id = format!("{}-{}", plugin.manifest.id, &crate::accounts::nonce()[..8]);
         let _ = events.send(PluginRunEvent::Launched {
             session: session.clone(),
@@ -2536,6 +2572,47 @@ mod tests {
             }
             self.inner.sleep(duration, cancel)
         }
+    }
+
+    #[test]
+    fn a_run_with_drive_waits_for_consent_then_mounts() {
+        let (cfg, _) = MockConfig::headless(MockScenario::single());
+        let m = MockBackend::new(cfg);
+        let mut spec = m.plugin_run_template("llama-cpp").unwrap();
+        spec.inputs.insert(
+            "repo".into(),
+            crate::plugins::InputValue::Text("unsloth/Qwen3-0.6B-GGUF".into()),
+        );
+        spec.drive = true;
+        let (tx, rx) = mpsc::channel();
+        let watcher = {
+            let m = m.clone();
+            std::thread::spawn(move || {
+                let mut seen = Vec::new();
+                for event in rx {
+                    if matches!(event, PluginRunEvent::DriveConsentNeeded { .. }) {
+                        m.confirm_drive_consent();
+                    }
+                    seen.push(event);
+                }
+                seen
+            })
+        };
+        let out = m.run_plugin(spec, tx, &nc()).unwrap();
+        assert_eq!(out.status.state, crate::vm::RunState::Ready);
+        let seen = watcher.join().unwrap();
+        let mounted = seen
+            .iter()
+            .position(|e| matches!(e, PluginRunEvent::DriveMounted { .. }))
+            .expect("mounted");
+        let launched = seen
+            .iter()
+            .position(|e| matches!(e, PluginRunEvent::Launched { .. }))
+            .expect("launched");
+        assert!(
+            mounted < launched,
+            "Drive is mounted before the script starts"
+        );
     }
 
     #[test]
