@@ -376,6 +376,12 @@ def cmd_drivemount(state_path, args):
     path = [a for a in args if not a.startswith("-") and a != session][-1:] or ["/content/drive"]
     s, ep, a = lookup(state_path, name, session)
     out("[colab] Mounting Google Drive to '%s' on %s..." % (path[0], session))
+    lost = s["knobs"].get("drive_conn_lost") or 0
+    if lost > 0:
+        s["knobs"]["drive_conn_lost"] = lost - 1
+        fc.save_server(s)
+        err("Traceback (most recent call last):\nRuntimeError: Connection was lost.")
+        return 1
     if not a.get("drive_granted"):
         out("\n[colab] REQUIRED: Google Drive Authorization needed.\nPlease visit:\n\n%s\n" % DRIVE_CONSENT_URL)
         sys.stdout.write("Press Enter after you have granted access... ")

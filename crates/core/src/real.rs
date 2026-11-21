@@ -473,10 +473,11 @@ const COPY_DEFAULT_STATE: &str = r#"src="$HOME/.config/colab-cli/sessions.json"
 umask 077
 mkdir -p -- "$(dirname -- "$1")" && cp -- "$src" "$1""#;
 const SLOT_TIMEOUT: Duration = Duration::from_secs(5);
-/// Times the plugin script's launch is sent when the connection to the runtime is lost.
-const LAUNCH_ATTEMPTS: u32 = 3;
-/// Wait before sending a launch again.
-const LAUNCH_RETRY_DELAY: Duration = Duration::from_secs(3);
+/// Times a step that is safe to repeat (the plugin script's launch, the Drive mount) is tried
+/// when the connection to the runtime is lost.
+const CONNECTION_ATTEMPTS: u32 = 3;
+/// Wait before trying such a step again.
+const RETRY_DELAY: Duration = Duration::from_secs(3);
 
 impl RealBackend {
     /// Loads app-side files and removes what an earlier run left in the plugin staging
@@ -2227,18 +2228,34 @@ impl RealBackend {
         cancel: &CancelToken,
     ) -> Result<()> {
         let (_g, cli, state) = self.inner.cli_for(account, cancel)?;
-        self.inner.drive_consent.store(false, Ordering::SeqCst);
-        cli.drive_mount(
-            &state,
-            session,
-            &mut |url| {
-                let _ = events.send(PluginRunEvent::DriveConsentNeeded {
-                    url: url.to_owned(),
-                });
-            },
-            &|| self.inner.drive_consent.swap(false, Ordering::SeqCst),
-            cancel,
-        )
+        let mut attempt = 1;
+        loop {
+            self.inner.drive_consent.store(false, Ordering::SeqCst);
+            let mounted = cli.drive_mount(
+                &state,
+                session,
+                &mut |url| {
+                    let _ = events.send(PluginRunEvent::DriveConsentNeeded {
+                        url: url.to_owned(),
+                    });
+                },
+                &|| self.inner.drive_consent.swap(false, Ordering::SeqCst),
+                cancel,
+            );
+            match mounted {
+                // Mounting again is harmless: a mounted Drive reports "already mounted".
+                Err(e) if e.kind == ErrorKind::ConnectionLost && attempt < CONNECTION_ATTEMPTS => {
+                    attempt += 1;
+                    let _ = events.send(PluginRunEvent::Log {
+                        lines: vec![format!(
+                            "[colab-playground] the connection was lost while mounting Google Drive; trying again ({attempt} of {CONNECTION_ATTEMPTS})"
+                        )],
+                    });
+                    self.inner.cfg.clock.sleep(RETRY_DELAY, cancel)?;
+                }
+                other => return other,
+            }
+        }
     }
 
     /// Runs the plugin on `session`, then scrubs the CLI history once more,
@@ -2306,14 +2323,14 @@ impl RealBackend {
                 Ok(_) => break,
                 // The cell may or may not have run. Sending it again is safe: a launch for
                 // a run id whose script is alive starts nothing.
-                Err(e) if e.kind == ErrorKind::ConnectionLost && attempt < LAUNCH_ATTEMPTS => {
+                Err(e) if e.kind == ErrorKind::ConnectionLost && attempt < CONNECTION_ATTEMPTS => {
                     attempt += 1;
                     let _ = events.send(PluginRunEvent::Log {
                         lines: vec![format!(
-                            "[colab-playground] the connection was lost while starting the script; trying again ({attempt} of {LAUNCH_ATTEMPTS})"
+                            "[colab-playground] the connection was lost while starting the script; trying again ({attempt} of {CONNECTION_ATTEMPTS})"
                         )],
                     });
-                    self.inner.cfg.clock.sleep(LAUNCH_RETRY_DELAY, cancel)?;
+                    self.inner.cfg.clock.sleep(RETRY_DELAY, cancel)?;
                 }
                 Err(e) => return Err(e),
             }

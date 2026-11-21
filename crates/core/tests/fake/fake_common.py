@@ -48,7 +48,8 @@ DEFAULT_KNOBS = {
     "watchdog_start_fails": False,  # a started watchdog exits at once
     "keyring_locked": False,        # keyring reads fail
     "cli_api_broken": False,        # colab_cli.client cannot be imported
-    "drive_denied": False,          # Drive consent is "granted" but the mount still fails
+    "drive_denied": False,
+    "drive_conn_lost": 0,           # drivemount calls that lose their connection first          # Drive consent is "granted" but the mount still fails
     "exec_conn_lost": None,         # {"code_has": "...", "times": n, "after_run": bool}: that
                                     # exec loses its connection n times
     "exec_hang": None,              # {"code_has": "...", "after": "error" | "result"}: that exec

@@ -931,6 +931,22 @@ fn drive_is_mounted_after_consent_and_its_folder_reaches_the_script() {
             .any(|e| matches!(e, PluginRunEvent::DriveMounted { .. }))
     );
 
+    // A mount that loses its connection is tried again.
+    let f = fixture();
+    f.adopt_alice();
+    f.knob("drive_conn_lost", json!(1));
+    let (result, events) = run_with_drive(&f, None);
+    assert_eq!(result.unwrap().status.state, RunState::Ready);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, PluginRunEvent::Log { lines }
+        if lines.iter().any(|l| l.contains("mounting Google Drive; trying again"))))
+    );
+    f.knob("drive_conn_lost", json!(3));
+    let (result, _) = run_with_drive(&f, None);
+    assert!(result.unwrap_err().is(ErrorKind::ConnectionLost));
+
     // A mount that fails after the consent fails the run before the script starts.
     let f = fixture();
     f.adopt_alice();
