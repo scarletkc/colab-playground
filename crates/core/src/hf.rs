@@ -46,6 +46,43 @@ pub fn search_url(base: &str, query: &str, limit: u32) -> String {
     )
 }
 
+/// Publishers whose GGUF files are made by the llama.cpp project itself, so they load in the
+/// llama.cpp builds the app runs. Other publishers' files sometimes target other software.
+pub const OFFICIAL_OWNERS: &[&str] = &["ggml-org"];
+
+/// Official repositories put first in a search, at most.
+pub const OFFICIAL_RESULTS: u32 = 3;
+
+pub fn is_official(repo: &str) -> bool {
+    repo.split('/')
+        .next()
+        .is_some_and(|owner| OFFICIAL_OWNERS.contains(&owner))
+}
+
+/// A search among `owner`'s GGUF repositories. A query written as `owner/name` searches for
+/// `name`, so pasting another publisher's repository still finds the official one.
+pub fn official_search_url(base: &str, owner: &str, query: &str, limit: u32) -> String {
+    let name = query.trim().rsplit('/').next().unwrap_or_default();
+    format!(
+        "{base}/api/models?author={owner}&search={}&filter=gguf&sort=downloads&direction=-1&limit={}",
+        encode_query(name),
+        limit.clamp(1, 100)
+    )
+}
+
+/// `official` first, then the rest of `general` without repeating any, at most `limit`.
+pub fn official_first(official: Vec<HfModel>, general: Vec<HfModel>, limit: u32) -> Vec<HfModel> {
+    let mut out: Vec<HfModel> = Vec::new();
+    let (first, rest): (Vec<_>, Vec<_>) = general.into_iter().partition(|m| is_official(&m.id));
+    for model in official.into_iter().chain(first).chain(rest) {
+        if !out.iter().any(|seen| seen.id == model.id) {
+            out.push(model);
+        }
+    }
+    out.truncate(limit as usize);
+    out
+}
+
 pub fn tree_url(base: &str, repo: &str) -> String {
     format!("{base}/api/models/{repo}/tree/main?recursive=true")
 }
@@ -116,12 +153,25 @@ impl HfClient {
         Ok(resp.body)
     }
 
-    /// Searches GGUF models, most downloaded first.
+    /// Searches GGUF models: official ones ([`OFFICIAL_OWNERS`]) first, then the rest, most
+    /// downloaded first. The official ones are looked up on their own, since a popular model
+    /// has more repackagings than fit in `limit`; when that lookup fails the rest still shows.
     pub fn search(&self, query: &str, limit: u32) -> Result<Vec<HfModel>> {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
-        parse_search(&self.get(&search_url(&self.base, query, limit))?)
+        let general = parse_search(&self.get(&search_url(&self.base, query, limit))?)?;
+        let official = OFFICIAL_OWNERS
+            .iter()
+            .flat_map(|owner| {
+                let url = official_search_url(&self.base, owner, query, OFFICIAL_RESULTS);
+                self.get(&url)
+                    .and_then(|body| parse_search(&body))
+                    .unwrap_or_default()
+            })
+            .filter(|model| is_official(&model.id))
+            .collect();
+        Ok(official_first(official, general, limit))
     }
 
     pub fn gguf_files(&self, repo: &str) -> Result<GgufListing> {
@@ -185,6 +235,50 @@ mod tests {
         assert_eq!(files.len(), 2);
         assert_eq!(group(&files).variants[0].size, 3000);
         assert!(c.gguf_files("not valid").is_err());
+    }
+
+    fn model(id: &str) -> HfModel {
+        HfModel {
+            id: id.into(),
+            downloads: 0,
+            likes: 0,
+            gated: false,
+        }
+    }
+
+    #[test]
+    fn official_repositories_come_first_once() {
+        let ids = |models: Vec<HfModel>| models.into_iter().map(|m| m.id).collect::<Vec<_>>();
+        let general = vec![
+            model("unsloth/M-GGUF"),
+            model("ggml-org/M-GGUF"),
+            model("a/M-GGUF"),
+            model("b/M-GGUF"),
+        ];
+        let official = vec![model("ggml-org/M-GGUF"), model("ggml-org/M-Small-GGUF")];
+        assert_eq!(
+            ids(official_first(official, general.clone(), 4)),
+            [
+                "ggml-org/M-GGUF",
+                "ggml-org/M-Small-GGUF",
+                "unsloth/M-GGUF",
+                "a/M-GGUF"
+            ]
+        );
+        assert_eq!(
+            ids(official_first(Vec::new(), general, 8))[..2],
+            ["ggml-org/M-GGUF", "unsloth/M-GGUF"],
+            "an official one in the general results moves up too"
+        );
+        assert!(
+            is_official("ggml-org/x") && !is_official("ggml-orgx/y") && !is_official("x/ggml-org")
+        );
+        let url = official_search_url(HF_BASE, "ggml-org", " unsloth/Qwen3 8B ", 3);
+        assert!(
+            url.contains("author=ggml-org")
+                && url.contains("search=Qwen3%208B")
+                && url.contains("limit=3")
+        );
     }
 
     #[test]

@@ -1297,4 +1297,5 @@ pub(super) const MESSAGES: Messages = &[
     (DEPLOYMENT_AGAIN, "Deploy again"),
     (DEPLOYMENT_EXISTING, "On a running session"),
     (DEPLOYMENT_DRIVE, "Google Drive"),
+    (HF_RESULT_OFFICIAL, "Official llama.cpp"),
 ];

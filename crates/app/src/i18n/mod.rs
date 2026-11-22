@@ -694,6 +694,7 @@ catalog_keys! {
     RUN_DRIVE_CONTINUE => "app.run.drive.continue",
     RUN_DRIVE_MOUNTED => "app.run.drive.mounted",
     NAV_DEPLOYMENTS => "app.nav.deployments",
+    HF_RESULT_OFFICIAL => "app.hf.result_official",
     DEPLOYMENTS_EMPTY => "app.deployments.empty",
     DEPLOYMENTS_HINT => "app.deployments.hint",
     DEPLOYMENT_AGAIN => "app.deployments.again",

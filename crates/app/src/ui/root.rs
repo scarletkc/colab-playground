@@ -151,6 +151,16 @@ impl RootView {
                 this.state
                     .update(cx, |state, cx| state.system_appearance_changed(mode, cx));
             }),
+            // Enter in the Hugging Face search field searches, like its Search button.
+            cx.subscribe(
+                &inputs.hf_query,
+                |this, input, event: &ely_gpui_component::forms::InputEvent, cx| {
+                    if *event == ely_gpui_component::forms::InputEvent::Submit {
+                        let text = input.read(cx).text().to_owned();
+                        this.state.update(cx, |state, cx| state.search_hf(text, cx));
+                    }
+                },
+            ),
         ];
         let mode = Mode::from(window.appearance());
         state.update(cx, |state, cx| state.system_appearance_changed(mode, cx));

@@ -1088,6 +1088,7 @@ fn catalog() -> Vec<(&'static str, f64)> {
     vec![
         ("unsloth/Qwen3-0.6B-GGUF", 0.6),
         ("unsloth/Qwen3-8B-GGUF", 8.2),
+        ("ggml-org/Qwen3-8B-GGUF", 8.2),
         ("bartowski/ScarletKc_ScarletKc-2.0-GGUF", 27.0),
         ("unsloth/gpt-oss-20b-GGUF", 20.9),
         ("bartowski/Llama-3.3-70B-Instruct-GGUF", 70.6),
@@ -2008,10 +2009,9 @@ impl Backend for MockBackend {
         if q.is_empty() {
             return Ok(vec![]);
         }
-        Ok(catalog()
+        let found: Vec<HfModel> = catalog()
             .into_iter()
             .filter(|(r, _)| r.to_ascii_lowercase().contains(&q))
-            .take(limit as usize)
             .enumerate()
             .map(|(i, (r, _))| HfModel {
                 id: r.into(),
@@ -2019,7 +2019,8 @@ impl Backend for MockBackend {
                 likes: 500 / (i as u64 + 1),
                 gated: false,
             })
-            .collect())
+            .collect();
+        Ok(crate::hf::official_first(Vec::new(), found, limit))
     }
 
     fn hf_files(&self, repo: &str, cancel: &CancelToken) -> Result<GgufListing> {

@@ -1093,4 +1093,5 @@ pub(super) const MESSAGES: Messages = &[
     (DEPLOYMENT_AGAIN, "再次部署"),
     (DEPLOYMENT_EXISTING, "在已有会话上"),
     (DEPLOYMENT_DRIVE, "Google Drive"),
+    (HF_RESULT_OFFICIAL, "llama.cpp 官方"),
 ];

@@ -104,6 +104,38 @@ fn quick_deploy_runs_to_a_ready_endpoint(cx: &mut TestAppContext) {
     );
 }
 
+#[gpui::test]
+fn enter_searches_and_official_repositories_come_first(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
+    open_deploy_form(&mut app);
+    app.fill(|inputs| inputs.hf_query.clone(), "qwen3");
+    // Enter in the field: the text input reports Submit.
+    let field = app.read_root(|root, _| root.inputs().hf_query.clone());
+    app.cx.update(|_, cx| {
+        field.update(cx, |_, cx| {
+            cx.emit(ely_gpui_component::forms::InputEvent::Submit)
+        })
+    });
+    app.settle();
+    let ids: Vec<String> = app.read(|state, _| {
+        state
+            .run_form()
+            .and_then(|form| form.hf.results.ready().cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|model| model.id)
+            .collect()
+    });
+    assert_eq!(
+        ids.first().map(String::as_str),
+        Some("ggml-org/Qwen3-8B-GGUF"),
+        "{ids:?}"
+    );
+    assert!(ids.iter().any(|id| id == REPO), "{ids:?}");
+    assert!(app.shown("hf-official ggml-org/Qwen3-8B-GGUF"));
+    assert!(!app.shown(&format!("hf-official {REPO}")));
+}
+
 /// The run's log as the app keeps it: how many lines, the oldest and the newest.
 fn log_ends(app: &mut TestApp<'_>) -> (usize, String, String) {
     app.read(|state, _| {

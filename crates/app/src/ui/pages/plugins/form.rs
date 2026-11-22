@@ -6,11 +6,13 @@
 use std::rc::Rc;
 
 use colab_playground_core::{
+    hf,
     plugins::{Capability, InputKind, InputSpec, InputValue, PluginInfo},
     quant::{self, FitInput, GgufListing},
 };
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
+    data_display::{Badge, Tone},
     feedback::InlineMessage,
     forms::{Choice, Input, Select, Switch},
     layout::{Card, CardHeader, Page, Well},
@@ -296,15 +298,28 @@ fn hf_lookup(
                         SharedString::from(format!("hf-result-{}", model.id)),
                         model.id.clone(),
                     )
-                    .trailing(Caption::new(tr_args(
-                        cx,
-                        if model.gated {
-                            keys::HF_RESULT_GATED
-                        } else {
-                            keys::HF_RESULT
-                        },
-                        &[("downloads", &format::number(cx, model.downloads as f64, 0))],
-                    )))
+                    .trailing(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .children(hf::is_official(&model.id).then(|| {
+                                tagged(
+                                    format!("hf-official {}", model.id),
+                                    Badge::new(tr(cx, keys::HF_RESULT_OFFICIAL))
+                                        .tone(Tone::Success),
+                                )
+                            }))
+                            .child(Caption::new(tr_args(
+                                cx,
+                                if model.gated {
+                                    keys::HF_RESULT_GATED
+                                } else {
+                                    keys::HF_RESULT
+                                },
+                                &[("downloads", &format::number(cx, model.downloads as f64, 0))],
+                            ))),
+                    )
                     .on_click(move |_, _, cx| {
                         let (id, repo) = (id.clone(), repo.clone());
                         handle.update(cx, |state, cx| state.choose_hf_repo(id, repo, cx))
