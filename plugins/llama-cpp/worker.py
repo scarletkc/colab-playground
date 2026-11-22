@@ -78,6 +78,8 @@ BUDGET_FRACTION = 0.97
 FALLBACK_KV_BYTES_PER_TOKEN = 128 * 1024
 FALLBACK_CTX = 32768
 MIN_AUTO_CTX = 8192
+AUTO_CTX_CAP = 131072  # an automatic context goes no higher; a context the user sets is used as is
+COMPUTE_MIB_PER_1K_CTX = 8.0  # compute buffers grow with the context (a margin, not a measurement)
 KV_FACTOR = {"f16": 1.0, "q8_0": 34.0 / 64.0, "q4_0": 18.0 / 64.0}
 FULL_PRECISION = ("F16", "BF16", "F32")
 LOW_BIT_PREFIXES = ("Q3", "Q2", "Q1", "IQ3", "IQ2", "IQ1", "TQ")
@@ -150,13 +152,14 @@ def is_low_bit(v):
 def estimate_mib(weights, mmproj, kv_bytes_per_token, ctx, kv):
     mib = 1024.0 * 1024.0
     w = weights / mib
-    return w + mmproj / mib + kv_bytes_per_token * KV_FACTOR[kv] * ctx / mib + RESERVE_MIB + COMPUTE_MIB + COMPUTE_FRACTION * w
+    return (w + mmproj / mib + kv_bytes_per_token * KV_FACTOR[kv] * ctx / mib + RESERVE_MIB + COMPUTE_MIB
+            + COMPUTE_FRACTION * w + COMPUTE_MIB_PER_1K_CTX * ctx / 1024)
 
 
 def ctx_ladder(inp):
     if inp["ctx"] > 0:
         return [inp["ctx"]], inp["ctx"]
-    mx = inp.get("model_ctx") or FALLBACK_CTX
+    mx = min(inp.get("model_ctx") or FALLBACK_CTX, AUTO_CTX_CAP)
     ladder, c = [mx], mx
     while c // 2 >= MIN_AUTO_CTX:
         c //= 2
@@ -625,23 +628,49 @@ def start_server(bindir, model, mm, alias, ctx, kv, mtp):
 SERVER_PROGRESS_EVERY = 15  # seconds between updates of the "server" stage while it loads
 
 
-def last_server_line():
-    """The last line of the server's log that says something (llama.cpp prints rows of dots
-    while it loads tensors), redacted and shortened."""
+def server_lines(last=40):
+    """The server log's last lines with something to say: llama.cpp's time, level and component
+    prefix ("0.04.519.222 E srv    load_model: ...") taken off, rows of dots dropped, redacted."""
     try:
         with open(SERVER_LOG, errors="replace") as fh:
-            lines = fh.readlines()[-40:]
+            lines = fh.readlines()
     except OSError:
-        return ""
-    for line in reversed(lines):
-        # llama.cpp prefixes its lines with a time, a level letter and often a component
-        # ("0.04.519.222 I srv    load_model: ..."); only the message helps the reader.
+        return []
+    out = []
+    for line in lines[-last:] if last else lines:
         line = re.sub(r"^[\d.]+\s+[A-Z]\s+", "", line.strip())
-        line = re.sub(r"^(srv|slot|que|main)\s+", "", line)
+        line = re.sub(r"^(srv|slot|que|main|cmn)\s+", "", line)
         if line.strip(". "):
-            line = redact(line)
-            return line if len(line) <= 140 else line[:137] + "..."
-    return ""
+            out.append(redact(line))
+    return out
+
+
+def last_server_line():
+    lines = server_lines()
+    if not lines:
+        return ""
+    line = lines[-1]
+    return line if len(line) <= 140 else line[:137] + "..."
+
+
+# What llama.cpp logs when it cannot read a model file at all: a newer architecture than this
+# build knows, or a file made for other software. Starting it again with other settings cannot help.
+INCOMPATIBLE_MODEL = ("check_tensor_dims", "unknown model architecture", "wrong number of tensors",
+                      "unknown pre-tokenizer type", "invalid magic", "unsupported model")
+
+
+# What llama.cpp logs when the GPU cannot hold what it needs (weights, KV cache, compute buffers).
+OUT_OF_MEMORY = ("failed to allocate", "out of memory", "cudaMalloc failed", "unable to allocate")
+
+
+def out_of_memory():
+    """The server log's line saying GPU memory ran out, or None."""
+    return next((line for line in server_lines(last=None) if any(sign in line for sign in OUT_OF_MEMORY)), None)
+
+
+def model_incompatible():
+    """The server log's line saying the model file cannot be read, or None."""
+    return next((line for line in server_lines(last=None) if any(sign in line for sign in INCOMPATIBLE_MODEL)), None)
 
 
 def elapsed(seconds):
@@ -674,11 +703,7 @@ def wait_healthy(p, label, timeout=1200):
 
 
 def log_tail(n=6):
-    try:
-        with open(SERVER_LOG, errors="replace") as fh:
-            return redact(" | ".join(line.strip() for line in fh.readlines()[-n:]))
-    except OSError:
-        return ""
+    return " | ".join(server_lines()[-n:])
 
 
 def chat(max_tokens, content):
@@ -776,6 +801,50 @@ def cpu_plan(variants, kept=()):
             "reason": "no GPU: CPU run", "estimate_mib": 0, "budget_mib": 0}
 
 
+def start_with_fallbacks(bindir, model, mm, alias, ctx, kv_opts, mtp_opts, tag):
+    """Starts llama-server and returns the (kv, mtp, ctx) it runs with. A setting that fails is
+    followed by the next; a model file llama.cpp cannot read fails at once; when GPU memory runs
+    out, the leanest settings are tried and then an automatic context is halved."""
+    # Settings to try, leanest last: KV f16 before q8_0, MTP on before off.
+    combos = [(m, k) for m in mtp_opts for k in kv_opts]
+    i, ok = 0, False
+    while i < len(combos):
+        mtp, kv = combos[i]
+        label = "starting llama-server (KV %s, MTP %s, context %d%s)" % (
+            kv, "on" if mtp else "off", ctx, ", reading the model from Google Drive" if DRIVE_DIR else "")
+        status("running", "server", label)
+        p = start_server(bindir, model, mm, alias, ctx, kv, mtp)
+        if wait_healthy(p, label):
+            ok = True
+            break
+        reason = model_incompatible()
+        if reason:
+            fail("llama.cpp %s cannot read this model file: it may be made for other software (some "
+                 "repositories say which files work with llama.cpp), or need a newer llama.cpp. Pick "
+                 "another repository, such as the one from ggml-org. llama-server said: %s"
+                 % (tag, reason))
+        oom = out_of_memory()
+        print("start failed: %s" % log_tail(), flush=True)
+        kill_server()
+        if not oom:
+            i += 1
+            continue
+        # GPU memory ran out: the estimate was too low for this model. Go straight to the
+        # leanest settings, then halve an automatic context until it fits.
+        if i < len(combos) - 1:
+            i = len(combos) - 1
+        elif CTX == 0 and ctx // 2 >= MIN_AUTO_CTX:
+            ctx //= 2
+            print("GPU memory ran out; trying a context of %d" % ctx, flush=True)
+        else:
+            fail("GPU memory ran out while starting llama-server, even with a context of %d. Set a smaller "
+                 "context length, pick a smaller quantisation, or ask for a GPU with more memory. "
+                 "llama-server said: %s" % (ctx, oom))
+    if not ok:
+        fail("llama-server did not start: %s" % log_tail())
+    return kv, mtp, ctx
+
+
 def main():
     os.makedirs(RUN_DIR, exist_ok=True)
     signal.signal(signal.SIGTERM, on_sigterm)
@@ -843,22 +912,8 @@ def main():
     if port_busy(PORT):
         fail("port %d is already in use on the VM; choose another port" % PORT)
 
-    ok, kv, mtp = False, kv_opts[0], False
-    for mtp in mtp_opts:
-        for kv in kv_opts:
-            label = "starting llama-server (KV %s, MTP %s%s)" % (kv, "on" if mtp else "off",
-                                                                 ", reading the model from Google Drive" if DRIVE_DIR else "")
-            status("running", "server", label)
-            p = start_server(bindir, model, mm, alias, choice["ctx"], kv, mtp)
-            if wait_healthy(p, label):
-                ok = True
-                break
-            print("start failed: %s" % log_tail(), flush=True)
-            kill_server()
-        if ok:
-            break
-    if not ok:
-        fail("llama-server did not start: %s" % log_tail())
+    kv, mtp, choice["ctx"] = start_with_fallbacks(bindir, model, mm, alias, choice["ctx"], kv_opts, mtp_opts,
+                                                  llama["tag"])
 
     used = gpu_used_mib()
     if gpu and used < 1024:

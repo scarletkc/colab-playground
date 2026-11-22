@@ -57,6 +57,13 @@ pub const FALLBACK_KV_BYTES_PER_TOKEN: u64 = 128 * 1024;
 pub const FALLBACK_CTX: u32 = 32_768;
 /// Smallest context the `ctx = 0` ladder goes down to.
 pub const MIN_AUTO_CTX: u32 = 8_192;
+/// Largest context the `ctx = 0` ladder starts from, whatever the model allows; a context the
+/// user sets is used as is.
+pub const AUTO_CTX_CAP: u32 = 131_072;
+/// Compute buffers per 1,024 tokens of context, on top of the fixed part: llama.cpp's buffers
+/// grow with the context, which a fixed estimate missed for very long ones. A margin, not a
+/// measurement.
+pub const COMPUTE_MIB_PER_1K_CTX: f64 = 8.0;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GgufFile {
@@ -299,7 +306,12 @@ pub fn estimate_mib(
     let mib = |b: f64| b / (1024.0 * 1024.0);
     let w = mib(weights as f64);
     let kv_mib = mib(kv_bytes_per_token as f64 * kv.factor() * f64::from(ctx));
-    w + mib(mmproj as f64) + kv_mib + RESERVE_MIB + COMPUTE_MIB + COMPUTE_FRACTION * w
+    w + mib(mmproj as f64)
+        + kv_mib
+        + RESERVE_MIB
+        + COMPUTE_MIB
+        + COMPUTE_FRACTION * w
+        + COMPUTE_MIB_PER_1K_CTX * f64::from(ctx) / 1024.0
 }
 
 fn budget(vram_mib: u32) -> f64 {
@@ -310,7 +322,11 @@ fn ctx_ladder(input: &FitInput) -> (Vec<u32>, u32) {
     if input.ctx > 0 {
         return (vec![input.ctx], input.ctx);
     }
-    let max = input.model_ctx.filter(|c| *c > 0).unwrap_or(FALLBACK_CTX);
+    let max = input
+        .model_ctx
+        .filter(|c| *c > 0)
+        .unwrap_or(FALLBACK_CTX)
+        .min(AUTO_CTX_CAP);
     let mut v = vec![max];
     let mut c = max;
     while c / 2 >= MIN_AUTO_CTX {

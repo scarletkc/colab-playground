@@ -1,36 +1,36 @@
 [
   {
-    "name": "80 GB A100, max context: Q8_0 with f16 KV",
+    "name": "80 GB A100, context capped at 128k: Q8_0 with f16 KV",
     "files": [["M-BF16-00001-of-00002.gguf", 27350000000], ["M-BF16-00002-of-00002.gguf", 27350000000],
               ["M-Q8_0.gguf", 29100000000], ["M-Q6_K.gguf", 22500000000], ["M-Q5_K_M.gguf", 19500000000],
               ["M-Q4_K_M.gguf", 16800000000], ["M-IQ2_M.gguf", 9900000000], ["mmproj-M-f16.gguf", 900000000]],
     "input": {"vram_mib": 81920, "ctx": 0, "model_ctx": 262144, "kv_bytes_per_token": 65536, "mmproj_bytes": 900000000, "kv": null},
     "quant": "auto",
-    "expect": {"quant": "Q8_0", "kv": "f16", "ctx": 262144}
+    "expect": {"quant": "Q8_0", "kv": "f16", "ctx": 131072}
   },
   {
-    "name": "40 GB A100, max context: Q6_K with q8_0 KV",
+    "name": "40 GB A100, context capped at 128k: Q8_0 with q8_0 KV",
     "files": [["M-BF16-00001-of-00002.gguf", 27350000000], ["M-BF16-00002-of-00002.gguf", 27350000000],
               ["M-Q8_0.gguf", 29100000000], ["M-Q6_K.gguf", 22500000000], ["M-Q5_K_M.gguf", 19500000000],
               ["M-Q4_K_M.gguf", 16800000000], ["M-IQ2_M.gguf", 9900000000], ["mmproj-M-f16.gguf", 900000000]],
     "input": {"vram_mib": 40960, "ctx": 0, "model_ctx": 262144, "kv_bytes_per_token": 65536, "mmproj_bytes": 900000000, "kv": null},
     "quant": "auto",
-    "expect": {"quant": "Q6_K", "kv": "q8_0", "ctx": 262144}
+    "expect": {"quant": "Q8_0", "kv": "q8_0", "ctx": 131072}
   },
   {
-    "name": "16 GB T4: only the low-bit quant fits, context halved",
+    "name": "16 GB T4: only the low-bit quant fits, context reduced",
     "files": [["M-Q8_0.gguf", 29100000000], ["M-Q6_K.gguf", 22500000000], ["M-Q5_K_M.gguf", 19500000000],
               ["M-Q4_K_M.gguf", 16800000000], ["M-IQ2_M.gguf", 9900000000]],
     "input": {"vram_mib": 15360, "ctx": 0, "model_ctx": 262144, "kv_bytes_per_token": 65536, "mmproj_bytes": 900000000, "kv": null},
     "quant": "auto",
-    "expect": {"quant": "IQ2_M", "kv": "q8_0", "ctx": 65536}
+    "expect": {"quant": "IQ2_M", "kv": "f16", "ctx": 32768}
   },
   {
-    "name": "fixed Q8_0 on 40 GB with ctx 0 halves the context",
+    "name": "fixed Q8_0 on 40 GB with ctx 0 takes q8_0 KV at the capped context",
     "files": [["M-Q8_0.gguf", 29100000000], ["M-Q6_K.gguf", 22500000000]],
     "input": {"vram_mib": 40960, "ctx": 0, "model_ctx": 262144, "kv_bytes_per_token": 65536, "mmproj_bytes": 900000000, "kv": null},
     "quant": "Q8_0",
-    "expect": {"quant": "Q8_0", "kv": "f16", "ctx": 131072}
+    "expect": {"quant": "Q8_0", "kv": "q8_0", "ctx": 131072}
   },
   {
     "name": "fixed Q8_0 that cannot fit lists the quants that would",
@@ -40,7 +40,7 @@
     "input": {"vram_mib": 40960, "ctx": 262144, "model_ctx": 262144, "kv_bytes_per_token": 65536, "mmproj_bytes": 900000000, "kv": "f16"},
     "quant": "Q8_0",
     "expect": null,
-    "expect_error_fitting": ["Q5_K_M", "Q4_K_M", "IQ2_M"]
+    "expect_error_fitting": ["Q4_K_M", "IQ2_M"]
   },
   {
     "name": "unknown GGUF header falls back to 32k context and 128 KiB/token",

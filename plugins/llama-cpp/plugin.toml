@@ -1,6 +1,6 @@
 api = 1
 id = "llama-cpp"
-version = "0.2.2"
+version = "0.2.3"
 # Optional: a saved Hugging Face token is passed for private / gated repos.
 needs = ["hf_token", "drive"]
 
@@ -71,11 +71,11 @@ zh-TW = "上下文長度"
 ja = "コンテキスト長"
 ko = "컨텍스트 길이"
 [inputs.help]
-en = "0 = the model's maximum, reduced automatically if it does not fit."
-zh-CN = "0 = 模型最大值，放不下时自动减小。"
-zh-TW = "0 = 模型最大值，放不下時自動減小。"
-ja = "0 = モデルの最大値。収まらない場合は自動で小さくします。"
-ko = "0 = 모델의 최댓값. 들어가지 않으면 자동으로 줄입니다."
+en = "0 = automatic: the model's maximum up to 131072, reduced if it does not fit. Set a number for a longer context."
+zh-CN = "0 = 自动：取模型最大值，但不超过 131072，放不下时再自动减小。需要更长的上下文请填具体数值。"
+zh-TW = "0 = 自動：取模型最大值，但不超過 131072，放不下時再自動減小。需要更長的上下文請填具體數值。"
+ja = "0 = 自動：モデルの最大値（上限 131072）。収まらない場合は自動で小さくします。より長いコンテキストには数値を指定してください。"
+ko = "0 = 자동: 모델의 최댓값(최대 131072). 들어가지 않으면 자동으로 줄입니다. 더 긴 컨텍스트는 숫자로 지정하세요."
 
 [[inputs]]
 id = "port"
