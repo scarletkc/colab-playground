@@ -124,6 +124,19 @@ fn seconds(time: SystemTime) -> u64 {
         .unwrap_or_default()
 }
 
+/// `items` under their titles, each group where its first item stood and keeping the order
+/// its items had.
+pub fn by_title<T>(items: impl IntoIterator<Item = (String, T)>) -> Vec<(String, Vec<T>)> {
+    let mut groups: Vec<(String, Vec<T>)> = Vec::new();
+    for (title, item) in items {
+        match groups.iter_mut().find(|(seen, _)| *seen == title) {
+            Some((_, members)) => members.push(item),
+            None => groups.push((title, vec![item])),
+        }
+    }
+    groups
+}
+
 /// The deployments file in the config directory (`None`: kept in memory only).
 #[derive(Clone, Debug)]
 pub struct DeploymentStore {
@@ -285,5 +298,19 @@ mod tests {
         fs::write(dir.path().join(DEPLOYMENTS_FILE), "{ not json").unwrap();
         assert!(store.load().is_empty());
         assert!(DeploymentStore::new(None).save(&list).is_ok());
+    }
+
+    #[test]
+    fn deployments_of_one_model_sit_together_in_order() {
+        let items = [("b", 1), ("a", 2), ("b", 3), ("c", 4), ("a", 5)]
+            .map(|(title, n)| (title.to_owned(), n));
+        assert_eq!(
+            by_title(items),
+            [
+                ("b".to_owned(), vec![1, 3]),
+                ("a".to_owned(), vec![2, 5]),
+                ("c".to_owned(), vec![4]),
+            ]
+        );
     }
 }

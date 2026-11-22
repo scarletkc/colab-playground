@@ -1,5 +1,5 @@
-//! The Deployments page: every deployment started from the app, the most recently used first,
-//! to start again with the same settings ("Deploy again" opens the run form on the Plugins
+//! The Deployments page: every deployment started from the app under the model it served (its
+//! title), the most recently used first, to start again with the same settings ("Deploy again" opens the run form on the Plugins
 //! page) or to remove from the list.
 
 use colab_playground_core::plugins::{InputKind, InputValue, PluginInfo};
@@ -36,6 +36,11 @@ pub fn redeploy_selector(id: &str) -> String {
 }
 pub fn forget_deployment_selector(id: &str) -> String {
     format!("deployment-forget {id}")
+}
+
+/// Selector of the deployments of one model: `deployment-group <title>`.
+pub fn deployment_group_selector(title: &str) -> String {
+    format!("deployment-group {title}")
 }
 
 /// Selector of the line shown when nothing was deployed yet.
@@ -75,82 +80,105 @@ fn deployment_title(record: &Deployment, info: Option<&PluginInfo>, plugin_name:
 }
 
 fn list_card(state: &AppState, handle: &Entity<AppState>, cx: &App) -> AnyElement {
-    let theme = cx.theme();
-    let now = state
-        .backend_now()
-        .unwrap_or_else(std::time::SystemTime::now);
-    let rows = state.deployments().iter().map(|record| {
+    let groups = crate::deployments::by_title(state.deployments().iter().map(|record| {
         let info = state.plugin(&record.plugin);
         let plugin_name = info
             .map(|info| state.plugin_name(info))
             .unwrap_or_else(|| record.plugin.clone());
-        let usable = info.is_some_and(|info| info.enabled) && !state.is_running_plugin();
-        let mut details = vec![plugin_name.clone()];
-        details.push(match &record.hardware {
-            Some(hardware) => tr(cx, format::accelerator_key(hardware.accelerator)).to_string(),
-            None => tr(cx, keys::DEPLOYMENT_EXISTING).to_string(),
-        });
-        let used = std::time::UNIX_EPOCH + std::time::Duration::from_secs(record.last_used);
-        details.push(format::age(cx, used, now).to_string());
-        let mut title = div().flex().items_center().gap_2().min_w_0().child(
-            div()
-                .min_w_0()
-                .truncate()
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(deployment_title(record, info, &plugin_name)),
-        );
-        if record.drive {
-            title = title.child(Badge::new(tr(cx, keys::DEPLOYMENT_DRIVE)).tone(Tone::Info));
-        }
-        let again = {
-            let (handle, id) = (handle.clone(), record.id.clone());
-            Button::new(
-                SharedString::from(format!("deployment-again-{}", record.id)),
-                tr(cx, keys::DEPLOYMENT_AGAIN),
-            )
-            .size(ControlSize::Sm)
-            .icon(IconName::Rocket)
-            .disabled(!usable)
-            .on_click(move |_, _, cx| handle.update(cx, |state, cx| state.redeploy(&id, cx)))
-        };
-        let forget = {
-            let (handle, id) = (handle.clone(), record.id.clone());
-            Button::new(
-                SharedString::from(format!("deployment-forget-{}", record.id)),
-                tr(cx, keys::ACTION_REMOVE),
-            )
-            .variant(ButtonVariant::Ghost)
-            .size(ControlSize::Sm)
-            .on_click(move |_, _, cx| {
-                handle.update(cx, |state, cx| state.forget_deployment(&id, cx))
-            })
-        };
+        (deployment_title(record, info, &plugin_name), record)
+    }))
+    .into_iter()
+    .map(|(title, records)| {
+        let rows = records
+            .into_iter()
+            .map(|record| deployment_row(state, record, handle, cx));
         tagged(
-            deployment_selector(&record.id),
+            deployment_group_selector(&title),
             div()
                 .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_3()
-                .py_2()
+                .flex_col()
                 .child(
                     div()
-                        .flex_1()
-                        .min_w(theme.label_width())
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(title)
-                        .child(Caption::new(format::list(cx, &details))),
+                        .min_w_0()
+                        .truncate()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(title),
                 )
-                .child(tagged(redeploy_selector(&record.id), again))
-                .child(tagged(forget_deployment_selector(&record.id), forget)),
+                .child(List::new().divided().children(rows)),
         )
     });
     tagged(
         DEPLOYMENTS,
-        Card::new().child(List::new().divided().children(rows)),
+        Card::new().child(div().flex().flex_col().gap_4().children(groups)),
     )
     .w_full()
     .into_any_element()
+}
+
+/// One deployment under its model's heading: what it ran on and when, since the heading names
+/// the model.
+fn deployment_row(
+    state: &AppState,
+    record: &Deployment,
+    handle: &Entity<AppState>,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let theme = cx.theme();
+    let now = state
+        .backend_now()
+        .unwrap_or_else(std::time::SystemTime::now);
+    let info = state.plugin(&record.plugin);
+    let plugin_name = info
+        .map(|info| state.plugin_name(info))
+        .unwrap_or_else(|| record.plugin.clone());
+    let usable = info.is_some_and(|info| info.enabled) && !state.is_running_plugin();
+    let mut details = vec![plugin_name];
+    details.push(match &record.hardware {
+        Some(hardware) => tr(cx, format::accelerator_key(hardware.accelerator)).to_string(),
+        None => tr(cx, keys::DEPLOYMENT_EXISTING).to_string(),
+    });
+    let used = std::time::UNIX_EPOCH + std::time::Duration::from_secs(record.last_used);
+    details.push(format::age(cx, used, now).to_string());
+    let mut summary = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .min_w_0()
+        .child(Caption::new(format::list(cx, &details)));
+    if record.drive {
+        summary = summary.child(Badge::new(tr(cx, keys::DEPLOYMENT_DRIVE)).tone(Tone::Info));
+    }
+    let again = {
+        let (handle, id) = (handle.clone(), record.id.clone());
+        Button::new(
+            SharedString::from(format!("deployment-again-{}", record.id)),
+            tr(cx, keys::DEPLOYMENT_AGAIN),
+        )
+        .size(ControlSize::Sm)
+        .icon(IconName::Rocket)
+        .disabled(!usable)
+        .on_click(move |_, _, cx| handle.update(cx, |state, cx| state.redeploy(&id, cx)))
+    };
+    let forget = {
+        let (handle, id) = (handle.clone(), record.id.clone());
+        Button::new(
+            SharedString::from(format!("deployment-forget-{}", record.id)),
+            tr(cx, keys::ACTION_REMOVE),
+        )
+        .variant(ButtonVariant::Ghost)
+        .size(ControlSize::Sm)
+        .on_click(move |_, _, cx| handle.update(cx, |state, cx| state.forget_deployment(&id, cx)))
+    };
+    tagged(
+        deployment_selector(&record.id),
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_3()
+            .py_2()
+            .child(div().flex_1().min_w(theme.label_width()).child(summary))
+            .child(tagged(redeploy_selector(&record.id), again))
+            .child(tagged(forget_deployment_selector(&record.id), forget)),
+    )
 }

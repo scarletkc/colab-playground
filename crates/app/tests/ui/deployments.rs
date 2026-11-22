@@ -13,8 +13,8 @@ use colab_playground::{
     state::{DriveStep, PluginView, RunPhase},
     ui::pages::{
         deployments::{
-            DEPLOYMENTS, DEPLOYMENTS_EMPTY, deployment_selector, forget_deployment_selector,
-            redeploy_selector,
+            DEPLOYMENTS, DEPLOYMENTS_EMPTY, deployment_group_selector, deployment_selector,
+            forget_deployment_selector, redeploy_selector,
         },
         plugins::{RUN_DRIVE, RUN_DRIVE_MOUNTED, RUN_START},
     },
@@ -101,6 +101,10 @@ fn a_deployment_is_recorded_deployed_again_and_removed(cx: &mut TestAppContext) 
     assert_eq!(app.route(), Route::Deployments);
     assert!(app.shown(DEPLOYMENTS));
     assert!(app.shown(&deployment_selector(&record.id)));
+    assert!(
+        app.shown(&deployment_group_selector(REPO)),
+        "under its model"
+    );
 
     // Deploying again opens the form on the Plugins page with the same model and context, and
     // no key.
