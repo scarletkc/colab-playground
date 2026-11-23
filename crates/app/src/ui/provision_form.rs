@@ -24,7 +24,7 @@ pub fn field_selector(field: &str) -> String {
     format!("prov {field}")
 }
 
-/// The selector of the burn rate while it reads `value`.
+/// The burn rate's selector carries the value it draws, so a test can tell what the row reads.
 pub fn rate_selector(value: &str) -> String {
     format!("{} {value}", field_selector("rate"))
 }
