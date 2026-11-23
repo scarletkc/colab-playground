@@ -141,10 +141,14 @@ when changing either.
    that directory on `LD_LIBRARY_PATH` when it is started from a background process.
 3. **The latent decides the node.** `EmptyLatentImage` always makes 4 channels;
    Flux works on 16 and needs `EmptySD3LatentImage`.
-4. **One file is a whole checkpoint.** A single-file Flux checkpoint has the keys
-   `model.diffusion_model.*`, `text_encoders.*` and `vae.*`, which is what
-   `CheckpointLoaderSimple` looks for; a diffusers repository (the pieces in
-   `unet/`, `vae/`, `text_encoder/`) is not a checkpoint and cannot be loaded.
+4. **One file is a whole checkpoint.** `CheckpointLoaderSimple` wants the model,
+   the text encoders and the VAE in one file: the keys are `model.diffusion_model.*`,
+   `text_encoders.*` and `vae.*`. The original `flux1-schnell.safetensors` holds the
+   transformer alone (776 tensors, no text encoders, no VAE) and cannot be loaded as
+   a checkpoint; the all-in-one file is
+   `Comfy-Org/Flux-1-Schnell/flux1-schnell-fp8.safetensors` (1438 tensors). A
+   diffusers repository (the pieces in `unet/`, `vae/`, `text_encoder/`) is not a
+   checkpoint either.
 5. **The web editor holds a websocket open**, so the tunnel keeps one TCP connection
    to the server port while a browser tab is open. That is what tells an interactive
    session from an abandoned one when the idle rule has to decide.

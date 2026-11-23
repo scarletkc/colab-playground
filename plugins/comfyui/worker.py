@@ -28,6 +28,7 @@ import re
 import shlex
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -63,11 +64,20 @@ REPO_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 PRESETS = {
     "sd15": ("stable-diffusion-v1-5/stable-diffusion-v1-5", "v1-5-pruned-emaonly.safetensors", 20, 7.5, 512),
     "sdxl": ("stabilityai/stable-diffusion-xl-base-1.0", "sd_xl_base_1.0.safetensors", 30, 7.0, 1024),
-    # Single-file Flux checkpoint (gated: a saved Hugging Face token is
-    # needed), loaded by CheckpointLoaderSimple.
-    "flux-schnell": ("black-forest-labs/FLUX.1-schnell", "flux1-schnell.safetensors", 4, 1.0, 1024),
+    # The all-in-one Flux Schnell checkpoint: the model, the text encoders
+    # and the VAE in one file, which is what CheckpointLoaderSimple wants.
+    # The original black-forest-labs file holds the transformer alone, so it
+    # cannot be loaded as a checkpoint.
+    "flux-schnell": ("Comfy-Org/Flux-1-Schnell", "flux1-schnell-fp8.safetensors", 4, 1.0, 1024),
 }
 CUSTOM_DEFAULTS = (None, None, 20, 7.5, 512)  # steps, cfg, size
+
+# What a .safetensors file carries, by the prefixes the formats use. A
+# checkpoint needs all three parts; a file with the model alone is a
+# diffusion model, not a checkpoint.
+MODEL_PREFIXES = ("model.diffusion_model.", "model.", "double_blocks.", "single_blocks.")
+CLIP_PREFIXES = ("cond_stage_model.", "conditioner.", "text_encoders.", "clip_l.", "t5xxl.")
+VAE_PREFIXES = ("first_stage_model.", "vae.")
 
 # A single-file checkpoint is a .safetensors at the repository root. Files in
 # a sub-directory belong to a diffusers layout (unet/, vae/, text_encoder/),
@@ -249,6 +259,33 @@ def pick_checkpoint():
     return repo, path, size
 
 
+def safetensors_keys(path):
+    """The tensor names in a .safetensors file, read from its header."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(8)
+            if len(head) < 8:
+                return None
+            length = struct.unpack("<Q", head)[0]
+            if length > 64 * 1024 * 1024:
+                return None
+            data = fh.read(length)
+        meta = json.loads(data)
+    except Exception:  # noqa: BLE001
+        return None
+    return [k for k in meta if k != "__metadata__"]
+
+
+def checkpoint_assets(path):
+    """-> (model, text encoders, VAE) that a checkpoint file carries."""
+    keys = safetensors_keys(path)
+    if not keys:
+        return None
+    return (any(k.startswith(MODEL_PREFIXES) for k in keys),
+            any(k.startswith(CLIP_PREFIXES) for k in keys),
+            any(k.startswith(VAE_PREFIXES) for k in keys))
+
+
 def download(repo, path, total):
     """Uses the Hugging Face library rather than its command line: the errors
     are typed (a gated repository says so) and the file lands in the models
@@ -365,6 +402,21 @@ def kill_server():
         time.sleep(1)
 
 
+def stop_server():
+    """Stops the server this worker started. It runs in its own session, so
+    the signal has to reach its process group."""
+    p = _server[0]
+    if p is not None and p.poll() is None:
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+        except OSError:
+            pass
+        for _ in range(20):
+            if p.poll() is not None:
+                return
+            time.sleep(0.5)
+
+
 def start_server():
     cmd = [sys.executable, os.path.join(COMFY, "main.py"), "--listen", "127.0.0.1",
            "--port", str(PORT), "--cuda-malloc", "--dont-print-server"]
@@ -405,12 +457,7 @@ def log_tail(n=6):
 
 
 def on_sigterm(*_):
-    p = _server[0]
-    if p is not None and p.poll() is None:
-        try:
-            os.killpg(p.pid, signal.SIGTERM)
-        except OSError:
-            pass
+    stop_server()
     try:
         status("failed", message="stopped")
     except OSError:
@@ -483,7 +530,7 @@ def warmup_graph(ckpt_name, steps, cfg, size, latent_node):
     }
 
 
-def warmup(ckpt_name, steps, cfg, size, latent_node):
+def warmup(p, ckpt_name, steps, cfg, size, latent_node):
     try:
         r = http_json("http://127.0.0.1:%d/prompt" % PORT,
                       {"prompt": warmup_graph(ckpt_name, steps, cfg, size, latent_node)}, timeout=1800)
@@ -501,6 +548,8 @@ def warmup(ckpt_name, steps, cfg, size, latent_node):
     if not prompt_id:
         fail("the test prompt was queued without an id: %s %s" % (redact(str(r))[:200], log_tail()))
     for _ in range(600):
+        if p.poll() is not None:
+            fail("ComfyUI stopped while the test image was running: %s" % log_tail())
         try:
             hist = http_json("http://127.0.0.1:%d/history/%s" % (PORT, prompt_id), timeout=10)
             entry = hist.get(prompt_id)
@@ -567,30 +616,46 @@ def main():
     status("running", "download", "%s (%.1f GB)" % (ckpt_path, total / 1e9), progress=0.0)
     ckpt_file = download(repo, ckpt_path, total)
     ckpt_name = os.path.relpath(ckpt_file, MODELS_CKPT)
+    assets = checkpoint_assets(ckpt_file)
+    if assets and not assets[0]:
+        fail("%s is not a checkpoint: it holds no model weights" % ckpt_name)
+    if assets and not (assets[1] and assets[2]):
+        fail("%s holds the model alone: ComfyUI needs one file with the text encoders and "
+             "the VAE in it as well (the all-in-one Flux file is "
+             "Comfy-Org/Flux-1-Schnell/flux1-schnell-fp8.safetensors)" % ckpt_name)
     status("running", "download", "checkpoint ready: %s" % ckpt_name)
 
     kill_server()
     if port_busy(PORT):
         fail("port %d is already in use on the VM; choose another port" % PORT)
-    status("running", "server", "starting ComfyUI on port %d" % PORT)
-    p = start_server()
-    if not wait_healthy(p):
-        fail("ComfyUI did not start: %s" % log_tail())
-    status("running", "server", "ComfyUI is up")
 
-    status("running", "warmup", "generating a test image (first run loads the model into VRAM)")
-    image = warmup(ckpt_name, steps, cfg, size, latent_node)
-    used = gpu_used_mib()
-    if gpu and used < 512:
-        fail("the test image ran on the CPU (the GPU shows %d MiB of memory in use)" % used)
-    outputs = {"preset": PRESET, "checkpoint": ckpt_name, "repo": repo, "gpu": gpu,
-               "vram_total_mib": vram, "vram_used_mib": used, "test_image": image,
-               "steps": steps, "cfg": cfg, "size": size, "url_path": "/",
-               "workflows_dir": os.path.join(COMFY, "user", "default", "workflows")}
-    busy.set()
-    status("ready", "warmup", "%s ready: test image %s" % (ckpt_name, image or "done"),
-           progress=1.0, outputs=outputs)
-    monitor()
+    ready = False
+    try:
+        status("running", "server", "starting ComfyUI on port %d" % PORT)
+        p = start_server()
+        if not wait_healthy(p):
+            fail("ComfyUI did not start: %s" % log_tail())
+        status("running", "server", "ComfyUI is up")
+
+        status("running", "warmup", "generating a test image (first run loads the model into VRAM)")
+        image = warmup(p, ckpt_name, steps, cfg, size, latent_node)
+        used = gpu_used_mib()
+        if gpu and used < 512:
+            fail("the test image ran on the CPU (the GPU shows %d MiB of memory in use)" % used)
+        outputs = {"preset": PRESET, "checkpoint": ckpt_name, "repo": repo, "gpu": gpu,
+                   "vram_total_mib": vram, "vram_used_mib": used, "test_image": image,
+                   "steps": steps, "cfg": cfg, "size": size, "url_path": "/",
+                   "workflows_dir": os.path.join(COMFY, "user", "default", "workflows")}
+        busy.set()
+        status("ready", "warmup", "%s ready: test image %s" % (ckpt_name, image or "done"),
+               progress=1.0, outputs=outputs)
+        ready = True
+        monitor()
+    finally:
+        # A run that never became ready leaves no server behind: it would keep
+        # the port and the VRAM of a session that stays alive.
+        if not ready:
+            stop_server()
 
 
 if __name__ == "__main__":

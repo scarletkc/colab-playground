@@ -1,6 +1,6 @@
 api = 1
 id = "comfyui"
-version = "0.2.0"
+version = "0.1.0"
 # Optional: a saved Hugging Face token is passed for private / gated repos.
 needs = ["hf_token"]
 
@@ -35,11 +35,11 @@ zh-TW = "底模預設"
 ja = "チェックポイント プリセット"
 ko = "체크포인트 프리셋"
 [inputs.help]
-en = "sd15: ~4 GB, fast on any GPU. sdxl: ~7 GB, better quality. flux-schnell: ~24 GB, needs an A100/H100 and is very fast at 4 steps. custom: your own repository."
-zh-CN = "sd15：约 4 GB，任何 GPU 都快。sdxl：约 7 GB，质量更好。flux-schnell：约 24 GB，需要 A100/H100，4 步出图非常快。custom：使用你自己的仓库。"
-zh-TW = "sd15：約 4 GB，任何 GPU 都快。sdxl：約 7 GB，品質更好。flux-schnell：約 24 GB，需要 A100/H100，4 步出圖非常快。custom：使用你自己的儲存庫。"
-ja = "sd15：約 4 GB、どの GPU でも高速。sdxl：約 7 GB、高品質。flux-schnell：約 24 GB、A100/H100 が必要で 4 ステップで高速生成。custom：自分のリポジトリ。"
-ko = "sd15: 약 4 GB, 어떤 GPU에서도 빠름. sdxl: 약 7 GB, 더 좋은 품질. flux-schnell: 약 24 GB, A100/H100 필요, 4단계로 매우 빠름. custom: 내 저장소."
+en = "sd15: ~4 GB, fast on any GPU. sdxl: ~7 GB, better quality. flux-schnell: ~17 GB, needs an A100/H100 and is very fast at 4 steps. custom: your own repository."
+zh-CN = "sd15：约 4 GB，任何 GPU 都快。sdxl：约 7 GB，质量更好。flux-schnell：约 17 GB，需要 A100/H100，4 步出图非常快。custom：使用你自己的仓库。"
+zh-TW = "sd15：約 4 GB，任何 GPU 都快。sdxl：約 7 GB，品質更好。flux-schnell：約 17 GB，需要 A100/H100，4 步出圖非常快。custom：使用你自己的儲存庫。"
+ja = "sd15：約 4 GB、どの GPU でも高速。sdxl：約 7 GB、高品質。flux-schnell：約 17 GB、A100/H100 が必要で 4 ステップで高速生成。custom：自分のリポジトリ。"
+ko = "sd15: 약 4 GB, 어떤 GPU에서도 빠름. sdxl: 약 7 GB, 더 좋은 품질. flux-schnell: 약 17 GB, A100/H100 필요, 4단계로 매우 빠름. custom: 내 저장소."
 
 [[inputs]]
 id = "repo"
@@ -51,11 +51,11 @@ zh-TW = "自訂底模儲存庫"
 ja = "カスタム チェックポイント リポジトリ"
 ko = "커스텀 체크포인트 저장소"
 [inputs.help]
-en = "Only for the custom preset: a Hugging Face repository id, e.g. stabilityai/stable-diffusion-xl-base-1.0. It must hold one .safetensors file at its root, not a diffusers layout."
-zh-CN = "仅 custom 预设使用：Hugging Face 仓库 id，例如 stabilityai/stable-diffusion-xl-base-1.0。仓库根目录要有单个 .safetensors 文件，不支持 diffusers 那种分目录的结构。"
-zh-TW = "僅 custom 預設使用：Hugging Face 儲存庫 id，例如 stabilityai/stable-diffusion-xl-base-1.0。儲存庫根目錄要有單一 .safetensors 檔案，不支援 diffusers 那種分目錄的結構。"
-ja = "custom プリセット専用：Hugging Face のリポジトリ ID（例：stabilityai/stable-diffusion-xl-base-1.0）。リポジトリ直下に 1 つの .safetensors が必要です（diffusers 形式は不可）。"
-ko = "custom 프리셋 전용: Hugging Face 저장소 ID(예: stabilityai/stable-diffusion-xl-base-1.0). 저장소 루트에 단일 .safetensors가 있어야 하며 diffusers 구조는 지원되지 않습니다."
+en = "Only for the custom preset: a Hugging Face repository id, e.g. stabilityai/stable-diffusion-xl-base-1.0. It must hold one .safetensors file at its root, and that file must carry the text encoders and the VAE as well, not the model alone."
+zh-CN = "仅 custom 预设使用：Hugging Face 仓库 id，例如 stabilityai/stable-diffusion-xl-base-1.0。仓库根目录要有单个 .safetensors 文件，且该文件要同时包含文本编码器和 VAE，不能只有模型。"
+zh-TW = "僅 custom 預設使用：Hugging Face 儲存庫 id，例如 stabilityai/stable-diffusion-xl-base-1.0。儲存庫根目錄要有單一 .safetensors 檔案，且該檔案要同時包含文字編碼器與 VAE，不能只有模型。"
+ja = "custom プリセット専用：Hugging Face のリポジトリ ID（例：stabilityai/stable-diffusion-xl-base-1.0）。リポジトリ直下に 1 つの .safetensors が必要で、そのファイルにテキストエンコーダーと VAE も含まれている必要があります（モデルのみは不可）。"
+ko = "custom 프리셋 전용: Hugging Face 저장소 ID(예: stabilityai/stable-diffusion-xl-base-1.0). 저장소 루트에 단일 .safetensors가 있어야 하며 그 파일에 텍스트 인코더와 VAE도 포함되어야 합니다(모델만은 안 됩니다)."
 
 [[inputs]]
 id = "pattern"
