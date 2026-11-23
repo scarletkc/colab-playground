@@ -1060,4 +1060,10 @@ pub(super) const MESSAGES: Messages = &[
         SETTINGS_FEEDBACK_DESCRIPTION,
         "在 GitHub 上报告问题或提出建议。打开的表单会预先填好本应用的版本和你的操作系统。",
     ),
+    (PROV_RATE_MEASURED, "{age}在同样硬件的运行时上测得。"),
+    (PROV_RATE_NOT_MEASURED, "尚未测得"),
+    (
+        PROV_RATE_NOT_MEASURED_HINT,
+        "同样硬件的运行时在账号上单独运行时，本应用会测出这个数值。",
+    ),
 ];

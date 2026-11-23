@@ -1270,4 +1270,13 @@ pub(super) const MESSAGES: Messages = &[
         SETTINGS_FEEDBACK_DESCRIPTION,
         "GitHub에서 문제를 보고하거나 아이디어를 제안하십시오. 열리는 양식에는 앱 버전과 운영 체제가 미리 채워져 있습니다.",
     ),
+    (
+        PROV_RATE_MEASURED,
+        "같은 하드웨어의 런타임에서 측정({age}).",
+    ),
+    (PROV_RATE_NOT_MEASURED, "아직 측정되지 않음"),
+    (
+        PROV_RATE_NOT_MEASURED_HINT,
+        "같은 하드웨어의 런타임이 계정에서 유일하게 실행 중일 때 앱이 측정합니다.",
+    ),
 ];

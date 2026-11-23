@@ -41,10 +41,12 @@ use crate::provision::{
     self, Hardware, ProvisionEvent, ProvisionOps, ProvisionOutcome, ProvisionSpec,
 };
 use crate::quant::GgufListing;
-use crate::sessions::{Ledger, ServerSession, StopReason, TrackedSession, WatchdogInfo};
+use crate::sessions::{
+    HardwareRate, Ledger, ServerSession, StopReason, TrackedSession, WatchdogInfo,
+};
 use crate::tunnel::{TunnelCtx, TunnelEvent, TunnelId, TunnelInfo, TunnelManager, TunnelSpec};
 use crate::updater::{self, Installed, SelfUpdate, UpdateProgress};
-use crate::usage::{AccountUsage, poll_due};
+use crate::usage::{AccountUsage, RateReading, poll_due};
 use crate::vm::{self, RunState, RunStatus};
 use crate::watchdog;
 
@@ -92,6 +94,7 @@ mod reconciliation_tests {
             spend: SpendMeter::new(SystemTime::UNIX_EPOCH),
             watchdog: None,
             stopped: None,
+            measured_rate: None,
         };
         backend.inner.st().ledger.upsert(entry("old")).unwrap();
         let sample = backend.inner.reconciliation_sample();
@@ -127,6 +130,7 @@ mod reconciliation_tests {
                     spend: SpendMeter::new(SystemTime::UNIX_EPOCH),
                     watchdog: None,
                     stopped: None,
+                    measured_rate: None,
                 })
                 .unwrap();
         }
@@ -167,6 +171,7 @@ mod reconciliation_tests {
                 spend: SpendMeter::new(SystemTime::UNIX_EPOCH),
                 watchdog: None,
                 stopped: None,
+                measured_rate: None,
             })
             .unwrap();
         let listing = |endpoint: &str| {
@@ -221,6 +226,7 @@ mod reconciliation_tests {
             spend: SpendMeter::new(SystemTime::UNIX_EPOCH),
             watchdog: None,
             stopped: None,
+            measured_rate: None,
         };
         let listing = |endpoints: &[&str]| -> Vec<RemoteAssignment> {
             endpoints
@@ -303,6 +309,7 @@ mod reconciliation_tests {
             spend: SpendMeter::new(SystemTime::UNIX_EPOCH),
             watchdog: None,
             stopped: None,
+            measured_rate: None,
         };
         for endpoint in [
             None,
@@ -924,6 +931,17 @@ impl Inner {
                     if let Some(s) = snap {
                         let _ = st.accounts.set_usage(&id, s);
                     }
+                    if verified.contains(&id)
+                        && let Some(name) = u.sole_session(&live)
+                    {
+                        let reading = RateReading {
+                            cu_per_hour: u.rate_cu_per_hour,
+                            at: now,
+                        };
+                        let _ = st
+                            .ledger
+                            .update(&id, name, |e| e.measured_rate = Some(reading));
+                    }
                 }
                 Err(e) => entry.record_failure(e, now),
             }
@@ -1488,6 +1506,10 @@ impl Backend for RealBackend {
         self.inner.usage_views()
     }
 
+    fn measured_rates(&self) -> Vec<HardwareRate> {
+        self.inner.st().ledger.measured_rates()
+    }
+
     fn usage_poll_due(&self) -> bool {
         let now = self.inner.now();
         let st = self.inner.st();
@@ -1633,6 +1655,7 @@ impl Backend for RealBackend {
             spend: SpendMeter::new(outcome.started_at),
             watchdog: outcome.watchdog.clone(),
             stopped: None,
+            measured_rate: None,
         })?;
         Ok(outcome)
     }

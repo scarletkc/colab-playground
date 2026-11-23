@@ -21,7 +21,7 @@ use crate::host::{Line, ProbeReport};
 use crate::plugins::{InputValue, PluginInfo, PluginPreview, ResolvedEndpoint};
 use crate::provision::{ProvisionEvent, ProvisionOutcome, ProvisionSpec};
 use crate::quant::GgufListing;
-use crate::sessions::{Accelerator, StopReason, TrackedSession, WatchdogInfo};
+use crate::sessions::{Accelerator, HardwareRate, StopReason, TrackedSession, WatchdogInfo};
 use crate::tunnel::{TunnelEvent, TunnelId, TunnelInfo, TunnelSpec};
 use crate::updater::{Installed, SelfUpdate, Unsupported, UpdateProgress};
 use crate::usage::{BalancePoint, UsageSnapshot};
@@ -285,6 +285,9 @@ pub trait Backend: Send + Sync {
     fn usage(&self) -> Vec<AccountUsageView>;
     /// True when a background usage refresh is due (cadence from [`Defaults`]).
     fn usage_poll_due(&self) -> bool;
+    /// What each hardware burned when a usage reading last measured it
+    /// ([`crate::usage::Usage::sole_session`]); hardware never measured is absent.
+    fn measured_rates(&self) -> Vec<HardwareRate>;
 
     // ---- runtimes and sessions
     /// Runtimes on every saved account, managed or not.

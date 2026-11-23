@@ -523,6 +523,7 @@ fn target_card(
             .child(provision_form::render(
                 "run",
                 &form.provision,
+                state.measured_rate(&form.provision),
                 edit,
                 None,
                 cx,

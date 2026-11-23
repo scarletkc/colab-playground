@@ -34,6 +34,27 @@ pub struct Usage {
     pub assignments: u32,
 }
 
+impl Usage {
+    /// The session this reading measures: the only managed session of an
+    /// account with a single runtime burns the whole account rate. `None`
+    /// while nothing burns (the account rate can lag behind a new runtime).
+    pub fn sole_session<'a>(&self, live: &'a BTreeSet<String>) -> Option<&'a str> {
+        let burning = self.rate_cu_per_hour.is_finite() && self.rate_cu_per_hour > NO_RATE;
+        if self.assignments != 1 || live.len() != 1 || !burning {
+            return None;
+        }
+        live.first().map(String::as_str)
+    }
+}
+
+/// A burn rate Colab reported, and when.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RateReading {
+    pub cu_per_hour: f64,
+    #[serde(with = "serde_secs")]
+    pub at: SystemTime,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct UsageSnapshot {
     pub balance_cu: f64,
@@ -355,6 +376,17 @@ mod tests {
             ..Defaults::default()
         };
         assert!(poll_due(Some(t(0)), t(5), true, &fast));
+    }
+
+    #[test]
+    fn a_reading_measures_the_only_runtime_of_an_account() {
+        let one = set(&["s1"]);
+        assert_eq!(u(50.0, 4.82, 1).sole_session(&one), Some("s1"));
+        // A runtime the app does not manage, a second session, or no rate yet.
+        assert_eq!(u(50.0, 6.58, 2).sole_session(&one), None);
+        assert_eq!(u(50.0, 6.58, 2).sole_session(&set(&["s1", "s2"])), None);
+        assert_eq!(u(50.0, 0.0, 1).sole_session(&one), None);
+        assert_eq!(u(50.0, 4.82, 1).sole_session(&set(&[])), None);
     }
 
     #[test]

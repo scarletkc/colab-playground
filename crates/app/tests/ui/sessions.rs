@@ -1180,6 +1180,47 @@ fn turning_on_a_limit_at_the_bottom_of_the_form_scrolls_its_value_into_view(
 }
 
 #[gpui::test]
+fn the_form_shows_what_the_chosen_hardware_was_measured_to_burn(cx: &mut TestAppContext) {
+    use colab_playground::ui::provision_form::field_selector;
+    use colab_playground_core::mock::mock_rate;
+    let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
+    let pick = |app: &mut TestApp<'_>, accelerator| {
+        app.update(|state, cx| {
+            state.edit_new_session(
+                |spec| {
+                    spec.accelerator = accelerator;
+                    spec.min_vram_mib = None;
+                },
+                cx,
+            )
+        });
+        assert!(
+            app.shown(&field_selector("rate")),
+            "the burn rate has a row"
+        );
+        app.read(|state, _| {
+            let spec = &state.new_session().expect("the form is open").spec;
+            state
+                .measured_rate(spec)
+                .map(|(reading, _)| reading.cu_per_hour)
+        })
+    };
+    open_new_session(&mut app);
+    assert_eq!(pick(&mut app, Accelerator::T4), None, "nothing ran yet");
+    app.click(NEW_SESSION_START);
+    assert!(matches!(phase(&mut app), Some(ProvisionPhase::Ready(_))));
+    app.update(|state, cx| state.close_overlay(cx));
+
+    // The T4 is the account's only runtime, so the account's burn rate is its own.
+    open_new_session(&mut app);
+    assert_eq!(
+        pick(&mut app, Accelerator::T4),
+        Some(mock_rate(Accelerator::T4))
+    );
+    assert_eq!(pick(&mut app, Accelerator::A100), None);
+}
+
+#[gpui::test]
 fn a_refresh_asked_for_during_a_listing_lists_once_more(cx: &mut TestAppContext) {
     let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
     let before = app.mock.runtime_listings();

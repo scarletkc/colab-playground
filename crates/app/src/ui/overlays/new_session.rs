@@ -71,6 +71,7 @@ pub(super) fn render(
                 .child(provision_form::render(
                     "new",
                     &session.spec,
+                    state.measured_rate(&session.spec),
                     edit,
                     Some(&session.scroll),
                     cx,

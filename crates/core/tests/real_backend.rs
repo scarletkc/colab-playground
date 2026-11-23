@@ -1107,6 +1107,10 @@ fn usage_guard_stop_and_vanished_sessions() {
     let r = f.b.guard_poll(&nc()).unwrap();
     assert_eq!(r.decisions.len(), 1);
     assert!(!r.decisions[0].stopped);
+    let rates = f.b.measured_rates();
+    assert_eq!(rates.len(), 1, "{rates:?}");
+    assert!(rates[0].matches(Accelerator::T4, false));
+    assert_eq!(rates[0].reading.cu_per_hour, 1.76);
     f.edit_server(|s| s["accounts"]["alice"]["balance"] = json!(30.0));
     let r = f.b.guard_poll(&nc()).unwrap();
     assert!(r.decisions[0].stopped, "{:?}", r.decisions);

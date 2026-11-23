@@ -36,11 +36,11 @@ use crate::provision::{
 };
 use crate::quant::{FitInput, GgufFile, GgufListing, fit_auto, group};
 use crate::sessions::{
-    Accelerator, Ledger, ServerSession, StopReason, TrackedSession, WatchdogInfo,
+    Accelerator, HardwareRate, Ledger, ServerSession, StopReason, TrackedSession, WatchdogInfo,
 };
 use crate::tunnel::{TunnelEvent, TunnelId, TunnelInfo, TunnelSpec, TunnelState};
 use crate::updater::{Installed, SelfUpdate, Unsupported, UpdateProgress};
-use crate::usage::{AccountUsage, Usage, poll_due};
+use crate::usage::{AccountUsage, RateReading, Usage, poll_due};
 use crate::vm::{RunState, RunStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -583,6 +583,15 @@ impl World {
             (false, Some(u)) => {
                 entry.record_success(u, now, &live);
                 entry.ownership_verified = live.is_empty() || verified;
+                if verified && let Some(name) = u.sole_session(&live) {
+                    let reading = RateReading {
+                        cu_per_hour: u.rate_cu_per_hour,
+                        at: now,
+                    };
+                    let _ = self
+                        .ledger
+                        .update(id, name, |e| e.measured_rate = Some(reading));
+                }
             }
             _ => entry.record_failure(
                 Error::new(ErrorKind::Http).detail("simulated usage failure"),
@@ -726,6 +735,7 @@ impl MockBackend {
                     policy,
                     spend: SpendMeter::new(started),
                     stopped: None,
+                    measured_rate: None,
                 });
             }
         }
@@ -1419,6 +1429,10 @@ impl Backend for MockBackend {
         self.w().usage_views()
     }
 
+    fn measured_rates(&self) -> Vec<HardwareRate> {
+        self.w().ledger.measured_rates()
+    }
+
     fn usage_poll_due(&self) -> bool {
         let now = self.now_();
         let w = self.w();
@@ -1548,6 +1562,7 @@ impl Backend for MockBackend {
             spend: SpendMeter::new(outcome.started_at),
             watchdog: outcome.watchdog.clone(),
             stopped: None,
+            measured_rate: None,
         })?;
         Ok(outcome)
     }
@@ -2396,6 +2411,60 @@ mod tests {
         m.set_failures(f);
         let stale = m.refresh_usage(&[], &nc()).unwrap();
         assert!(stale[0].snapshot.unwrap().stale);
+    }
+
+    #[test]
+    fn a_runtime_alone_on_its_account_measures_its_hardware() {
+        let (m, clock) = mock(MockScenario::single());
+        let start = |accelerator| {
+            let spec = ProvisionSpec {
+                accelerator,
+                min_vram_mib: None,
+                ..m.defaults().provision_spec(m.new_session_name(None))
+            };
+            let (tx, _rx) = mpsc::channel();
+            m.provision(spec, tx, &nc()).unwrap().name
+        };
+        let rate = |accelerator| {
+            m.measured_rates()
+                .into_iter()
+                .find(|r| r.matches(accelerator, false))
+                .map(|r| r.reading)
+        };
+        assert!(m.measured_rates().is_empty());
+        let t4 = start(Accelerator::T4);
+        m.refresh_usage(&[], &nc()).unwrap();
+        let measured = rate(Accelerator::T4).unwrap();
+        assert_eq!(measured.cu_per_hour, mock_rate(Accelerator::T4));
+        // A guard round reads usage too, and keeps what it measured.
+        clock.advance(Duration::from_secs(60));
+        m.guard_poll(&nc()).unwrap();
+        assert!(rate(Accelerator::T4).unwrap().at > measured.at);
+
+        // With two runtimes the account rate is the sum: neither is measured.
+        start(Accelerator::A100);
+        let before = rate(Accelerator::T4);
+        clock.advance(Duration::from_secs(60));
+        m.guard_poll(&nc()).unwrap();
+        assert_eq!(rate(Accelerator::T4), before);
+        assert_eq!(rate(Accelerator::A100), None);
+
+        // The stopped session's reading stays; the one left alone is measured.
+        let t4 = m
+            .runtimes(&nc())
+            .unwrap()
+            .runtimes
+            .into_iter()
+            .find(|r| r.id.name.as_deref() == Some(&t4))
+            .unwrap();
+        m.stop_session(&t4.id, StopOptions::default(), &nc())
+            .unwrap();
+        m.guard_poll(&nc()).unwrap();
+        assert_eq!(rate(Accelerator::T4), before);
+        assert_eq!(
+            rate(Accelerator::A100).unwrap().cu_per_hour,
+            mock_rate(Accelerator::A100)
+        );
     }
 
     #[test]

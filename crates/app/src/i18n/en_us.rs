@@ -1255,4 +1255,13 @@ pub(super) const MESSAGES: Messages = &[
         SETTINGS_FEEDBACK_DESCRIPTION,
         "Report a problem or suggest an idea on GitHub. The issue form opens with the app's version and your operating system filled in.",
     ),
+    (
+        PROV_RATE_MEASURED,
+        "Measured {age} on a runtime with this hardware.",
+    ),
+    (PROV_RATE_NOT_MEASURED, "Not measured yet"),
+    (
+        PROV_RATE_NOT_MEASURED_HINT,
+        "The app measures it while a runtime with this hardware is the only one on its account.",
+    ),
 ];

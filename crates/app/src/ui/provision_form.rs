@@ -3,9 +3,9 @@
 //! do when they run out, and the cost limits. Values start from `Defaults`; edits apply to
 //! this one action only. Each control's wrapper carries the selector `prov <field>`.
 
-use std::rc::Rc;
+use std::{rc::Rc, time::SystemTime};
 
-use colab_playground_core::provision::ProvisionSpec;
+use colab_playground_core::{provision::ProvisionSpec, usage::RateReading};
 use ely_gpui_component::{layout::bring_into_view, theme::ActiveTheme, typography::Caption};
 use gpui::{
     AnyElement, App, Axis, IntoElement, ParentElement, RenderOnce, ScrollHandle, SharedString,
@@ -13,7 +13,8 @@ use gpui::{
 };
 
 use crate::{
-    i18n::{keys, tr},
+    format,
+    i18n::{keys, tr, tr_args},
     ui::{parts::field_label, runtime_options::Controls, tagged},
 };
 
@@ -102,9 +103,11 @@ fn set<T: Copy + 'static>(
 
 /// The options for `spec`; `prefix` keeps element ids apart when two forms exist. With
 /// `scroll` (the area the form scrolls in), a limit switched on brings its row into view.
+/// `rate` is `AppState::measured_rate` of `spec`.
 pub fn render(
     prefix: &'static str,
     spec: &ProvisionSpec,
+    rate: Option<(RateReading, SystemTime)>,
     edit: SpecEdit,
     scroll: Option<&ScrollHandle>,
     cx: &App,
@@ -144,6 +147,22 @@ pub fn render(
         guard.idle_timeout,
         set(&edit, |spec, v| spec.guard.idle_timeout = v),
     );
+    // What the runtime being set up will burn is not known before it runs: the figure is the
+    // one measured on the same hardware, so it is marked as an estimate.
+    let (rate_value, rate_hint) = match rate {
+        Some((reading, now)) => (
+            format::approx(cx, &format::cu_rate(cx, reading.cu_per_hour)),
+            tr_args(
+                cx,
+                keys::PROV_RATE_MEASURED,
+                &[("age", &format::age(cx, reading.at, now))],
+            ),
+        ),
+        None => (
+            tr(cx, keys::PROV_RATE_NOT_MEASURED),
+            tr(cx, keys::PROV_RATE_NOT_MEASURED_HINT),
+        ),
+    };
     let limit_row = |field: &'static str,
                      on: bool,
                      label: SharedString,
@@ -170,6 +189,13 @@ pub fn render(
             cx,
         ),
         row("high_mem", tr(cx, keys::DEF_HIGH_MEM), None, high_mem, cx),
+        row(
+            "rate",
+            tr(cx, keys::RUNTIME_RATE),
+            Some(rate_hint),
+            div().child(rate_value),
+            cx,
+        ),
     ];
     if gpu {
         rows.push(limit_row(

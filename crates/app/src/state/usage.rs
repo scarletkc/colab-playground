@@ -8,8 +8,13 @@
 use std::time::{Duration, SystemTime};
 
 use colab_playground_core::{
-    Error, ErrorKind, accounts::AccountId, backend::AccountUsageView, guard::USAGE_STALE_AFTER,
-    usage::UsageSnapshot,
+    Error, ErrorKind,
+    accounts::AccountId,
+    backend::AccountUsageView,
+    guard::USAGE_STALE_AFTER,
+    provision::ProvisionSpec,
+    sessions::HardwareRate,
+    usage::{RateReading, UsageSnapshot},
 };
 use gpui::{Context, Task};
 
@@ -23,6 +28,8 @@ pub const POLL_CHECK: Duration = Duration::from_secs(5);
 #[derive(Clone, Debug, Default)]
 pub(crate) struct UsageCache {
     pub(crate) views: Vec<AccountUsageView>,
+    /// What each hardware burned when it was last measured, as of the last refresh.
+    pub(crate) rates: Vec<HardwareRate>,
     pub(crate) now: Option<SystemTime>,
     pub(crate) error: Option<Error>,
 }
@@ -188,6 +195,17 @@ impl AppState {
         self.fetch_usage(true, false, cx);
     }
 
+    /// What a runtime with `spec`'s hardware burned when it was last measured, and the
+    /// backend's clock to tell how long ago that was.
+    pub fn measured_rate(&self, spec: &ProvisionSpec) -> Option<(RateReading, SystemTime)> {
+        let rate = self
+            .usage
+            .rates
+            .iter()
+            .find(|rate| rate.matches(spec.accelerator, spec.high_mem))?;
+        Some((rate.reading, self.usage.now?))
+    }
+
     fn fetch_usage(&mut self, manual: bool, relist: bool, cx: &mut Context<Self>) {
         if !self.cli_installed() {
             return;
@@ -241,21 +259,32 @@ impl AppState {
                                 } else {
                                     report.usage.clone()
                                 };
-                            Ok((views, Some(Ok(report)), backend.now()))
+                            Ok((
+                                views,
+                                Some(Ok(report)),
+                                backend.measured_rates(),
+                                backend.now(),
+                            ))
                         }
                         Err(error) => {
                             let views = backend.refresh_usage(&[], cancel)?;
-                            Ok((views, Some(Err(error)), backend.now()))
+                            Ok((
+                                views,
+                                Some(Err(error)),
+                                backend.measured_rates(),
+                                backend.now(),
+                            ))
                         }
                     }
                 } else {
                     let views = backend.refresh_usage(&[], cancel)?;
-                    Ok((views, None, backend.now()))
+                    Ok((views, None, backend.measured_rates(), backend.now()))
                 }
             },
             move |state, result, cx| match result {
-                Ok((views, report, now)) => {
+                Ok((views, report, rates, now)) => {
                     state.usage.views = views;
+                    state.usage.rates = rates;
                     state.usage.now = Some(now);
                     state.usage.error = None;
                     match report {
