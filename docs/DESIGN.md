@@ -46,7 +46,7 @@ Goals
 - English, 简体中文, 繁體中文, 日本語, 한국어. Light, dark and follow-system appearance.
 - Colab core: CLI install, accounts (login / switch / remove), sessions (create with hardware
   targeting + retry, list, stop), port forwarding, cost guards.
-- Plugins: everything beyond the Colab core is a plugin. `llama-cpp` is bundled.
+- Plugins: everything beyond the Colab core is a plugin. `llama-cpp` and `comfyui` are bundled.
 - A mock backend drives the whole UI without WSL, the CLI or a Google account.
 
 Non-goals (v1)

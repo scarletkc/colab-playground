@@ -131,6 +131,24 @@ when changing either.
 7. Start with `-ngl 999 -fa on --jinja -np 1`. When startup fails (usually out
    of memory), fall back KV cache `f16 → q8_0`, then MTP on → off.
 
+## ComfyUI on the VM
+
+1. **Do not let pip touch PyTorch.** ComfyUI's `requirements.txt` lists `torch` and
+   `torchvision` without a version, so installing it replaces the CUDA build of the
+   runtime with another one. Drop them from the list, then check
+   `torch.cuda.is_available()` before starting the server.
+2. **`libcuda.so.1` lives in `/usr/lib64-nvidia`** (see above), so the server needs
+   that directory on `LD_LIBRARY_PATH` when it is started from a background process.
+3. **The latent decides the node.** `EmptyLatentImage` always makes 4 channels;
+   Flux works on 16 and needs `EmptySD3LatentImage`.
+4. **One file is a whole checkpoint.** A single-file Flux checkpoint has the keys
+   `model.diffusion_model.*`, `text_encoders.*` and `vae.*`, which is what
+   `CheckpointLoaderSimple` looks for; a diffusers repository (the pieces in
+   `unet/`, `vae/`, `text_encoder/`) is not a checkpoint and cannot be loaded.
+5. **The web editor holds a websocket open**, so the tunnel keeps one TCP connection
+   to the server port while a browser tab is open. That is what tells an interactive
+   session from an abandoned one when the idle rule has to decide.
+
 ## Estimating GPU memory (ScarletKc-2.0 Q8_0 example)
 
 ScarletKc-2.0 (Qwen3.5 architecture) has 64 layers, of which only 16 use full

@@ -3,8 +3,8 @@
 A plugin turns a script into a one-click action on a Colab runtime: the app
 shows a form generated from the manifest, provisions (or reuses) a session,
 uploads the script, starts it detached on the VM, renders its progress, and
-forwards the ports it declares. The bundled `plugins/llama-cpp/` is a complete
-example.
+forwards the ports it declares. The bundled `plugins/llama-cpp/` and
+`plugins/comfyui/` are complete examples.
 
 **A plugin never runs anything on the user's machine.** The host only reads the
 manifest and uploads the script; the script runs on the user's paid Colab

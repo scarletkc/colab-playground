@@ -713,10 +713,16 @@ pub struct PluginPreview {
 
 /// Bundled plugins: (manifest, script bytes).
 pub fn bundled() -> Vec<(&'static str, &'static [u8])> {
-    vec![(
-        include_str!("../../../plugins/llama-cpp/plugin.toml"),
-        include_bytes!("../../../plugins/llama-cpp/worker.py"),
-    )]
+    vec![
+        (
+            include_str!("../../../plugins/llama-cpp/plugin.toml"),
+            include_bytes!("../../../plugins/llama-cpp/worker.py"),
+        ),
+        (
+            include_str!("../../../plugins/comfyui/plugin.toml"),
+            include_bytes!("../../../plugins/comfyui/worker.py"),
+        ),
+    ]
 }
 
 /// Reads and validates a plugin directory (no symlinked or oversized files,
@@ -1183,6 +1189,19 @@ script = "main.py"
         }
         let ep = &p.manifest.endpoints[0];
         assert_eq!(ep.port_input.as_deref(), Some("port"));
+    }
+
+    #[test]
+    fn bundled_comfy_manifest_is_valid() {
+        let store = PluginStore::load(None, None).unwrap();
+        let p = store.get("comfyui").expect("bundled plugin");
+        assert_eq!(p.source, PluginSource::Bundled);
+        assert!(p.manifest.needs.contains(&Capability::HfToken));
+        assert!(!p.script.is_empty());
+        assert_eq!(p.manifest.stages.len(), 5);
+        let ep = &p.manifest.endpoints[0];
+        assert_eq!(ep.port_input.as_deref(), Some("port"));
+        assert_eq!(p.manifest.keep[0].path, "/content/ComfyUI/output");
     }
 
     #[test]

@@ -1,0 +1,211 @@
+api = 1
+id = "comfyui"
+version = "0.2.0"
+# Optional: a saved Hugging Face token is passed for private / gated repos.
+needs = ["hf_token"]
+
+[name]
+en = "Deploy ComfyUI"
+zh-CN = "部署 ComfyUI"
+zh-TW = "部署 ComfyUI"
+ja = "ComfyUI をデプロイ"
+ko = "ComfyUI 배포"
+
+[description]
+en = "Run ComfyUI on a Colab GPU and open its node editor in your browser through the tunnel. A preset picks the checkpoint, or point it at any Hugging Face repository with a single .safetensors file. A test image is generated before it reports ready."
+zh-CN = "在 Colab GPU 上运行 ComfyUI，通过隧道在本地浏览器打开节点编辑器。预设自动选底模，也可以指定任意带单个 .safetensors 文件的 Hugging Face 仓库。报告就绪前会先出一张测试图。"
+zh-TW = "在 Colab GPU 上執行 ComfyUI，透過隧道在本機瀏覽器開啟節點編輯器。預設自動選底模，也可以指定任意帶單一 .safetensors 檔案的 Hugging Face 儲存庫。回報就緒前會先出一張測試圖。"
+ja = "Colab の GPU 上で ComfyUI を実行し、トンネル経由でブラウザからノードエディターを開けます。プリセットがチェックポイントを選び、単一の .safetensors を含む任意の Hugging Face リポジトリも指定できます。準備完了の前にテスト画像を生成します。"
+ko = "Colab GPU에서 ComfyUI를 실행하고 터널을 통해 브라우저에서 노드 에디터를 엽니다. 프리셋이 체크포인트를 고르고, 단일 .safetensors가 있는 임의의 Hugging Face 저장소를 지정할 수도 있습니다. 준비 보고 전에 테스트 이미지를 생성합니다."
+
+[provision]
+accelerator = "A100"
+min_vram_mib = 0
+high_mem = false
+
+[[inputs]]
+id = "preset"
+type = "select"
+options = ["sd15", "sdxl", "flux-schnell", "custom"]
+default = "sd15"
+[inputs.label]
+en = "Checkpoint preset"
+zh-CN = "底模预设"
+zh-TW = "底模預設"
+ja = "チェックポイント プリセット"
+ko = "체크포인트 프리셋"
+[inputs.help]
+en = "sd15: ~4 GB, fast on any GPU. sdxl: ~7 GB, better quality. flux-schnell: ~24 GB, needs an A100/H100 and is very fast at 4 steps. custom: your own repository."
+zh-CN = "sd15：约 4 GB，任何 GPU 都快。sdxl：约 7 GB，质量更好。flux-schnell：约 24 GB，需要 A100/H100，4 步出图非常快。custom：使用你自己的仓库。"
+zh-TW = "sd15：約 4 GB，任何 GPU 都快。sdxl：約 7 GB，品質更好。flux-schnell：約 24 GB，需要 A100/H100，4 步出圖非常快。custom：使用你自己的儲存庫。"
+ja = "sd15：約 4 GB、どの GPU でも高速。sdxl：約 7 GB、高品質。flux-schnell：約 24 GB、A100/H100 が必要で 4 ステップで高速生成。custom：自分のリポジトリ。"
+ko = "sd15: 약 4 GB, 어떤 GPU에서도 빠름. sdxl: 약 7 GB, 더 좋은 품질. flux-schnell: 약 24 GB, A100/H100 필요, 4단계로 매우 빠름. custom: 내 저장소."
+
+[[inputs]]
+id = "repo"
+type = "text"
+[inputs.label]
+en = "Custom checkpoint repository"
+zh-CN = "自定义底模仓库"
+zh-TW = "自訂底模儲存庫"
+ja = "カスタム チェックポイント リポジトリ"
+ko = "커스텀 체크포인트 저장소"
+[inputs.help]
+en = "Only for the custom preset: a Hugging Face repository id, e.g. stabilityai/stable-diffusion-xl-base-1.0. It must hold one .safetensors file at its root, not a diffusers layout."
+zh-CN = "仅 custom 预设使用：Hugging Face 仓库 id，例如 stabilityai/stable-diffusion-xl-base-1.0。仓库根目录要有单个 .safetensors 文件，不支持 diffusers 那种分目录的结构。"
+zh-TW = "僅 custom 預設使用：Hugging Face 儲存庫 id，例如 stabilityai/stable-diffusion-xl-base-1.0。儲存庫根目錄要有單一 .safetensors 檔案，不支援 diffusers 那種分目錄的結構。"
+ja = "custom プリセット専用：Hugging Face のリポジトリ ID（例：stabilityai/stable-diffusion-xl-base-1.0）。リポジトリ直下に 1 つの .safetensors が必要です（diffusers 形式は不可）。"
+ko = "custom 프리셋 전용: Hugging Face 저장소 ID(예: stabilityai/stable-diffusion-xl-base-1.0). 저장소 루트에 단일 .safetensors가 있어야 하며 diffusers 구조는 지원되지 않습니다."
+
+[[inputs]]
+id = "pattern"
+type = "text"
+[inputs.label]
+en = "File name pattern (custom preset)"
+zh-CN = "文件名模式（custom 预设）"
+zh-TW = "檔名模式（custom 預設）"
+ja = "ファイル名パターン（custom プリセット）"
+ko = "파일 이름 패턴(custom 프리셋)"
+[inputs.help]
+en = "Substring to match, e.g. fp16 or pruned. Empty picks the largest checkpoint at the repository root."
+zh-CN = "匹配的子串，例如 fp16 或 pruned。留空则取仓库根目录最大的底模文件。"
+zh-TW = "匹配的子字串，例如 fp16 或 pruned。留空則取儲存庫根目錄最大的底模檔案。"
+ja = "一致させる部分文字列（例：fp16、pruned）。空欄ならリポジトリ直下で最大のチェックポイントを使います。"
+ko = "일치시킬 부분 문자열(예: fp16, pruned). 비우면 저장소 루트에서 가장 큰 체크포인트를 사용합니다."
+
+[[inputs]]
+id = "steps"
+type = "number"
+default = 0
+min = 0
+max = 200
+[inputs.label]
+en = "Sampling steps"
+zh-CN = "采样步数"
+zh-TW = "取樣步數"
+ja = "サンプリングステップ"
+ko = "샘플링 스텝"
+[inputs.help]
+en = "0 = the preset's own number of steps (20 for SD 1.5, 30 for SDXL, 4 for Flux Schnell)."
+zh-CN = "0 = 使用预设自带的步数（SD 1.5 为 20，SDXL 为 30，Flux Schnell 为 4）。"
+zh-TW = "0 = 使用預設自帶的步數（SD 1.5 為 20，SDXL 為 30，Flux Schnell 為 4）。"
+ja = "0 = プリセットの標準ステップ数（SD 1.5 は 20、SDXL は 30、Flux Schnell は 4）。"
+ko = "0 = 프리셋 기본 스텝 수(SD 1.5는 20, SDXL은 30, Flux Schnell은 4)."
+
+[[inputs]]
+id = "size"
+type = "number"
+default = 0
+min = 0
+max = 2048
+[inputs.label]
+en = "Image size"
+zh-CN = "图像边长"
+zh-TW = "影像邊長"
+ja = "画像サイズ"
+ko = "이미지 크기"
+[inputs.help]
+en = "0 = the preset's own size (512 for SD 1.5, 1024 for SDXL and Flux Schnell). The test image uses it."
+zh-CN = "0 = 使用预设自带的尺寸（SD 1.5 为 512，SDXL 与 Flux Schnell 为 1024）。测试图按此尺寸生成。"
+zh-TW = "0 = 使用預設自帶的尺寸（SD 1.5 為 512，SDXL 與 Flux Schnell 為 1024）。測試圖依此尺寸生成。"
+ja = "0 = プリセットの標準サイズ（SD 1.5 は 512、SDXL と Flux Schnell は 1024）。テスト画像はこのサイズです。"
+ko = "0 = 프리셋 기본 크기(SD 1.5는 512, SDXL과 Flux Schnell은 1024). 테스트 이미지는 이 크기로 생성됩니다."
+
+[[inputs]]
+id = "port"
+type = "number"
+default = 8188
+min = 1024
+max = 65535
+[inputs.label]
+en = "Server port on the VM"
+zh-CN = "VM 上的服务端口"
+zh-TW = "VM 上的服務連接埠"
+ja = "VM 上のサーバー ポート"
+ko = "VM의 서버 포트"
+
+[[inputs]]
+id = "extra_args"
+type = "text"
+[inputs.label]
+en = "Extra ComfyUI arguments"
+zh-CN = "额外的 ComfyUI 参数"
+zh-TW = "額外的 ComfyUI 參數"
+ja = "ComfyUI の追加引数"
+ko = "ComfyUI 추가 인수"
+[inputs.help]
+en = "Passed to ComfyUI as they are, e.g. --preview-method auto or --highvram."
+zh-CN = "原样传给 ComfyUI，例如 --preview-method auto 或 --highvram。"
+zh-TW = "原樣傳給 ComfyUI，例如 --preview-method auto 或 --highvram。"
+ja = "そのまま ComfyUI に渡します（例：--preview-method auto、--highvram）。"
+ko = "그대로 ComfyUI에 전달됩니다(예: --preview-method auto, --highvram)."
+
+[run]
+script = "worker.py"
+
+[[stages]]
+id = "detect"
+[stages.label]
+en = "Check the GPU"
+zh-CN = "检查 GPU"
+zh-TW = "檢查 GPU"
+ja = "GPU を確認"
+ko = "GPU 확인"
+
+[[stages]]
+id = "install"
+[stages.label]
+en = "Install ComfyUI"
+zh-CN = "安装 ComfyUI"
+zh-TW = "安裝 ComfyUI"
+ja = "ComfyUI をインストール"
+ko = "ComfyUI 설치"
+
+[[stages]]
+id = "download"
+[stages.label]
+en = "Download the checkpoint"
+zh-CN = "下载底模"
+zh-TW = "下載底模"
+ja = "チェックポイントをダウンロード"
+ko = "체크포인트 다운로드"
+
+[[stages]]
+id = "server"
+[stages.label]
+en = "Start the server"
+zh-CN = "启动服务"
+zh-TW = "啟動服務"
+ja = "サーバーを起動"
+ko = "서버 시작"
+
+[[stages]]
+id = "warmup"
+[stages.label]
+en = "Generate a test image"
+zh-CN = "生成测试图"
+zh-TW = "產生測試圖"
+ja = "テスト画像を生成"
+ko = "테스트 이미지 생성"
+
+[[endpoints]]
+id = "ui"
+port_input = "port"
+path = "/"
+health = "/"
+kind = "http"
+[endpoints.label]
+en = "ComfyUI web editor"
+zh-CN = "ComfyUI 网页编辑器"
+zh-TW = "ComfyUI 網頁編輯器"
+ja = "ComfyUI Web エディター"
+ko = "ComfyUI 웹 에디터"
+
+[[keep]]
+path = "/content/ComfyUI/output"
+[keep.label]
+en = "Generated images"
+zh-CN = "生成的图片"
+zh-TW = "產生的圖片"
+ja = "生成画像"
+ko = "생성된 이미지"
