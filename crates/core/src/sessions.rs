@@ -415,7 +415,7 @@ impl Ledger {
         true
     }
 
-    /// Writes the ledger if a [`Ledger::change`] is waiting for it.
+    /// Writes the ledger if a [`Ledger::change`], or a write that failed, is waiting for it.
     pub fn save_changes(&mut self) -> Result<()> {
         if self.unsaved { self.save() } else { Ok(()) }
     }
