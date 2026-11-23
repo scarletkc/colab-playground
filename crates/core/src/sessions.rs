@@ -479,6 +479,8 @@ impl Ledger {
 
     /// Writes the ledger (atomic replace).
     pub fn save(&mut self) -> Result<()> {
+        // A write that fails leaves the entries unsaved, whoever asked for it.
+        self.unsaved = true;
         if let Some(path) = &self.path {
             crate::paths::write_atomic(
                 path,
@@ -640,6 +642,28 @@ mod tests {
             stopped: None,
             measured_rate: None,
         }
+    }
+
+    #[test]
+    fn a_failed_write_is_made_by_the_next_round_that_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        // The ledger's folder cannot be created while a file has its name.
+        let folder = dir.path().join("local");
+        let path = folder.join("ledger.json");
+        let mut ledger = Ledger::load(&path).unwrap();
+        std::fs::write(&folder, "").unwrap();
+        assert!(ledger.upsert(live("s", None)).is_err());
+
+        std::fs::remove_file(&folder).unwrap();
+        let account = AccountId::new("a1").unwrap();
+        assert!(ledger.change(&account, "s", |_| {}));
+        ledger.save_changes().unwrap();
+        assert!(Ledger::load(&path).unwrap().live(&account, "s").is_some());
+
+        std::fs::remove_file(&path).unwrap();
+        assert!(ledger.change(&account, "s", |_| {}));
+        ledger.save_changes().unwrap();
+        assert!(!path.exists(), "written with nothing to save");
     }
 
     fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
