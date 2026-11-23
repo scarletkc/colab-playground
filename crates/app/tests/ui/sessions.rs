@@ -1326,3 +1326,78 @@ fn the_periodic_listing_asks_for_no_other(cx: &mut TestAppContext) {
         "with none under way it lists"
     );
 }
+
+fn h100_is_refused() -> Options {
+    Options {
+        failures: MockFailures {
+            not_entitled: vec![Accelerator::H100],
+            ..MockFailures::default()
+        },
+        ..Options::scenario(MockScenario::single())
+    }
+}
+
+#[gpui::test]
+fn a_suggested_name_follows_the_hardware_after_a_failed_attempt(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, h100_is_refused());
+    open_new_session(&mut app);
+    pick_hardware(&mut app, Accelerator::H100);
+    let refused = name_field(&mut app);
+    assert!(refused.starts_with("h100-"), "{refused}");
+    app.click(NEW_SESSION_START);
+    assert!(matches!(phase(&mut app), Some(ProvisionPhase::Failed(_))));
+
+    app.click("new-session-change");
+    assert_eq!(name_field(&mut app), refused);
+    pick_hardware(&mut app, Accelerator::T4);
+    let shown = name_field(&mut app);
+    assert!(shown.starts_with("t4-"), "{shown}");
+
+    app.click(NEW_SESSION_START);
+    let Some(ProvisionPhase::Ready(outcome)) = phase(&mut app) else {
+        panic!("expected a ready runtime, got {:?}", phase(&mut app));
+    };
+    assert_eq!(outcome.name, shown);
+}
+
+#[gpui::test]
+fn a_typed_name_survives_a_hardware_change_after_a_failed_attempt(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, h100_is_refused());
+    open_new_session(&mut app);
+    pick_hardware(&mut app, Accelerator::H100);
+    app.fill(|inputs| inputs.session_name.clone(), "my-experiment");
+    app.click(NEW_SESSION_START);
+    assert!(matches!(phase(&mut app), Some(ProvisionPhase::Failed(_))));
+
+    app.click("new-session-change");
+    pick_hardware(&mut app, Accelerator::T4);
+    assert_eq!(name_field(&mut app), "my-experiment");
+
+    app.fill(|inputs| inputs.session_name.clone(), "");
+    app.click(NEW_SESSION_START);
+    let Some(ProvisionPhase::Ready(outcome)) = phase(&mut app) else {
+        panic!("expected a ready runtime, got {:?}", phase(&mut app));
+    };
+    assert!(outcome.name.starts_with("t4-"), "{}", outcome.name);
+}
+
+#[gpui::test]
+fn an_emptied_name_field_after_a_failed_attempt_starts_under_a_suggested_name(
+    cx: &mut TestAppContext,
+) {
+    let mut app = TestApp::with(cx, h100_is_refused());
+    open_new_session(&mut app);
+    pick_hardware(&mut app, Accelerator::H100);
+    app.fill(|inputs| inputs.session_name.clone(), "my-experiment");
+    app.click(NEW_SESSION_START);
+    assert!(matches!(phase(&mut app), Some(ProvisionPhase::Failed(_))));
+
+    app.click("new-session-change");
+    app.set_failures(MockFailures::default());
+    app.fill(|inputs| inputs.session_name.clone(), "");
+    app.click(NEW_SESSION_START);
+    let Some(ProvisionPhase::Ready(outcome)) = phase(&mut app) else {
+        panic!("expected a ready runtime, got {:?}", phase(&mut app));
+    };
+    assert!(outcome.name.starts_with("h100-"), "{}", outcome.name);
+}

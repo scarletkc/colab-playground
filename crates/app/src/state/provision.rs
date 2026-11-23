@@ -80,7 +80,8 @@ pub struct NewSession {
     /// New on each opening and reset when a failed or cancelled attempt is edited again, so the
     /// form shows from the top.
     pub scroll: ScrollHandle,
-    /// The name the form offered the name field last; the next one replaces only this one.
+    /// The name the form made up last. An empty name field starts the session under it, and
+    /// it is the only text in the field that the next one replaces.
     suggested_name: String,
 }
 
@@ -192,10 +193,13 @@ impl AppState {
         {
             return;
         }
-        let name = name.trim().to_owned();
-        if !name.is_empty() {
-            session.spec.name = name;
-        }
+        let name = name.trim();
+        // Not the name already in the spec: after a failed attempt that is the one typed for it.
+        session.spec.name = if name.is_empty() {
+            session.suggested_name.clone()
+        } else {
+            name.to_owned()
+        };
         if let Err(error) = session.spec.validate() {
             session.phase = ProvisionPhase::Failed(error);
             cx.notify();
