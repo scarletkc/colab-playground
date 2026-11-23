@@ -5,7 +5,10 @@
 
 use std::{rc::Rc, time::SystemTime};
 
-use colab_playground_core::{provision::ProvisionSpec, usage::RateReading};
+use colab_playground_core::{
+    provision::ProvisionSpec,
+    usage::{RateReading, published_rate},
+};
 use ely_gpui_component::{layout::bring_into_view, theme::ActiveTheme, typography::Caption};
 use gpui::{
     AnyElement, App, Axis, IntoElement, ParentElement, RenderOnce, ScrollHandle, SharedString,
@@ -153,10 +156,12 @@ pub fn render(
         set(&edit, |spec, v| spec.guard.idle_timeout = v),
     );
     // What the runtime being set up will burn is not known before it runs: the figure is the
-    // one measured on the same hardware, so it is marked as an estimate.
+    // one measured on the same hardware, or one other users published until then, so it is
+    // marked as an estimate.
+    let rate_text = |rate: f64| format::approx(cx, &format::cu_rate(cx, rate));
     let (rate_value, rate_hint) = match rate {
         Some((reading, now)) => (
-            format::approx(cx, &format::cu_rate(cx, reading.cu_per_hour)),
+            rate_text(reading.cu_per_hour),
             tr_args(
                 cx,
                 keys::PROV_RATE_MEASURED,
@@ -164,8 +169,8 @@ pub fn render(
             ),
         ),
         None => (
-            tr(cx, keys::PROV_RATE_NOT_MEASURED),
-            tr(cx, keys::PROV_RATE_NOT_MEASURED_HINT),
+            rate_text(published_rate(spec.accelerator, spec.high_mem)),
+            tr(cx, keys::PROV_RATE_PUBLISHED),
         ),
     };
     let limit_row = |field: &'static str,

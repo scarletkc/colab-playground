@@ -1081,9 +1081,8 @@ pub(super) const MESSAGES: Messages = &[
         "在 GitHub 上回報問題或提出建議。開啟的表單會預先填好本應用程式的版本和你的作業系統。",
     ),
     (PROV_RATE_MEASURED, "{age}在相同硬體的執行階段上測得。"),
-    (PROV_RATE_NOT_MEASURED, "尚未測得"),
     (
-        PROV_RATE_NOT_MEASURED_HINT,
-        "相同硬體的執行階段在帳號上單獨執行時，本應用程式會測出這個數值。",
+        PROV_RATE_PUBLISHED,
+        "其他使用者公布的數值，本應用程式測得後會取代。",
     ),
 ];

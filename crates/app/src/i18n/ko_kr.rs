@@ -1274,9 +1274,8 @@ pub(super) const MESSAGES: Messages = &[
         PROV_RATE_MEASURED,
         "같은 하드웨어의 런타임에서 측정({age}).",
     ),
-    (PROV_RATE_NOT_MEASURED, "아직 측정되지 않음"),
     (
-        PROV_RATE_NOT_MEASURED_HINT,
-        "같은 하드웨어의 런타임이 계정에서 유일하게 실행 중일 때 앱이 측정합니다.",
+        PROV_RATE_PUBLISHED,
+        "다른 사용자가 공개한 값입니다. 앱이 측정하면 그 값으로 바뀝니다.",
     ),
 ];

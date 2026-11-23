@@ -1180,41 +1180,46 @@ fn turning_on_a_limit_at_the_bottom_of_the_form_scrolls_its_value_into_view(
 }
 
 #[gpui::test]
-fn the_form_shows_what_the_chosen_hardware_was_measured_to_burn(cx: &mut TestAppContext) {
-    use colab_playground::{format, i18n::keys, ui::provision_form::rate_selector};
-    use colab_playground_core::mock::mock_rate;
+fn the_form_shows_what_the_chosen_hardware_burns(cx: &mut TestAppContext) {
+    use colab_playground::{format, ui::provision_form::rate_selector};
+    use colab_playground_core::{mock::mock_rate, usage::published_rate};
     let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
-    let pick = |app: &mut TestApp<'_>, accelerator| {
+    let pick = |app: &mut TestApp<'_>, accelerator, high_mem| {
         app.update(|state, cx| {
             state.edit_new_session(
                 |spec| {
                     spec.accelerator = accelerator;
+                    spec.high_mem = high_mem;
                     spec.min_vram_mib = None;
                 },
                 cx,
             )
         });
     };
-    let not_measured = app.text(keys::PROV_RATE_NOT_MEASURED);
-    let t4 = app
-        .cx
-        .update(|_, cx| format::approx(cx, &format::cu_rate(cx, mock_rate(Accelerator::T4))));
+    let shows = |app: &mut TestApp<'_>, rate: f64| {
+        let text = app
+            .cx
+            .update(|_, cx| format::approx(cx, &format::cu_rate(cx, rate)));
+        assert!(app.shown(&rate_selector(&text)), "{text}");
+    };
+    let published = published_rate(Accelerator::T4, false);
+    assert_ne!(published, mock_rate(Accelerator::T4));
+
+    // Nothing ran yet: the figure is the one other users published.
     open_new_session(&mut app);
-    pick(&mut app, Accelerator::T4);
-    assert!(app.shown(&rate_selector(&not_measured)), "nothing ran yet");
+    pick(&mut app, Accelerator::T4, false);
+    shows(&mut app, published);
     app.click(NEW_SESSION_START);
     assert!(matches!(phase(&mut app), Some(ProvisionPhase::Ready(_))));
     app.update(|state, cx| state.close_overlay(cx));
 
-    // The T4 is the account's only runtime, so the account's burn rate is its own.
+    // The T4 is the account's only runtime, so the account's burn rate is its own and
+    // replaces the published figure; hardware that never ran keeps the published one.
     open_new_session(&mut app);
-    pick(&mut app, Accelerator::T4);
-    assert!(app.shown(&rate_selector(&t4)), "{t4}");
-    pick(&mut app, Accelerator::A100);
-    assert!(
-        app.shown(&rate_selector(&not_measured)),
-        "an A100 never ran"
-    );
+    pick(&mut app, Accelerator::T4, false);
+    shows(&mut app, mock_rate(Accelerator::T4));
+    pick(&mut app, Accelerator::A100, true);
+    shows(&mut app, published_rate(Accelerator::A100, true));
 }
 
 #[gpui::test]

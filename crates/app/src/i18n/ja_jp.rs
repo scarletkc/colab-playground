@@ -1373,9 +1373,8 @@ pub(super) const MESSAGES: Messages = &[
         PROV_RATE_MEASURED,
         "同じハードウェアのランタイムで測定（{age}）。",
     ),
-    (PROV_RATE_NOT_MEASURED, "未測定"),
     (
-        PROV_RATE_NOT_MEASURED_HINT,
-        "同じハードウェアのランタイムがアカウントで唯一のランタイムとして動いているときに、アプリが測定します。",
+        PROV_RATE_PUBLISHED,
+        "ほかのユーザーが公開した値です。アプリが測定すると置き換わります。",
     ),
 ];

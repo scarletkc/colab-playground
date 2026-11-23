@@ -1259,9 +1259,8 @@ pub(super) const MESSAGES: Messages = &[
         PROV_RATE_MEASURED,
         "Measured {age} on a runtime with this hardware.",
     ),
-    (PROV_RATE_NOT_MEASURED, "Not measured yet"),
     (
-        PROV_RATE_NOT_MEASURED_HINT,
-        "The app measures it while a runtime with this hardware is the only one on its account.",
+        PROV_RATE_PUBLISHED,
+        "A figure other users published. The app's own measurement replaces it.",
     ),
 ];
