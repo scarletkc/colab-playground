@@ -24,6 +24,11 @@ pub fn field_selector(field: &str) -> String {
     format!("prov {field}")
 }
 
+/// The selector of the burn rate while it reads `value`.
+pub fn rate_selector(value: &str) -> String {
+    format!("{} {value}", field_selector("rate"))
+}
+
 fn row(
     field: &str,
     label: SharedString,
@@ -193,7 +198,7 @@ pub fn render(
             "rate",
             tr(cx, keys::RUNTIME_RATE),
             Some(rate_hint),
-            div().child(rate_value),
+            tagged(rate_selector(&rate_value), div().child(rate_value)),
             cx,
         ),
     ];
