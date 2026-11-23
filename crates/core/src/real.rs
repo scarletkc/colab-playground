@@ -913,6 +913,8 @@ impl Inner {
         Ok(())
     }
 
+    /// A measured rate is left unsaved: the caller's round ends with
+    /// [`Ledger::save_changes`].
     fn record_usage(
         &self,
         results: Vec<(AccountId, Result<crate::usage::Usage>)>,
@@ -938,9 +940,8 @@ impl Inner {
                             cu_per_hour: u.rate_cu_per_hour,
                             at: now,
                         };
-                        let _ = st
-                            .ledger
-                            .update(&id, name, |e| e.measured_rate = Some(reading));
+                        st.ledger
+                            .change(&id, name, |e| e.measured_rate = Some(reading));
                     }
                 }
                 Err(e) => entry.record_failure(e, now),
@@ -1499,6 +1500,7 @@ impl Backend for RealBackend {
                 &verified,
             ),
         }
+        let _ = self.inner.st().ledger.save_changes();
         Ok(self.inner.usage_views())
     }
 
@@ -1770,11 +1772,10 @@ impl Backend for RealBackend {
             };
             let mut meter = e.spend.clone();
             meter.record(now, rate);
-            let _ = self
-                .inner
+            self.inner
                 .st()
                 .ledger
-                .update(&e.account, &e.name, |x| x.spend = meter.clone());
+                .change(&e.account, &e.name, |x| x.spend = meter.clone());
             let decision = evaluate(&e.policy, now, snapshot.as_ref(), &meter);
             let target = RuntimeRef {
                 account: e.account.clone(),
@@ -1803,6 +1804,7 @@ impl Backend for RealBackend {
                 error,
             });
         }
+        let _ = self.inner.st().ledger.save_changes();
         report.usage = self.inner.usage_views();
         Ok(report)
     }

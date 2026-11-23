@@ -1134,6 +1134,45 @@ fn usage_guard_stop_and_vanished_sessions() {
 }
 
 #[test]
+fn a_usage_round_writes_the_ledger_once() {
+    // What runs, whether it ended before the round, whether the round is the guard's,
+    // and how many rates the round measures: only a session running alone is measured.
+    for (sessions, ended, guard, measured) in [
+        (&["alone"][..], false, true, 1),
+        (&["first", "second"][..], false, true, 0),
+        (&["alone"][..], true, true, 0),
+        (&["alone"][..], false, false, 1),
+    ] {
+        let f = fixture();
+        f.adopt_alice();
+        for name in sessions {
+            f.provision(name, Accelerator::T4);
+        }
+        if ended {
+            f.edit_server(|s| s["accounts"]["alice"]["assignments"] = json!({}));
+        }
+        let ledger = f.root.join("local").join("ledger.json");
+        // The ledger is replaced through this temporary file. As a link it keeps the
+        // round's first write in `write`, and the ledger is that link until a second
+        // write replaces it.
+        let write = f.root.join("write.json");
+        let temporary = ledger.with_file_name(format!(".ledger.json.{}.tmp", std::process::id()));
+        std::os::unix::fs::symlink(&write, &temporary).unwrap();
+
+        if guard {
+            f.b.guard_poll(&nc()).unwrap();
+        } else {
+            f.b.refresh_usage(&[], &nc()).unwrap();
+        }
+        let case = format!("{sessions:?}, ended: {ended}, guard round: {guard}");
+        assert!(write.exists(), "nothing was written ({case})");
+        assert!(ledger.is_symlink(), "written more than once ({case})");
+        let saved = RealBackend::new(f.cfg.clone()).unwrap().measured_rates();
+        assert_eq!(saved.len(), measured, "{saved:?} ({case})");
+    }
+}
+
+#[test]
 fn usage_reconciles_before_counting_managed_sessions() {
     for guard in [false, true] {
         let f = fixture();

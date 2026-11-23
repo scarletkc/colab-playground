@@ -282,6 +282,8 @@ impl TrackedSession {
 pub struct Ledger {
     path: Option<PathBuf>,
     entries: Vec<TrackedSession>,
+    /// The entries differ from the file: [`Ledger::save_changes`] writes them.
+    unsaved: bool,
 }
 
 impl Ledger {
@@ -295,6 +297,7 @@ impl Ledger {
         Ok(Ledger {
             path: Some(path.to_owned()),
             entries,
+            unsaved: false,
         })
     }
 
@@ -303,6 +306,7 @@ impl Ledger {
         Ledger {
             path: None,
             entries: Vec::new(),
+            unsaved: false,
         }
     }
 
@@ -385,17 +389,34 @@ impl Ledger {
         name: &str,
         f: impl FnOnce(&mut TrackedSession),
     ) -> Result<bool> {
-        let found = match self.live_mut(account, name) {
-            Some(e) => {
-                f(e);
-                true
-            }
-            None => false,
-        };
+        let found = self.change(account, name, f);
         if found {
             self.save()?;
         }
         Ok(found)
+    }
+
+    /// [`Ledger::update`] without the write, for a round that changes several entries:
+    /// it ends with [`Ledger::save_changes`] and so writes the ledger once.
+    pub fn change(
+        &mut self,
+        account: &AccountId,
+        name: &str,
+        f: impl FnOnce(&mut TrackedSession),
+    ) -> bool {
+        match self.live_mut(account, name) {
+            Some(e) => {
+                f(e);
+                self.unsaved = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Writes the ledger if a [`Ledger::change`] is waiting for it.
+    pub fn save_changes(&mut self) -> Result<()> {
+        if self.unsaved { self.save() } else { Ok(()) }
     }
 
     pub fn mark_stopped(
@@ -456,13 +477,14 @@ impl Ledger {
     }
 
     /// Writes the ledger (atomic replace).
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&mut self) -> Result<()> {
         if let Some(path) = &self.path {
             crate::paths::write_atomic(
                 path,
                 serde_json::to_string_pretty(&self.entries)?.as_bytes(),
             )?;
         }
+        self.unsaved = false;
         Ok(())
     }
 }
