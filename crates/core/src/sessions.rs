@@ -432,13 +432,20 @@ impl Ledger {
         outcome
     }
 
-    /// Keeps at most 200 stopped entries.
+    /// Keeps at most 200 stopped entries, the one holding a hardware's latest
+    /// measured rate among them however old it is.
     fn trim(&mut self) {
         let stopped = self.entries.iter().filter(|e| e.stopped.is_some()).count();
         if stopped > 200 {
+            let latest = self.measured_rates();
             let mut drop = stopped - 200;
             self.entries.retain(|e| {
-                if drop > 0 && e.stopped.is_some() {
+                let holds_rate = e.measured_rate.is_some_and(|reading| {
+                    latest
+                        .iter()
+                        .any(|r| r.matches(e.accelerator, e.high_mem) && r.reading == reading)
+                });
+                if drop > 0 && e.stopped.is_some() && !holds_rate {
                     drop -= 1;
                     false
                 } else {
@@ -659,6 +666,34 @@ mod tests {
         assert_eq!(rate(Accelerator::L4, false), Some(4.82));
         assert_eq!(rate(Accelerator::L4, true), Some(4.82));
         assert_eq!(rate(Accelerator::A100, false), None);
+    }
+
+    #[test]
+    fn a_measured_rate_outlives_the_trimming_of_old_sessions() {
+        let a1 = AccountId::new("a1").unwrap();
+        let mut ledger = Ledger::in_memory();
+        let mut stop = |entry: TrackedSession| {
+            let name = entry.name.clone();
+            ledger.upsert(entry).unwrap();
+            ledger
+                .mark_stopped(&a1, &name, SystemTime::UNIX_EPOCH, StopReason::User)
+                .unwrap();
+        };
+        stop(TrackedSession {
+            accelerator: Accelerator::T4,
+            measured_rate: Some(RateReading {
+                cu_per_hour: 1.76,
+                at: SystemTime::UNIX_EPOCH,
+            }),
+            ..live("measured", None)
+        });
+        for i in 0..250 {
+            stop(live(&format!("s{i}"), None));
+        }
+        assert!(ledger.entries().iter().all(|e| e.name != "s0"), "trimmed");
+        let rates = ledger.measured_rates();
+        assert_eq!(rates.len(), 1);
+        assert!(rates[0].matches(Accelerator::T4, false));
     }
 
     #[test]
