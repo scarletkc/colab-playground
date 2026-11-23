@@ -53,10 +53,11 @@ impl Usage {
 /// changes them, so this is only where the figure starts: a reading of the
 /// app's own replaces it ([`Usage::sole_session`]).
 ///
-/// From the September 2026 measurements at
-/// <https://note.com/okakutech/n/nfb368939d8d4>; the high-RAM T4 and the H100
-/// from <https://www.gkbrk.com/google-colab>. The G4 and the H100 were
-/// published for one machine shape, which stands for both.
+/// From the table measured at
+/// <https://mcp-tool-shop-org.github.io/rnd/handbook/colab-golden-path/>; the
+/// TPUs from <https://note.com/okakutech/n/nfb368939d8d4>, the high-RAM T4 and
+/// the H100 from <https://www.gkbrk.com/google-colab>. The G4 and the H100
+/// were published for one machine shape, which stands for both.
 pub fn published_rate(accelerator: Accelerator, high_mem: bool) -> f64 {
     let high_mem = high_mem && accelerator.supports_high_mem();
     match (accelerator, high_mem) {
