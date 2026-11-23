@@ -1715,6 +1715,9 @@ impl Backend for RealBackend {
             .into_iter()
             .collect();
         if ids.is_empty() {
+            // The record of the last session's stop can still be waiting for a write that
+            // failed.
+            let _ = self.inner.st().ledger.save_changes();
             report.usage = self.inner.usage_views();
             return Ok(report);
         }

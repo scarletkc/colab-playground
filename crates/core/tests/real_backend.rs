@@ -1196,9 +1196,8 @@ fn a_usage_round_writes_the_ledger_once() {
     }
 }
 
-#[test]
-fn a_guard_stop_saves_what_the_round_read_before_it_stops() {
-    let f = fixture();
+/// Starts a session the guard stops in its next round: the balance is under its floor.
+fn session_under_its_floor(f: &Fixture) {
     f.adopt_alice();
     let mut spec = ProvisionSpec::new("floor", Accelerator::T4, &Defaults::default());
     spec.guard = GuardPolicy {
@@ -1208,6 +1207,12 @@ fn a_guard_stop_saves_what_the_round_read_before_it_stops() {
     let (tx, _rx) = channel();
     f.b.provision(spec, tx, &nc()).unwrap();
     f.edit_server(|s| s["accounts"]["alice"]["balance"] = json!(30.0));
+}
+
+#[test]
+fn a_guard_stop_saves_what_the_round_read_before_it_stops() {
+    let f = fixture();
+    session_under_its_floor(&f);
 
     let (ledger, write) = keep_next_ledger_write(&f, "write.json");
     let r = f.b.guard_poll(&nc()).unwrap();
@@ -1219,6 +1224,27 @@ fn a_guard_stop_saves_what_the_round_read_before_it_stops() {
     assert!(!ledger.is_symlink());
     let after = &ledger_entries(&ledger)[0];
     assert!(!after["stopped"].is_null(), "{after}");
+}
+
+#[test]
+fn a_failed_stop_record_write_is_made_by_the_next_guard_round() {
+    let f = fixture();
+    session_under_its_floor(&f);
+    let ledger = f.cfg.local_dir.join("ledger.json");
+    let before = std::fs::read_to_string(&ledger).unwrap();
+    // A folder where the file was makes every write fail.
+    std::fs::remove_file(&ledger).unwrap();
+    std::fs::create_dir(&ledger).unwrap();
+    let r = f.b.guard_poll(&nc()).unwrap();
+    assert!(r.decisions[0].stopped, "{:?}", r.decisions);
+    std::fs::remove_dir(&ledger).unwrap();
+    std::fs::write(&ledger, &before).unwrap();
+
+    // No session is left for this round to read.
+    assert!(f.b.guard_poll(&nc()).unwrap().decisions.is_empty());
+    let e = &ledger_entries(&ledger)[0];
+    assert!(!e["stopped"].is_null(), "{e}");
+    assert_eq!(e["spend"]["rate_known"], true, "{e}");
 }
 
 #[test]
