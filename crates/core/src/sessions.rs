@@ -397,21 +397,22 @@ impl Ledger {
     }
 
     /// [`Ledger::update`] without the write, for a round that changes several entries:
-    /// it ends with [`Ledger::save_changes`] and so writes the ledger once.
+    /// it ends with [`Ledger::save_changes`] and so writes the ledger once, or not at all
+    /// when `f` left every entry as it was.
     pub fn change(
         &mut self,
         account: &AccountId,
         name: &str,
         f: impl FnOnce(&mut TrackedSession),
     ) -> bool {
-        match self.live_mut(account, name) {
-            Some(e) => {
-                f(e);
-                self.unsaved = true;
-                true
-            }
-            None => false,
-        }
+        let Some(e) = self.live_mut(account, name) else {
+            return false;
+        };
+        let before = e.clone();
+        f(e);
+        let changed = *e != before;
+        self.unsaved |= changed;
+        true
     }
 
     /// Writes the ledger if a [`Ledger::change`] is waiting for it.
