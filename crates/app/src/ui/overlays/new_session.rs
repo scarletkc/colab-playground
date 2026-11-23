@@ -53,9 +53,13 @@ pub(super) fn render(
         }
         ProvisionPhase::Editing => {
             let edit: provision_form::SpecEdit = {
-                let handle = handle.clone();
+                let (handle, name) = (handle.clone(), inputs.session_name.clone());
                 Rc::new(move |cx: &mut App, f: &dyn Fn(&mut colab_playground_core::provision::ProvisionSpec)| {
-                    handle.update(cx, |state, cx| state.edit_new_session(|spec| f(spec), cx))
+                    let shown = name.read(cx).text().to_owned();
+                    handle.update(cx, |state, cx| {
+                        state.note_session_name(&shown);
+                        state.edit_new_session(|spec| f(spec), cx)
+                    })
                 })
             };
             let blocked = state.is_provisioning();

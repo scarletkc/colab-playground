@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use colab_playground_core::{
     Error, ErrorKind,
+    backend::accelerator_prefix,
     provision::{ProvisionEvent, ProvisionOutcome, ProvisionSpec},
 };
 use gpui::{Context, ScrollHandle};
@@ -79,6 +80,10 @@ pub struct NewSession {
     /// New on each opening and reset when a failed or cancelled attempt is edited again, so the
     /// form shows from the top.
     pub scroll: ScrollHandle,
+    /// The name the form put into the name field last. The field gets the next one only while
+    /// it still shows this one or nothing, so a name the user typed is never replaced.
+    suggested_name: String,
+    name_typed: bool,
 }
 
 impl AppState {
@@ -113,24 +118,57 @@ impl AppState {
             phase: ProvisionPhase::Editing,
             progress: ProvisionProgress::default(),
             scroll: ScrollHandle::new(),
+            suggested_name: String::new(),
+            name_typed: false,
         });
         self.overlay = Some(Overlay::NewSession);
+        self.suggest_session_name(cx);
+        cx.notify();
+    }
+
+    /// Makes a name with the prefix of the hardware the form has chosen. An empty name field
+    /// starts the session under it, and the field shows it unless the user typed a name.
+    fn suggest_session_name(&mut self, cx: &mut Context<Self>) {
+        let Some(session) = &self.new_session else {
+            return;
+        };
+        let accelerator = session.spec.accelerator;
+        let prefix = accelerator_prefix(accelerator);
         self.run_backend(
             Op::SessionName,
             cx,
-            |backend, _| Ok(backend.new_session_name(None)),
-            |state, result, cx| {
-                if let Ok(name) = result
-                    && let Some(session) = &mut state.new_session
-                    && session.phase == ProvisionPhase::Editing
-                {
+            move |backend, _| Ok(backend.new_session_name(Some(&prefix))),
+            move |state, result, cx| {
+                let Some(session) = &mut state.new_session else {
+                    return;
+                };
+                if session.phase != ProvisionPhase::Editing {
+                    return;
+                }
+                // The hardware changed while this name was made (a request made meanwhile
+                // was ignored).
+                if session.spec.accelerator != accelerator {
+                    state.suggest_session_name(cx);
+                    return;
+                }
+                if let Ok(name) = result {
                     session.spec.name = name.clone();
-                    state.set_input(InputSlot::SessionName, name);
+                    if !session.name_typed {
+                        session.suggested_name = name.clone();
+                        state.set_input(InputSlot::SessionName, name);
+                    }
                     cx.notify();
                 }
             },
         );
-        cx.notify();
+    }
+
+    /// Tells the form what its name field shows, before an edit that may change the hardware.
+    pub fn note_session_name(&mut self, shown: &str) {
+        if let Some(session) = &mut self.new_session {
+            let shown = shown.trim();
+            session.name_typed = !shown.is_empty() && shown != session.suggested_name;
+        }
     }
 
     pub fn edit_new_session(
@@ -141,9 +179,13 @@ impl AppState {
         if let Some(session) = &mut self.new_session
             && session.phase == ProvisionPhase::Editing
         {
+            let accelerator = session.spec.accelerator;
             edit(&mut session.spec);
             if !session.spec.accelerator.is_gpu() {
                 session.spec.min_vram_mib = None;
+            }
+            if session.spec.accelerator != accelerator {
+                self.suggest_session_name(cx);
             }
             cx.notify();
         }
