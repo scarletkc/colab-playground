@@ -249,9 +249,17 @@ impl RootView {
         let pending = self
             .state
             .update(cx, |state, _| state.take_pending_inputs());
-        for (slot, text) in pending {
-            if let Some(input) = self.inputs.slot(&slot) {
-                input.update(cx, |input, cx| input.set_text(text, cx));
+        for pending in pending {
+            if let Some(input) = self.inputs.slot(&pending.slot) {
+                input.update(cx, |input, cx| {
+                    let shown = input.text().trim();
+                    let typed = pending
+                        .replaces
+                        .is_some_and(|replaces| !shown.is_empty() && shown != replaces);
+                    if !typed {
+                        input.set_text(pending.text, cx);
+                    }
+                });
             }
         }
     }

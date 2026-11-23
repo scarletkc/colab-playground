@@ -153,7 +153,7 @@ pub struct AppState {
     plugin_view: PluginView,
     run_form: Option<RunForm>,
     plugin_run: Option<PluginRun>,
-    pending_inputs: Vec<(InputSlot, String)>,
+    pending_inputs: Vec<PendingInput>,
     quit: quit::QuitState,
     stop_all_pending: bool,
     /// The user's stop waits for a runtime listing before asking for a star or feedback
@@ -188,6 +188,16 @@ pub enum Overlay {
     Update(UpdatePrompt),
     /// Asking for a star or feedback (see `feedback`).
     Feedback,
+}
+
+/// A text the root view still has to put into a field it owns.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingInput {
+    pub slot: InputSlot,
+    pub text: String,
+    /// Set by `AppState::offer_input`: the field takes the text only while it is empty or
+    /// shows this.
+    pub replaces: Option<String>,
 }
 
 /// A text field the root view owns, for state to fill (`AppState::set_input`).
@@ -360,12 +370,35 @@ impl AppState {
 
     /// Asks the root view to put `text` into a text field it owns.
     pub(crate) fn set_input(&mut self, slot: InputSlot, text: String) {
-        self.pending_inputs.retain(|(pending, _)| pending != &slot);
-        self.pending_inputs.push((slot, text));
+        self.pending_inputs.retain(|pending| pending.slot != slot);
+        self.pending_inputs.push(PendingInput {
+            slot,
+            text,
+            replaces: None,
+        });
+    }
+
+    /// Like [`Self::set_input`] for a text the app made up: the field takes it only while it
+    /// is empty or shows `replaces` (what the app put there before), which the root view
+    /// checks when it applies the text, so what the user typed meanwhile stays.
+    pub(crate) fn offer_input(&mut self, slot: InputSlot, replaces: String, text: String) {
+        // An offer the field has not seen yet stood for the same earlier text.
+        let offered = self
+            .pending_inputs
+            .iter_mut()
+            .find(|pending| pending.slot == slot && pending.replaces.is_some());
+        match offered {
+            Some(pending) => pending.text = text,
+            None => self.pending_inputs.push(PendingInput {
+                slot,
+                text,
+                replaces: Some(replaces),
+            }),
+        }
     }
 
     /// Text-field contents the root view still has to apply.
-    pub fn take_pending_inputs(&mut self) -> Vec<(InputSlot, String)> {
+    pub fn take_pending_inputs(&mut self) -> Vec<PendingInput> {
         std::mem::take(&mut self.pending_inputs)
     }
 

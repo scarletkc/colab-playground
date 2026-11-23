@@ -80,10 +80,8 @@ pub struct NewSession {
     /// New on each opening and reset when a failed or cancelled attempt is edited again, so the
     /// form shows from the top.
     pub scroll: ScrollHandle,
-    /// The name the form put into the name field last. The field gets the next one only while
-    /// it still shows this one or nothing, so a name the user typed is never replaced.
+    /// The name the form offered the name field last; the next one replaces only this one.
     suggested_name: String,
-    name_typed: bool,
 }
 
 impl AppState {
@@ -119,15 +117,16 @@ impl AppState {
             progress: ProvisionProgress::default(),
             scroll: ScrollHandle::new(),
             suggested_name: String::new(),
-            name_typed: false,
         });
         self.overlay = Some(Overlay::NewSession);
+        // Whatever an earlier opening left in the field is not a name typed for this one.
+        self.set_input(InputSlot::SessionName, String::new());
         self.suggest_session_name(cx);
         cx.notify();
     }
 
     /// Makes a name with the prefix of the hardware the form has chosen. An empty name field
-    /// starts the session under it, and the field shows it unless the user typed a name.
+    /// starts the session under it, and the field shows it unless the user typed another.
     fn suggest_session_name(&mut self, cx: &mut Context<Self>) {
         let Some(session) = &self.new_session else {
             return;
@@ -153,22 +152,12 @@ impl AppState {
                 }
                 if let Ok(name) = result {
                     session.spec.name = name.clone();
-                    if !session.name_typed {
-                        session.suggested_name = name.clone();
-                        state.set_input(InputSlot::SessionName, name);
-                    }
+                    let replaces = std::mem::replace(&mut session.suggested_name, name.clone());
+                    state.offer_input(InputSlot::SessionName, replaces, name);
                     cx.notify();
                 }
             },
         );
-    }
-
-    /// Tells the form what its name field shows, before an edit that may change the hardware.
-    pub fn note_session_name(&mut self, shown: &str) {
-        if let Some(session) = &mut self.new_session {
-            let shown = shown.trim();
-            session.name_typed = !shown.is_empty() && shown != session.suggested_name;
-        }
     }
 
     pub fn edit_new_session(
