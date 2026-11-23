@@ -14,7 +14,7 @@ use colab_playground::{
             RESERVED_NOTE,
         },
         pages::sessions::{NEW_SESSION_SELECTOR, forward_selector, stop_selector},
-        progress,
+        progress, provision_form,
     },
 };
 use colab_playground_core::{
@@ -1179,6 +1179,74 @@ fn turning_on_a_limit_at_the_bottom_of_the_form_scrolls_its_value_into_view(
     );
 }
 
+fn name_field(app: &mut TestApp<'_>) -> String {
+    app.read_root(|root, cx| root.inputs().session_name.read(cx).text().to_owned())
+}
+
+fn pick_hardware(app: &mut TestApp<'_>, accelerator: Accelerator) {
+    let index = Accelerator::ALL
+        .iter()
+        .position(|a| *a == accelerator)
+        .expect("a known accelerator");
+    app.pick_option(
+        &provision_form::field_selector("accelerator"),
+        index,
+        Accelerator::ALL.len(),
+    );
+    assert_eq!(
+        app.read(|state, _| state.new_session().map(|s| s.spec.accelerator)),
+        Some(accelerator)
+    );
+}
+
+#[gpui::test]
+fn the_generated_name_follows_the_chosen_hardware(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
+    assert_eq!(
+        app.read(|state, _| state.defaults().accelerator),
+        Accelerator::A100
+    );
+    open_new_session(&mut app);
+    let first = name_field(&mut app);
+    assert!(first.starts_with("a100-"), "{first}");
+
+    pick_hardware(&mut app, Accelerator::T4);
+    let second = name_field(&mut app);
+    assert!(second.starts_with("t4-"), "{second}");
+
+    pick_hardware(&mut app, Accelerator::None);
+    let third = name_field(&mut app);
+    assert!(third.starts_with("cpu-"), "{third}");
+
+    // An edit that leaves the hardware alone leaves the name alone.
+    app.click(&provision_form::field_selector("high_mem"));
+    assert!(app.read(|state, _| state.new_session().is_some_and(|s| s.spec.high_mem)));
+    assert_eq!(name_field(&mut app), third);
+
+    app.click(NEW_SESSION_START);
+    let Some(ProvisionPhase::Ready(outcome)) = phase(&mut app) else {
+        panic!("expected a ready runtime, got {:?}", phase(&mut app));
+    };
+    assert_eq!(outcome.name, third);
+}
+
+#[gpui::test]
+fn a_typed_name_survives_a_hardware_change(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
+    open_new_session(&mut app);
+    app.fill(|inputs| inputs.session_name.clone(), "my-experiment");
+    pick_hardware(&mut app, Accelerator::T4);
+    assert_eq!(name_field(&mut app), "my-experiment");
+
+    // An emptied field starts the session under a name made for the hardware chosen since.
+    app.fill(|inputs| inputs.session_name.clone(), "");
+    app.click(NEW_SESSION_START);
+    let Some(ProvisionPhase::Ready(outcome)) = phase(&mut app) else {
+        panic!("expected a ready runtime, got {:?}", phase(&mut app));
+    };
+    assert!(outcome.name.starts_with("t4-"), "{}", outcome.name);
+}
+
 #[gpui::test]
 fn the_form_shows_what_the_chosen_hardware_burns(cx: &mut TestAppContext) {
     use colab_playground::{format, ui::provision_form::rate_selector};
@@ -1257,4 +1325,79 @@ fn the_periodic_listing_asks_for_no_other(cx: &mut TestAppContext) {
         before + 2,
         "with none under way it lists"
     );
+}
+
+fn h100_is_refused() -> Options {
+    Options {
+        failures: MockFailures {
+            not_entitled: vec![Accelerator::H100],
+            ..MockFailures::default()
+        },
+        ..Options::scenario(MockScenario::single())
+    }
+}
+
+#[gpui::test]
+fn a_suggested_name_follows_the_hardware_after_a_failed_attempt(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, h100_is_refused());
+    open_new_session(&mut app);
+    pick_hardware(&mut app, Accelerator::H100);
+    let refused = name_field(&mut app);
+    assert!(refused.starts_with("h100-"), "{refused}");
+    app.click(NEW_SESSION_START);
+    assert!(matches!(phase(&mut app), Some(ProvisionPhase::Failed(_))));
+
+    app.click("new-session-change");
+    assert_eq!(name_field(&mut app), refused);
+    pick_hardware(&mut app, Accelerator::T4);
+    let shown = name_field(&mut app);
+    assert!(shown.starts_with("t4-"), "{shown}");
+
+    app.click(NEW_SESSION_START);
+    let Some(ProvisionPhase::Ready(outcome)) = phase(&mut app) else {
+        panic!("expected a ready runtime, got {:?}", phase(&mut app));
+    };
+    assert_eq!(outcome.name, shown);
+}
+
+#[gpui::test]
+fn a_typed_name_survives_a_hardware_change_after_a_failed_attempt(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, h100_is_refused());
+    open_new_session(&mut app);
+    pick_hardware(&mut app, Accelerator::H100);
+    app.fill(|inputs| inputs.session_name.clone(), "my-experiment");
+    app.click(NEW_SESSION_START);
+    assert!(matches!(phase(&mut app), Some(ProvisionPhase::Failed(_))));
+
+    app.click("new-session-change");
+    pick_hardware(&mut app, Accelerator::T4);
+    assert_eq!(name_field(&mut app), "my-experiment");
+
+    app.fill(|inputs| inputs.session_name.clone(), "");
+    app.click(NEW_SESSION_START);
+    let Some(ProvisionPhase::Ready(outcome)) = phase(&mut app) else {
+        panic!("expected a ready runtime, got {:?}", phase(&mut app));
+    };
+    assert!(outcome.name.starts_with("t4-"), "{}", outcome.name);
+}
+
+#[gpui::test]
+fn an_emptied_name_field_after_a_failed_attempt_starts_under_a_suggested_name(
+    cx: &mut TestAppContext,
+) {
+    let mut app = TestApp::with(cx, h100_is_refused());
+    open_new_session(&mut app);
+    pick_hardware(&mut app, Accelerator::H100);
+    app.fill(|inputs| inputs.session_name.clone(), "my-experiment");
+    app.click(NEW_SESSION_START);
+    assert!(matches!(phase(&mut app), Some(ProvisionPhase::Failed(_))));
+
+    app.click("new-session-change");
+    app.set_failures(MockFailures::default());
+    app.fill(|inputs| inputs.session_name.clone(), "");
+    app.click(NEW_SESSION_START);
+    let Some(ProvisionPhase::Ready(outcome)) = phase(&mut app) else {
+        panic!("expected a ready runtime, got {:?}", phase(&mut app));
+    };
+    assert!(outcome.name.starts_with("h100-"), "{}", outcome.name);
 }
