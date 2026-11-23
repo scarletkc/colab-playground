@@ -1784,6 +1784,9 @@ impl Backend for RealBackend {
             };
             let (mut stopped, mut error) = (false, None);
             if let Decision::Stop(concern) = &decision {
+                // A stop can take long and the app can quit before it returns: what the
+                // round read is saved first.
+                let _ = self.inner.st().ledger.save_changes();
                 match self.inner.stop(
                     &target,
                     &StopOptions {
