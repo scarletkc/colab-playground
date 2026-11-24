@@ -31,6 +31,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -90,6 +91,7 @@ NOT_A_CHECKPOINT = re.compile(
 # ------------------------------------------------------------- status
 
 _current_stage = ["detect"]
+_failure = [""]
 
 
 def redact(text):
@@ -119,6 +121,7 @@ def status(state, stage=None, message="", progress=None, outputs=None):
 
 
 def fail(message):
+    _failure[0] = message
     status("failed", message=message)
     sys.exit(1)
 
@@ -402,19 +405,35 @@ def kill_server():
         time.sleep(1)
 
 
-def stop_server():
-    """Stops the server this worker started. It runs in its own session, so
-    the signal has to reach its process group."""
-    p = _server[0]
-    if p is not None and p.poll() is None:
+def kill_group(pid, sig):
+    """Signals the process group of a child that runs in its own session.
+    Windows has no process groups, so the process tree is taken down there."""
+    if hasattr(os, "killpg"):
         try:
-            os.killpg(p.pid, signal.SIGTERM)
+            os.killpg(pid, sig)
         except OSError:
             pass
-        for _ in range(20):
-            if p.poll() is not None:
-                return
-            time.sleep(0.5)
+        return
+    subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, check=False)
+
+
+def stop_server():
+    """Stops the server this worker started. It runs in its own session, so
+    the signal has to reach its process group. Returns its exit code."""
+    p = _server[0]
+    if p is None or p.poll() is not None:
+        return None
+    kill_group(p.pid, signal.SIGTERM)
+    for _ in range(20):
+        if p.poll() is not None:
+            return p.returncode
+        time.sleep(0.5)
+    kill_group(p.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    try:
+        p.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+    return p.returncode
 
 
 def start_server():
@@ -566,6 +585,166 @@ def warmup(p, ckpt_name, steps, cfg, size, latent_node):
     fail("the test image did not finish in time")
 
 
+# ------------------------------------------------------------- self test
+
+
+def fake_safetensors(path, keys):
+    """A .safetensors file with a header and no weights."""
+    body = json.dumps({k: {"dtype": "F16", "shape": [1], "data_offsets": [0, 2]} for k in keys}).encode()
+    with open(path, "wb") as fh:
+        fh.write(struct.pack("<Q", len(body)))
+        fh.write(body)
+    return path
+
+
+def pid_alive(pid):
+    if os.name == "nt":
+        out = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/NH"],
+                             capture_output=True, text=True).stdout
+        return str(pid) in out
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def self_test():
+    """The parts that can be checked without a Colab runtime:
+        python3 worker.py --self-test
+    """
+    global RUN_DIR, STATUS_FILE, PRESET, REPO, PATTERN, hf_tree
+    RUN_DIR = tempfile.mkdtemp(prefix="comfyui-selftest")
+    STATUS_FILE = os.path.join(RUN_DIR, "status.json")
+    failures = 0
+
+    def check(name, got, want):
+        nonlocal failures
+        ok = got == want
+        failures += 0 if ok else 1
+        print("%s %-46s %s" % ("ok  " if ok else "FAIL", name, got if ok else "%r != %r" % (got, want)))
+
+    def expect_failure(name, fn):
+        nonlocal failures
+        try:
+            fn()
+        except SystemExit:
+            print("ok   %-46s failed as expected" % name)
+            return
+        failures += 1
+        print("FAIL %-46s did not fail" % name)
+
+    def patch(**names):
+        """Replaces module level functions and returns a function that puts
+        the originals back."""
+        old = {k: globals()[k] for k in names}
+        globals().update(names)
+        return lambda: globals().update(old)
+
+    # ---------------------------------------------------------- picking
+    tree = [
+        {"type": "file", "path": "v1-5-pruned-emaonly.safetensors", "lfs": {"size": 4270000000}},
+        {"type": "file", "path": "unet/diffusion_pytorch_model.safetensors", "lfs": {"size": 10270000000}},
+        {"type": "file", "path": "cereal_lora.safetensors", "lfs": {"size": 90000000}},
+    ]
+    hf_tree = lambda repo: tree
+    PRESET, REPO, PATTERN = "sd15", "", ""
+    check("the sd15 preset", pick_checkpoint()[:2],
+          ("stable-diffusion-v1-5/stable-diffusion-v1-5", "v1-5-pruned-emaonly.safetensors"))
+    PRESET, REPO, PATTERN = "custom", "someone/model", ""
+    check("a custom repository", pick_checkpoint()[1], "v1-5-pruned-emaonly.safetensors")
+    PATTERN = "unet/"
+    expect_failure("a diffusers repository", pick_checkpoint)
+    PATTERN = "nothing"
+    expect_failure("a repository without a match", pick_checkpoint)
+    PATTERN = ""
+    hf_tree = lambda repo: [{"type": "file", "path": "cereal_lora.safetensors", "lfs": {"size": 90000000}}]
+    expect_failure("a repository with only a LoRA", pick_checkpoint)
+    REPO = "not-a-repo"
+    expect_failure("a repository id that is not owner/name", pick_checkpoint)
+
+    # ---------------------------------------------------------- contents
+    ckpt = os.path.join(RUN_DIR, "fake.safetensors")
+    check("an SD 1.5 checkpoint", checkpoint_assets(fake_safetensors(ckpt, [
+        "model.diffusion_model.input_blocks.0.0.weight", "cond_stage_model.transformer.text_model.emb.weight",
+        "first_stage_model.decoder.conv_in.weight"])), (True, True, True))
+    check("an SDXL checkpoint", checkpoint_assets(fake_safetensors(ckpt, [
+        "model.diffusion_model.input_blocks.0.0.weight", "conditioner.embedders.0.text_model.emb.weight",
+        "first_stage_model.decoder.conv_in.weight"])), (True, True, True))
+    check("an all-in-one Flux checkpoint", checkpoint_assets(fake_safetensors(ckpt, [
+        "model.diffusion_model.img_in.weight", "text_encoders.clip_l.transformer.text_model.emb.weight",
+        "text_encoders.t5xxl.transformer.encoder.block.0.weight", "vae.decoder.conv_in.weight"])), (True, True, True))
+    check("a Flux transformer alone", checkpoint_assets(fake_safetensors(ckpt, [
+        "double_blocks.0.img_attn.qkv.weight", "single_blocks.0.modulation.lin.weight"])), (True, False, False))
+    check("a LoRA is no checkpoint", checkpoint_assets(fake_safetensors(ckpt, [
+        "lora_unet_down_blocks.0.to_q.lora_A.weight"])), (False, False, False))
+
+    # ---------------------------------------------------------- the model family
+    PRESET = "flux-schnell"
+    check("Flux wants a 16 channel latent", generation_params("Comfy-Org/Flux-1-Schnell", "flux1-schnell-fp8.safetensors"),
+          (4, 1.0, 1024, "EmptySD3LatentImage"))
+    PRESET = "sd15"
+    check("SD 1.5 wants a 4 channel latent", generation_params("r/x", "x.safetensors"),
+          (20, 7.5, 512, "EmptyLatentImage"))
+    check("PyTorch is left alone", [l for l in filter_requirements(["torch\n", "torchvision\n", "torchsde\n", "numpy>=1.25.0\n"])
+                                    if l.strip().lower() in ("torch", "torchvision")], [])
+
+    # ---------------------------------------------------------- the failure paths
+    def boom():
+        raise RuntimeError("the install failed")
+
+    def must_not_start():
+        raise AssertionError("the server must not start")
+
+    restore = patch(install_comfy=boom, check_torch=lambda: "A100", start_server=must_not_start)
+    try:
+        expect_failure("a failed install", run)
+    finally:
+        restore()
+    check("a failed install is reported", json.load(open(STATUS_FILE))["state"], "failed")
+
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    check("a server that died is noticed", wait_healthy(dead, timeout=5), False)
+
+    server = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], start_new_session=True)
+
+    def fake_start():
+        _server[0] = server
+        return server
+
+    restore = patch(install_comfy=lambda: None, check_torch=lambda: "A100",
+                    pick_checkpoint=lambda: ("r/x", "x.safetensors", 1),
+                    download=lambda repo, path, total: path,
+                    kill_server=lambda: None, port_busy=lambda port: False,
+                    start_server=fake_start, wait_healthy=lambda p: True,
+                    warmup=lambda *a: (_ for _ in ()).throw(RuntimeError("the warm-up failed")),
+                    gpu_used_mib=lambda: 4096)
+    try:
+        expect_failure("a failed warm-up", run)
+    finally:
+        restore()
+    check("a failed warm-up stops the server", pid_alive(server.pid), False)
+
+    # a cancelled run stops the server too, and says so
+    pidfile = os.path.join(RUN_DIR, "cancel.pid")
+    script = ("import subprocess, sys;"
+              "sys.path.insert(0, %r);"
+              "import worker;"
+              "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'], start_new_session=True);"
+              "worker._server[0] = p;"
+              "open(%r, 'w').write(str(p.pid));"
+              "worker.on_sigterm()") % (os.path.dirname(os.path.abspath(__file__)), pidfile)
+    env = dict(os.environ, PLUGIN_STATUS_FILE=os.path.join(RUN_DIR, "cancel-status.json"))
+    cancelled = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env)
+    check("a cancelled run exits 143", cancelled.returncode, 143)
+    time.sleep(0.5)
+    check("a cancelled run stops the server", pid_alive(int(open(pidfile).read())), False)
+
+    print("\n%d failure(s)" % failures)
+    return 1 if failures else 0
+
+
 # ------------------------------------------------------------- main
 
 
@@ -597,40 +776,46 @@ def main():
     if PORT == 8080:
         fail("VM port 8080 belongs to Colab; choose another port")
 
-    status("running", "detect", "checking the GPU")
-    gpu, vram = gpu_info()
-    if not gpu:
-        print("warning: no GPU detected, generation will be very slow", flush=True)
-    status("running", "detect", "%s, %d MiB" % (gpu, vram) if gpu else "no GPU (CPU run, very slow)")
-
-    status("running", "install", "installing ComfyUI")
-    install_comfy()
-    torch_gpu = check_torch()
-    status("running", "install", "ComfyUI installed (%s)" % (torch_gpu or gpu or "no GPU"))
-
-    status("running", "download", "looking for a checkpoint")
-    repo, ckpt_path, total = pick_checkpoint()
-    steps, cfg, size, latent_node = generation_params(repo, ckpt_path)
-    if latent_node == "EmptySD3LatentImage" and vram and vram < 20000:
-        print("warning: a Flux checkpoint wants about 24 GB of VRAM; this GPU has %d MiB" % vram, flush=True)
-    status("running", "download", "%s (%.1f GB)" % (ckpt_path, total / 1e9), progress=0.0)
-    ckpt_file = download(repo, ckpt_path, total)
-    ckpt_name = os.path.relpath(ckpt_file, MODELS_CKPT)
-    assets = checkpoint_assets(ckpt_file)
-    if assets and not assets[0]:
-        fail("%s is not a checkpoint: it holds no model weights" % ckpt_name)
-    if assets and not (assets[1] and assets[2]):
-        fail("%s holds the model alone: ComfyUI needs one file with the text encoders and "
-             "the VAE in it as well (the all-in-one Flux file is "
-             "Comfy-Org/Flux-1-Schnell/flux1-schnell-fp8.safetensors)" % ckpt_name)
-    status("running", "download", "checkpoint ready: %s" % ckpt_name)
-
-    kill_server()
-    if port_busy(PORT):
-        fail("port %d is already in use on the VM; choose another port" % PORT)
-
     ready = False
     try:
+        status("running", "detect", "checking the GPU")
+        gpu, vram = gpu_info()
+        if not gpu:
+            print("warning: no GPU detected, generation will be very slow", flush=True)
+        status("running", "detect", "%s, %d MiB" % (gpu, vram) if gpu else "no GPU (CPU run, very slow)")
+
+        status("running", "install", "installing ComfyUI")
+        install_comfy()
+        torch_gpu = check_torch()
+        status("running", "install", "ComfyUI installed (%s)" % (torch_gpu or gpu or "no GPU"))
+
+        status("running", "download", "looking for a checkpoint")
+        repo, ckpt_path, total = pick_checkpoint()
+        steps, cfg, size, latent_node = generation_params(repo, ckpt_path)
+        if latent_node == "EmptySD3LatentImage" and vram and vram < 20000:
+            print("warning: a Flux checkpoint wants about 24 GB of VRAM; this GPU has %d MiB" % vram, flush=True)
+        status("running", "download", "%s (%.1f GB)" % (ckpt_path, total / 1e9), progress=0.0)
+        ckpt_file = download(repo, ckpt_path, total)
+        ckpt_name = os.path.relpath(ckpt_file, MODELS_CKPT)
+        assets = checkpoint_assets(ckpt_file)
+        if assets:
+            missing = []
+            if not assets[0]:
+                missing.append("the model")
+            if not assets[1]:
+                missing.append("the text encoders")
+            if not assets[2]:
+                missing.append("the VAE")
+            if missing:
+                fail("%s is missing %s: ComfyUI needs one file that holds the model, the text "
+                     "encoders and the VAE (the all-in-one Flux file is "
+                     "Comfy-Org/Flux-1-Schnell/flux1-schnell-fp8.safetensors)" % (ckpt_name, ", ".join(missing)))
+        status("running", "download", "checkpoint ready: %s" % ckpt_name)
+
+        kill_server()
+        if port_busy(PORT):
+            fail("port %d is already in use on the VM; choose another port" % PORT)
+
         status("running", "server", "starting ComfyUI on port %d" % PORT)
         p = start_server()
         if not wait_healthy(p):
@@ -655,13 +840,24 @@ def main():
         # A run that never became ready leaves no server behind: it would keep
         # the port and the VRAM of a session that stays alive.
         if not ready:
-            stop_server()
+            code = stop_server()
+            if code is not None:
+                print("the server was stopped (exit %s)" % code, flush=True)
+                if _failure[0]:
+                    status("failed", message="%s (the server was stopped) %s"
+                           % (_failure[0], log_tail(3)))
 
 
-if __name__ == "__main__":
+def run():
     try:
         main()
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001
         fail("worker error: %s: %s" % (type(exc).__name__, redact("%s" % exc)[:200]))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
+        sys.exit(self_test())
+    run()
