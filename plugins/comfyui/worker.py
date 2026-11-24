@@ -398,17 +398,6 @@ def port_busy(port):
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def kill_server():
-    """Clears the port before the server starts. Only a ComfyUI in the
-    directory this plugin uses is touched."""
-    main = os.path.join(COMFY, "main.py")
-    subprocess.run(["pkill", "-f", main], check=False)
-    for _ in range(30):
-        if subprocess.run(["pgrep", "-f", main], capture_output=True).returncode != 0:
-            return
-        time.sleep(1)
-
-
 def kill_group(pid, sig):
     """Signals the process group of a child that runs in its own session.
     Windows has no process groups, so the process tree is taken down there."""
@@ -749,6 +738,16 @@ def self_test():
         restore()
     check("a failed install is reported", json.load(open(STATUS_FILE))["state"], "failed")
 
+    restore = patch(install_comfy=lambda: None, check_torch=lambda: "A100",
+                    pick_checkpoint=lambda: ("r/x", "x.safetensors", 1),
+                    download=lambda repo, path, total: path,
+                    port_busy=lambda port: True, start_server=must_not_start)
+    try:
+        expect_failure("a port that is taken", run_worker)
+    finally:
+        restore()
+    check("a taken port is not taken from anyone", "already in use" in json.load(open(STATUS_FILE))["message"], True)
+
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
     check("a server that died is noticed", wait_healthy(dead, timeout=5), False)
@@ -762,7 +761,7 @@ def self_test():
     restore = patch(install_comfy=lambda: None, check_torch=lambda: "A100",
                     pick_checkpoint=lambda: ("r/x", "x.safetensors", 1),
                     download=lambda repo, path, total: path,
-                    kill_server=lambda: None, port_busy=lambda port: False,
+                    port_busy=lambda port: False,
                     start_server=fake_start, wait_healthy=lambda p: True,
                     warmup=lambda *a: (_ for _ in ()).throw(RuntimeError("the warm-up failed")),
                     gpu_used_mib=lambda: 4096)
@@ -858,9 +857,11 @@ def main():
                      "Comfy-Org/Flux-1-Schnell/flux1-schnell-fp8.safetensors)" % (ckpt_name, ", ".join(missing)))
         status("running", "download", "checkpoint ready: %s" % ckpt_name)
 
-        kill_server()
+        # The server of another run, or one the user started, may hold the
+        # port. It is not this worker's to stop.
         if port_busy(PORT):
-            fail("port %d is already in use on the VM; choose another port" % PORT)
+            fail("port %d is already in use on the VM: another service holds it. "
+                 "Stop it, or choose another port" % PORT)
 
         status("running", "server", "starting ComfyUI on port %d" % PORT)
         p = start_server()
