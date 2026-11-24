@@ -1149,6 +1149,35 @@ fn ledger_entries(file: &Path) -> Vec<serde_json::Value> {
 }
 
 #[test]
+fn joint_starts_use_measurements_from_the_same_usage_round() {
+    let f = fixture();
+    let alice = f.adopt_alice();
+    let bob = f.add_bob();
+    let (joint, solo) = if alice.id < bob.id {
+        (alice.id, bob.id)
+    } else {
+        (bob.id, alice.id)
+    };
+    f.b.refresh_usage(std::slice::from_ref(&joint), &nc())
+        .unwrap();
+    f.b.switch_account(&solo, &nc()).unwrap();
+    f.provision("solo-t4", Accelerator::T4);
+    f.b.switch_account(&joint, &nc()).unwrap();
+    f.provision("joint-a100", Accelerator::A100);
+    f.provision("joint-t4", Accelerator::T4);
+    let results = f.b.refresh_usage(&[joint.clone(), solo], &nc()).unwrap();
+    let view = results.iter().find(|v| v.account == joint).unwrap();
+    let total = view.snapshot.unwrap().rate_cu_per_hour;
+    let a100 = colab_playground_core::usage::published_rate(Accelerator::A100, false);
+    let expected = total * (1.76 / (a100 + 1.76));
+    let actual = view.session_rates["joint-t4"];
+    assert!(
+        (actual - expected).abs() < 1e-9,
+        "T4 estimate {actual}, expected {expected}"
+    );
+}
+
+#[test]
 fn a_usage_round_writes_the_ledger_once() {
     // What runs, whether it ended before the round, whether the round is the guard's,
     // and how many rates the round measures: only a session running alone is measured.

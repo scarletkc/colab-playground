@@ -921,28 +921,40 @@ impl Inner {
         verified: &BTreeSet<AccountId>,
     ) {
         let now = self.now();
-        for (id, res) in results {
-            let mut st = self.st();
-            let State { usage, ledger, .. } = &mut *st;
+        let mut st = self.st();
+        let State {
+            accounts,
+            usage,
+            ledger,
+            ..
+        } = &mut *st;
+        let readings: Vec<_> = results
+            .into_iter()
+            .map(|(id, reading)| {
+                let live = ledger.live_of(&id).map(|e| e.name.clone()).collect();
+                (id, reading, live)
+            })
+            .collect();
+        for (id, reading, live) in &readings {
+            if let Ok(u) = reading
+                && verified.contains(id)
+                && let Some(name) = u.sole_session(live)
+            {
+                let rate = RateReading {
+                    cu_per_hour: u.rate_cu_per_hour,
+                    at: now,
+                };
+                ledger.change(id, name, |e| e.measured_rate = Some(rate));
+            }
+        }
+        for (id, res, live) in readings {
             let entry = usage.entry(id.clone()).or_default();
             match res {
                 Ok(u) => {
-                    let live = ledger.live_of(&id).map(|e| e.name.clone()).collect();
                     entry.record_success(u, now, &live, || ledger.live_hardware_rates(&id));
                     entry.ownership_verified = live.is_empty() || verified.contains(&id);
-                    let snap = entry.snapshot;
-                    if let Some(s) = snap {
-                        let _ = st.accounts.set_usage(&id, s);
-                    }
-                    if verified.contains(&id)
-                        && let Some(name) = u.sole_session(&live)
-                    {
-                        let reading = RateReading {
-                            cu_per_hour: u.rate_cu_per_hour,
-                            at: now,
-                        };
-                        st.ledger
-                            .change(&id, name, |e| e.measured_rate = Some(reading));
+                    if let Some(s) = entry.snapshot {
+                        let _ = accounts.set_usage(&id, s);
                     }
                 }
                 Err(e) => entry.record_failure(e, now),
