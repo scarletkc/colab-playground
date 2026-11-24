@@ -9,7 +9,8 @@
 //!   sessions, 5 min otherwise by default; manual refresh is always allowed).
 //! * [`RateAttribution`] — an *estimated* per-session burn rate, taken from the
 //!   change of the account rate observed when sessions start or stop, split
-//!   evenly when ambiguous. All per-session figures are estimates (`≈`).
+//!   using hardware rates for joint starts when available. All per-session
+//!   figures are estimates (`≈`).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, SystemTime};
@@ -225,14 +226,21 @@ pub struct RateAttribution {
 impl RateAttribution {
     /// `live` are the app-managed sessions running now. Sessions that appeared
     /// since the previous reading share the rate increase (plus whatever the
-    /// sessions that disappeared were estimated at) evenly. Sessions without
+    /// sessions that disappeared were estimated at), in proportion to their
+    /// hardware rates when all are known, and evenly otherwise. Sessions without
     /// an estimate (first reading, no positive increase) share whatever rate
     /// is not yet explained, evenly with the unmanaged runtimes
     /// (`assignments` beyond `live`). A zero share leaves a session unknown,
     /// to be worked out again at the next reading: the account rate can lag
     /// behind a new runtime, and a zero kept for good would hide its spend
     /// from the cost guard.
-    pub fn observe(&mut self, account_rate: f64, assignments: u32, live: &BTreeSet<String>) {
+    pub fn observe(
+        &mut self,
+        account_rate: f64,
+        assignments: u32,
+        live: &BTreeSet<String>,
+        hardware_rates: impl FnOnce() -> BTreeMap<String, f64>,
+    ) {
         let rate = account_rate.max(0.0);
         let mut freed = 0.0;
         self.rates.retain(|name, r| {
@@ -248,15 +256,34 @@ impl RateAttribution {
             .filter(|n| !self.rates.contains_key(*n))
             .cloned()
             .collect();
-        let delta_share = match self.last_rate {
+        let delta = match self.last_rate {
             Some(prev) if !started.is_empty() => {
                 let delta = rate - prev + freed;
-                (delta > NO_RATE).then(|| delta / started.len() as f64)
+                (delta > NO_RATE).then_some(delta)
             }
             _ => None,
         };
-        for name in started {
-            self.rates.insert(name, delta_share);
+        let weights = delta.filter(|_| started.len() > 1).and_then(|_| {
+            let rates = hardware_rates();
+            let weights: Vec<_> = started
+                .iter()
+                .map(|name| {
+                    rates
+                        .get(name)
+                        .copied()
+                        .filter(|r| r.is_finite() && *r > NO_RATE)
+                })
+                .collect::<Option<_>>()?;
+            let total: f64 = weights.iter().sum();
+            total.is_finite().then_some((weights, total))
+        });
+        let count = started.len();
+        for (i, name) in started.into_iter().enumerate() {
+            let share = delta.map(|d| match &weights {
+                Some((weights, total)) => d * (weights[i] / total),
+                None => d / count as f64,
+            });
+            self.rates.insert(name, share);
         }
         let unknown: Vec<String> = self
             .rates
@@ -308,13 +335,23 @@ pub struct AccountUsage {
 }
 
 impl AccountUsage {
-    pub fn record_success(&mut self, usage: Usage, now: SystemTime, live: &BTreeSet<String>) {
+    pub fn record_success(
+        &mut self,
+        usage: Usage,
+        now: SystemTime,
+        live: &BTreeSet<String>,
+        hardware_rates: impl FnOnce() -> BTreeMap<String, f64>,
+    ) {
         self.snapshot = Some(UsageSnapshot::new(usage, now));
         self.managed_at_reading = Some(live.len());
         self.ownership_verified = true;
         self.history.push(now, usage.balance_cu);
-        self.attribution
-            .observe(usage.rate_cu_per_hour, usage.assignments, live);
+        self.attribution.observe(
+            usage.rate_cu_per_hour,
+            usage.assignments,
+            live,
+            hardware_rates,
+        );
         self.last_attempt = Some(now);
         self.last_error = None;
     }
@@ -447,7 +484,7 @@ mod tests {
         let mut a = AccountUsage::default();
         a.record_failure(Error::new(crate::ErrorKind::Http), t(0));
         assert!(a.snapshot.is_none(), "unknown stays unknown, not zero");
-        a.record_success(u(50.0, 5.0, 1), t(30), &set(&["s1"]));
+        a.record_success(u(50.0, 5.0, 1), t(30), &set(&["s1"]), BTreeMap::new);
         a.record_failure(Error::new(crate::ErrorKind::Http), t(60));
         let s = a.snapshot.unwrap();
         assert!(s.stale);
@@ -472,16 +509,16 @@ mod tests {
     #[test]
     fn attribution_from_rate_deltas() {
         let mut a = RateAttribution::default();
-        a.observe(0.0, 0, &set(&[]));
+        a.observe(0.0, 0, &set(&[]), BTreeMap::new);
         // s1 starts: rate goes 0 -> 11.8, all of it is s1.
-        a.observe(11.8, 1, &set(&["s1"]));
+        a.observe(11.8, 1, &set(&["s1"]), BTreeMap::new);
         assert_eq!(a.rate_of("s1"), Some(11.8));
         // s2 (a T4) starts: +1.8.
-        a.observe(13.6, 2, &set(&["s1", "s2"]));
+        a.observe(13.6, 2, &set(&["s1", "s2"]), BTreeMap::new);
         assert!((a.rate_of("s2").unwrap() - 1.8).abs() < 1e-9);
         assert_eq!(a.rate_of("s1"), Some(11.8));
         // s1 stops and s3 starts in the same interval: s3 gets the change plus s1's freed rate.
-        a.observe(7.0, 2, &set(&["s2", "s3"]));
+        a.observe(7.0, 2, &set(&["s2", "s3"]), BTreeMap::new);
         assert!((a.rate_of("s3").unwrap() - 5.2).abs() < 1e-9);
         assert_eq!(a.rate_of("s1"), None);
     }
@@ -490,40 +527,44 @@ mod tests {
     fn ambiguous_starts_split_evenly_with_unmanaged() {
         let mut a = RateAttribution::default();
         // First reading ever: two sessions plus one unmanaged runtime share 9 CU/h.
-        a.observe(9.0, 3, &set(&["a", "b"]));
+        a.observe(9.0, 3, &set(&["a", "b"]), || {
+            BTreeMap::from([("a".into(), 1.0), ("b".into(), 2.0)])
+        });
         assert_eq!(a.rate_of("a"), Some(3.0));
         assert_eq!(a.rate_of("b"), Some(3.0));
-        // Two start together: the increase is split evenly.
-        a.observe(13.0, 5, &set(&["a", "b", "c", "d"]));
+        // Two start together, but only one rate is known.
+        a.observe(13.0, 5, &set(&["a", "b", "c", "d"]), || {
+            BTreeMap::from([("c".into(), 1.0)])
+        });
         assert_eq!(a.rate_of("c"), Some(2.0));
         assert_eq!(a.rate_of("d"), Some(2.0));
         // A start without a rate increase (already billed at the previous
         // reading) falls back to the unexplained remainder.
         let mut b = RateAttribution::default();
-        b.observe(5.0, 1, &set(&[]));
-        b.observe(5.0, 1, &set(&["late"]));
+        b.observe(5.0, 1, &set(&[]), BTreeMap::new);
+        b.observe(5.0, 1, &set(&["late"]), BTreeMap::new);
         assert_eq!(b.rate_of("late"), Some(5.0));
     }
 
     #[test]
     fn a_start_the_rate_lags_behind_stays_unknown_until_its_rate_shows() {
         let mut a = RateAttribution::default();
-        a.observe(0.0, 0, &set(&[]));
-        a.observe(0.0, 1, &set(&["h"]));
+        a.observe(0.0, 0, &set(&[]), BTreeMap::new);
+        a.observe(0.0, 1, &set(&["h"]), BTreeMap::new);
         assert_eq!(a.rate_of("h"), None);
-        a.observe(0.0, 1, &set(&["h"]));
+        a.observe(0.0, 1, &set(&["h"]), BTreeMap::new);
         assert_eq!(a.rate_of("h"), None);
-        a.observe(18.3, 1, &set(&["h"]));
+        a.observe(18.3, 1, &set(&["h"]), BTreeMap::new);
         assert_eq!(a.rate_of("h"), Some(18.3));
         // Beside a known session it gets the remainder once that shows.
-        a.observe(18.3, 2, &set(&["h", "t"]));
+        a.observe(18.3, 2, &set(&["h", "t"]), BTreeMap::new);
         assert_eq!(a.rate_of("t"), None);
-        a.observe(20.06, 2, &set(&["h", "t"]));
+        a.observe(20.06, 2, &set(&["h", "t"]), BTreeMap::new);
         assert!((a.rate_of("t").unwrap() - 1.76).abs() < 1e-9);
         assert_eq!(a.rate_of("h"), Some(18.3));
         // On the first reading too.
         let mut first = RateAttribution::default();
-        first.observe(0.0, 1, &set(&["x"]));
+        first.observe(0.0, 1, &set(&["x"]), BTreeMap::new);
         assert_eq!(first.rate_of("x"), None);
         assert!(first.rates().is_empty());
     }
@@ -532,8 +573,8 @@ mod tests {
     fn a_lagging_start_beside_an_unmanaged_runtime_takes_its_share_at_once() {
         // An estimate the spend cap can stop on, rather than unknown for as long as it runs.
         let mut a = RateAttribution::default();
-        a.observe(5.0, 1, &set(&[]));
-        a.observe(5.0, 2, &set(&["m"]));
+        a.observe(5.0, 1, &set(&[]), BTreeMap::new);
+        a.observe(5.0, 2, &set(&["m"]), BTreeMap::new);
         assert_eq!(a.rate_of("m"), Some(2.5));
     }
 
@@ -546,8 +587,8 @@ mod tests {
         };
         let mut a = RateAttribution::default();
         let mut meter = SpendMeter::new(t(0));
-        a.observe(0.0, 0, &set(&[]));
-        a.observe(0.0, 1, &set(&["h"]));
+        a.observe(0.0, 0, &set(&[]), BTreeMap::new);
+        a.observe(0.0, 1, &set(&["h"]), BTreeMap::new);
         meter.record(t(30), a.rate_of("h"));
         assert_eq!(
             evaluate(&policy, t(30), None, &meter),
@@ -555,7 +596,7 @@ mod tests {
                 limit: Limit::Spend
             }])
         );
-        a.observe(18.3, 1, &set(&["h"]));
+        a.observe(18.3, 1, &set(&["h"]), BTreeMap::new);
         meter.record(t(1800), a.rate_of("h"));
         assert!((meter.spend().unwrap() - 9.15).abs() < 1e-9);
         assert!(matches!(
@@ -569,14 +610,14 @@ mod tests {
         let mut a: RateAttribution =
             serde_json::from_value(serde_json::json!({"last_rate": 0.0, "rates": {"h": 0.0}}))
                 .unwrap();
-        a.observe(18.3, 1, &set(&["h"]));
+        a.observe(18.3, 1, &set(&["h"]), BTreeMap::new);
         assert_eq!(a.rate_of("h"), Some(18.3));
     }
 
     #[test]
     fn unmanaged_and_totals() {
         let mut a = AccountUsage::default();
-        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]));
+        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]), BTreeMap::new);
         assert_eq!(a.unmanaged_runtimes(2), 1);
         let s1 = UsageSnapshot::new(u(10.0, 1.0, 1), t(0));
         let mut s2 = UsageSnapshot::new(u(5.0, 2.0, 1), t(0));
@@ -592,7 +633,7 @@ mod tests {
     fn unmanaged_count_stays_with_the_reading() {
         let mut a = AccountUsage::default();
         assert_eq!(a.unmanaged_runtimes(0), 0);
-        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]));
+        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]), BTreeMap::new);
         assert_eq!(
             a.unmanaged_runtimes(1),
             1,
@@ -605,20 +646,25 @@ mod tests {
         );
         a.record_failure(Error::new(crate::ErrorKind::Http), t(30));
         assert_eq!(a.unmanaged_runtimes(3), 1);
-        a.record_success(u(79.0, 13.6, 5), t(60), &set(&["s1", "s2", "s3"]));
+        a.record_success(
+            u(79.0, 13.6, 5),
+            t(60),
+            &set(&["s1", "s2", "s3"]),
+            BTreeMap::new,
+        );
         assert_eq!(
             a.unmanaged_runtimes(0),
             2,
             "a successful reading updates the count"
         );
-        a.record_success(u(78.0, 13.6, 1), t(90), &set(&["s1", "s2"]));
+        a.record_success(u(78.0, 13.6, 1), t(90), &set(&["s1", "s2"]), BTreeMap::new);
         assert_eq!(a.unmanaged_runtimes(0), 0, "subtraction saturates");
     }
 
     #[test]
     fn older_usage_caches_fall_back_to_known_sessions() {
         let mut a = AccountUsage::default();
-        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]));
+        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]), BTreeMap::new);
         let mut value = serde_json::to_value(&a).unwrap();
         value.as_object_mut().unwrap().remove("managed_at_reading");
         value.as_object_mut().unwrap().remove("ownership_verified");

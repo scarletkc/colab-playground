@@ -581,7 +581,7 @@ impl World {
         let entry = self.usage.entry(id.clone()).or_default();
         match (fails, reading) {
             (false, Some(u)) => {
-                entry.record_success(u, now, &live);
+                entry.record_success(u, now, &live, || self.ledger.live_hardware_rates(id));
                 entry.ownership_verified = live.is_empty() || verified;
                 if verified && let Some(name) = u.sole_session(&live) {
                     let reading = RateReading {
@@ -2411,6 +2411,67 @@ mod tests {
         m.set_failures(f);
         let stale = m.refresh_usage(&[], &nc()).unwrap();
         assert!(stale[0].snapshot.unwrap().stale);
+    }
+
+    #[test]
+    fn joint_starts_split_by_measured_hardware_rates() {
+        check_joint_hardware_split(true);
+    }
+
+    #[test]
+    fn joint_starts_split_by_published_hardware_rates() {
+        check_joint_hardware_split(false);
+    }
+
+    fn check_joint_hardware_split(measure_first: bool) {
+        let (m, _) = mock(MockScenario::single());
+        let start = |accelerator| {
+            let spec = ProvisionSpec {
+                accelerator,
+                high_mem: false,
+                min_vram_mib: None,
+                ..m.defaults().provision_spec(m.new_session_name(None))
+            };
+            let (tx, _rx) = mpsc::channel();
+            m.provision(spec, tx, &nc()).unwrap().name
+        };
+        let hardware = [Accelerator::A100, Accelerator::T4];
+        if measure_first {
+            for accelerator in hardware {
+                let name = start(accelerator);
+                m.refresh_usage(&[], &nc()).unwrap();
+                let runtime = m
+                    .runtimes(&nc())
+                    .unwrap()
+                    .runtimes
+                    .into_iter()
+                    .find(|r| r.id.name.as_deref() == Some(&name))
+                    .unwrap();
+                m.stop_session(&runtime.id, StopOptions::default(), &nc())
+                    .unwrap();
+            }
+        }
+        assert!(
+            m.refresh_usage(&[], &nc()).unwrap()[0]
+                .session_rates
+                .is_empty()
+        );
+        let [a100, t4] = hardware.map(start);
+        let [a100_weight, t4_weight] = if measure_first {
+            hardware.map(mock_rate)
+        } else {
+            hardware.map(|accelerator| crate::usage::published_rate(accelerator, false))
+        };
+        let views = m.refresh_usage(&[], &nc()).unwrap();
+        let rates = &views[0].session_rates;
+        let total = views[0].snapshot.unwrap().rate_cu_per_hour;
+        assert!(
+            (rates[&a100] - total * (a100_weight / (a100_weight + t4_weight))).abs() < 1e-9,
+            "A100 estimate was {}, T4 estimate was {}",
+            rates[&a100],
+            rates[&t4]
+        );
+        assert!((rates[&t4] - total * (t4_weight / (a100_weight + t4_weight))).abs() < 1e-9);
     }
 
     #[test]

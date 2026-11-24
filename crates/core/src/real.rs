@@ -922,12 +922,13 @@ impl Inner {
     ) {
         let now = self.now();
         for (id, res) in results {
-            let live = self.live_names(&id);
             let mut st = self.st();
-            let entry = st.usage.entry(id.clone()).or_default();
+            let State { usage, ledger, .. } = &mut *st;
+            let entry = usage.entry(id.clone()).or_default();
             match res {
                 Ok(u) => {
-                    entry.record_success(u, now, &live);
+                    let live = ledger.live_of(&id).map(|e| e.name.clone()).collect();
+                    entry.record_success(u, now, &live, || ledger.live_hardware_rates(&id));
                     entry.ownership_verified = live.is_empty() || verified.contains(&id);
                     let snap = entry.snapshot;
                     if let Some(s) = snap {

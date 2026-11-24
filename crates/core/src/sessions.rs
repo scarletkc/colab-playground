@@ -5,6 +5,7 @@
 //! deadline, integrated spend, why it was stopped) so the UI can show uptime,
 //! estimated spend and time to auto-stop.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -14,7 +15,7 @@ use crate::accounts::AccountId;
 use crate::clock::serde_secs;
 use crate::error::{Error, Result};
 use crate::guard::{Concern, GuardPolicy, SpendMeter};
-use crate::usage::RateReading;
+use crate::usage::{RateReading, published_rate};
 
 /// Hardware that can be requested from `colab new`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -337,6 +338,22 @@ impl Ledger {
             }
         }
         latest
+    }
+
+    pub(crate) fn live_hardware_rates(&self, account: &AccountId) -> BTreeMap<String, f64> {
+        let measured = self.measured_rates();
+        self.live_of(account)
+            .map(|session| {
+                let rate = measured
+                    .iter()
+                    .find(|r| r.matches(session.accelerator, session.high_mem))
+                    .map_or_else(
+                        || published_rate(session.accelerator, session.high_mem),
+                        |r| r.reading.cu_per_hour,
+                    );
+                (session.name.clone(), rate)
+            })
+            .collect()
     }
 
     pub fn names(&self) -> Vec<String> {
