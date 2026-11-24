@@ -399,9 +399,12 @@ def port_busy(port):
 
 
 def kill_server():
-    subprocess.run(["pkill", "-f", "ComfyUI/main.py"], check=False)
+    """Clears the port before the server starts. Only a ComfyUI in the
+    directory this plugin uses is touched."""
+    main = os.path.join(COMFY, "main.py")
+    subprocess.run(["pkill", "-f", main], check=False)
     for _ in range(30):
-        if subprocess.run(["pgrep", "-f", "ComfyUI/main.py"], capture_output=True).returncode != 0:
+        if subprocess.run(["pgrep", "-f", main], capture_output=True).returncode != 0:
             return
         time.sleep(1)
 
@@ -679,6 +682,42 @@ def self_test():
         "double_blocks.0.img_attn.qkv.weight", "single_blocks.0.modulation.lin.weight"])), (True, False, False))
     check("a LoRA is no checkpoint", checkpoint_assets(fake_safetensors(ckpt, [
         "lora_unet_down_blocks.0.to_q.lora_A.weight"])), (False, False, False))
+
+    # ---------------------------------------------------------- the install
+    # The real install path, with the command helper replaced by a recorder:
+    # the shadowing of that helper broke every install once already.
+    commands = []
+
+    def fake_run(cmd, **kw):
+        commands.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    fake_comfy = os.path.join(RUN_DIR, "ComfyUI")
+    os.makedirs(fake_comfy, exist_ok=True)
+    with open(os.path.join(fake_comfy, "main.py"), "w") as fh:
+        fh.write("")
+    with open(os.path.join(fake_comfy, "requirements.txt"), "w") as fh:
+        fh.write("torch\ntorchvision\ntorchsde\nnumpy>=1.25.0\n")
+
+    restore = patch(COMFY=fake_comfy, run=fake_run)
+    try:
+        install_comfy()
+    finally:
+        restore()
+    check("the install runs pip", any("pip" in " ".join(c) for c in commands), True)
+    check("the install does not clone again", any("clone" in " ".join(c) for c in commands), False)
+    installed = [l.strip().lower() for l in open(os.path.join(RUN_DIR, "requirements.txt")).read().splitlines()]
+    check("the install leaves PyTorch alone", [l for l in installed if l in ("torch", "torchvision")], [])
+    check("the install keeps the rest", "torchsde" in installed and any(l.startswith("numpy") for l in installed), True)
+
+    commands.clear()
+    os.remove(os.path.join(fake_comfy, "main.py"))
+    restore = patch(COMFY=fake_comfy, run=fake_run)
+    try:
+        install_comfy()
+    finally:
+        restore()
+    check("the install clones ComfyUI", any("clone" in " ".join(c) for c in commands), True)
 
     # ---------------------------------------------------------- the model family
     check("the subprocess helper runs a command", run([sys.executable, "-c", "pass"]).returncode, 0)
