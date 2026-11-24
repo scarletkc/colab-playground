@@ -54,7 +54,7 @@ does, and what Package checks before anything is attached:
 
 - **No version in the names.** The release tag says which version the files are. The Windows exe
   is the app itself and keeps its name when the app updates in place, and the folder the Linux
-  archive unpacks stays where the user put it. Installed copies fetch the files by these names
+  archive unpacks into stays where the user put it. Installed copies fetch the files by these names
   from `releases/download/<tag>/`: renaming a download, or the folder inside an archive, breaks
   updating for every installed copy.
 
