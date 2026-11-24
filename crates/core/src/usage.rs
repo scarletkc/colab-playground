@@ -7,10 +7,7 @@
 //!   failed. Unknown is never treated as zero.
 //! * [`poll_due`] — the cadence from [`Defaults`] (30 s while the account has
 //!   sessions, 5 min otherwise by default; manual refresh is always allowed).
-//! * [`RateAttribution`] — an *estimated* per-session burn rate, taken from the
-//!   change of the account rate observed when sessions start or stop, split
-//!   using hardware rates for joint starts when available. All per-session
-//!   figures are estimates (`≈`).
+//! * [`RateAttribution`] — per-session burn-rate estimates (`≈`).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, SystemTime};
@@ -224,14 +221,8 @@ pub struct RateAttribution {
 }
 
 impl RateAttribution {
-    /// `live` are the app-managed sessions running now. Sessions that appeared
-    /// since the previous reading share the rate increase (plus whatever the
-    /// sessions that disappeared were estimated at), in proportion to their
-    /// hardware rates when all are known, and evenly otherwise. Sessions without
-    /// an estimate (first reading, no positive increase) share whatever rate
-    /// is not yet explained, evenly with the unmanaged runtimes
-    /// (`assignments` beyond `live`). A zero share leaves a session unknown,
-    /// to be worked out again at the next reading: the account rate can lag
+    /// `live` are the app-managed sessions running now.
+    /// A zero share leaves a session unknown because the account rate can lag
     /// behind a new runtime, and a zero kept for good would hide its spend
     /// from the cost guard.
     pub fn observe(
