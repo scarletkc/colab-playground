@@ -581,8 +581,7 @@ impl World {
         let entry = self.usage.entry(id.clone()).or_default();
         match (fails, reading) {
             (false, Some(u)) => {
-                entry.record_success(u, now, &live);
-                entry.ownership_verified = live.is_empty() || verified;
+                entry.record_success(u, now, &live, verified);
                 if verified && let Some(name) = u.sole_session(&live) {
                     let reading = RateReading {
                         cu_per_hour: u.rate_cu_per_hour,
@@ -2465,6 +2464,46 @@ mod tests {
             rate(Accelerator::A100).unwrap().cu_per_hour,
             mock_rate(Accelerator::A100)
         );
+    }
+
+    #[test]
+    fn a_session_left_alone_is_charged_what_the_account_burns() {
+        let (m, clock) = mock(MockScenario::single());
+        let start = |accelerator| {
+            let spec = ProvisionSpec {
+                accelerator,
+                min_vram_mib: None,
+                ..m.defaults().provision_spec(m.new_session_name(None))
+            };
+            let (tx, _rx) = mpsc::channel();
+            m.provision(spec, tx, &nc()).unwrap().name
+        };
+        let runtime = |name: &str| {
+            m.runtimes(&nc())
+                .unwrap()
+                .runtimes
+                .into_iter()
+                .find(|r| r.id.name.as_deref() == Some(name))
+                .unwrap()
+        };
+        let rate = |name: &str| runtime(name).estimated_rate_cu_per_hour.unwrap();
+        // An A100 and a T4 start between two readings, so they share the rise.
+        m.refresh_usage(&[], &nc()).unwrap();
+        let a100 = start(Accelerator::A100);
+        let t4 = start(Accelerator::T4);
+        m.refresh_usage(&[], &nc()).unwrap();
+        let shared = (mock_rate(Accelerator::A100) + mock_rate(Accelerator::T4)) / 2.0;
+        assert!((rate(&t4) - shared).abs() < 1e-9, "{}", rate(&t4));
+
+        m.stop_session(&runtime(&a100).id, StopOptions::default(), &nc())
+            .unwrap();
+        for _ in 0..4 {
+            m.refresh_usage(&[], &nc()).unwrap();
+            clock.advance(Duration::from_secs(30));
+        }
+        assert!((rate(&t4) - shared).abs() < 1e-9, "{}", rate(&t4));
+        m.refresh_usage(&[], &nc()).unwrap();
+        assert_eq!(rate(&t4), mock_rate(Accelerator::T4));
     }
 
     #[test]

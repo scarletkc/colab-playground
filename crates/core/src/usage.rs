@@ -9,7 +9,8 @@
 //!   sessions, 5 min otherwise by default; manual refresh is always allowed).
 //! * [`RateAttribution`] — an *estimated* per-session burn rate, taken from the
 //!   change of the account rate observed when sessions start or stop, split
-//!   evenly when ambiguous. All per-session figures are estimates (`≈`).
+//!   evenly when ambiguous, and from the account rate itself while a session
+//!   is the account's only runtime. All per-session figures are estimates (`≈`).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, SystemTime};
@@ -25,6 +26,12 @@ pub const HISTORY_CAPACITY: usize = 120;
 
 /// A rate (CU/h) at or below this is rounding error, not a runtime burning.
 const NO_RATE: f64 = 1e-9;
+
+/// How long the account rate must hold, after it last moved, before it is
+/// taken for what a session alone on the account burns. Runtimes that go
+/// together can each leave the account rate at a time of their own, so the
+/// first fall need not be the last.
+const ALONE_HOLD: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
@@ -220,6 +227,28 @@ impl BalanceHistory {
 pub struct RateAttribution {
     last_rate: Option<f64>,
     rates: BTreeMap<String, Option<f64>>,
+    /// What a session burned while it was the account's only runtime. It
+    /// stands in for the estimate in `rates`, which stays as it was so that
+    /// every other estimate is worked out as before.
+    #[serde(default)]
+    measured: BTreeMap<String, f64>,
+    #[serde(skip)]
+    alone: Option<Alone>,
+}
+
+/// The session that is the account's only runtime, since the reading that
+/// found it alone.
+#[derive(Debug, Clone, PartialEq)]
+struct Alone {
+    name: String,
+    /// The account rate has moved since a runtime last came or went. Until
+    /// it does, it can still hold what a runtime that went burned.
+    followed: bool,
+    /// When the rate last moved, or the session was found alone.
+    since: SystemTime,
+    /// What the first measurement of this spell replaced, to put back if the
+    /// rate moves afterwards.
+    replaced: Option<Option<f64>>,
 }
 
 impl RateAttribution {
@@ -278,15 +307,74 @@ impl RateAttribution {
         self.last_rate = Some(rate);
     }
 
+    /// [`Self::observe`], and a measurement of a session that is the
+    /// account's only runtime: the account rate is what it burns, once that
+    /// rate has followed the last runtime that came or went and then held for
+    /// [`ALONE_HOLD`]. `verified` says the listing taken with this reading
+    /// matched each session in `live` to a runtime of the account.
+    pub fn observe_at(
+        &mut self,
+        now: SystemTime,
+        account_rate: f64,
+        assignments: u32,
+        live: &BTreeSet<String>,
+        verified: bool,
+    ) {
+        let rate = account_rate.max(0.0);
+        let moved = self.last_rate.map(|last| (last - rate).abs() > NO_RATE);
+        self.observe(account_rate, assignments, live);
+        self.measured.retain(|name, _| live.contains(name));
+        let Some(name) = live.first().filter(|_| assignments == 1 && live.len() == 1) else {
+            self.alone = None;
+            return;
+        };
+        let mut alone = match self.alone.take() {
+            Some(mut alone) if &alone.name == name => {
+                if moved == Some(true) {
+                    // The rate moved with nothing coming or going, so what
+                    // this spell measured may have been only part of its way.
+                    if let Some(before) = alone.replaced.take() {
+                        match before {
+                            Some(r) => self.measured.insert(name.clone(), r),
+                            None => self.measured.remove(name),
+                        };
+                    }
+                    alone.followed = true;
+                    alone.since = now;
+                } else if now < alone.since {
+                    // The system time was set back.
+                    alone.since = now;
+                }
+                alone
+            }
+            _ => Alone {
+                name: name.clone(),
+                // The first reading has nothing to compare with.
+                followed: moved != Some(false),
+                since: now,
+                replaced: None,
+            },
+        };
+        let held = now.duration_since(alone.since).unwrap_or_default() >= ALONE_HOLD;
+        if verified && alone.followed && held && rate.is_finite() && rate > NO_RATE {
+            let before = self.measured.insert(name.clone(), rate);
+            alone.replaced.get_or_insert(before);
+        }
+        self.alone = Some(alone);
+    }
+
     /// Estimated rate of a session (CU/h).
     pub fn rate_of(&self, name: &str) -> Option<f64> {
-        self.rates.get(name).copied().flatten()
+        self.measured
+            .get(name)
+            .copied()
+            .or_else(|| self.rates.get(name).copied().flatten())
     }
 
     pub fn rates(&self) -> BTreeMap<String, f64> {
         self.rates
-            .iter()
-            .filter_map(|(n, r)| r.map(|r| (n.clone(), r)))
+            .keys()
+            .filter_map(|n| self.rate_of(n).map(|r| (n.clone(), r)))
             .collect()
     }
 }
@@ -308,13 +396,26 @@ pub struct AccountUsage {
 }
 
 impl AccountUsage {
-    pub fn record_success(&mut self, usage: Usage, now: SystemTime, live: &BTreeSet<String>) {
+    /// `verified`: the listing taken with this reading matched each session
+    /// in `live` to a runtime of the account.
+    pub fn record_success(
+        &mut self,
+        usage: Usage,
+        now: SystemTime,
+        live: &BTreeSet<String>,
+        verified: bool,
+    ) {
         self.snapshot = Some(UsageSnapshot::new(usage, now));
         self.managed_at_reading = Some(live.len());
-        self.ownership_verified = true;
+        self.ownership_verified = live.is_empty() || verified;
         self.history.push(now, usage.balance_cu);
-        self.attribution
-            .observe(usage.rate_cu_per_hour, usage.assignments, live);
+        self.attribution.observe_at(
+            now,
+            usage.rate_cu_per_hour,
+            usage.assignments,
+            live,
+            verified,
+        );
         self.last_attempt = Some(now);
         self.last_error = None;
     }
@@ -447,7 +548,7 @@ mod tests {
         let mut a = AccountUsage::default();
         a.record_failure(Error::new(crate::ErrorKind::Http), t(0));
         assert!(a.snapshot.is_none(), "unknown stays unknown, not zero");
-        a.record_success(u(50.0, 5.0, 1), t(30), &set(&["s1"]));
+        a.record_success(u(50.0, 5.0, 1), t(30), &set(&["s1"]), true);
         a.record_failure(Error::new(crate::ErrorKind::Http), t(60));
         let s = a.snapshot.unwrap();
         assert!(s.stale);
@@ -573,10 +674,165 @@ mod tests {
         assert_eq!(a.rate_of("h"), Some(18.3));
     }
 
+    /// A reading at `at` seconds whose listing showed the runtimes.
+    fn read(a: &mut RateAttribution, at: u64, rate: f64, assignments: u32, live: &[&str]) {
+        a.observe_at(t(at), rate, assignments, &set(live), true);
+    }
+
+    /// The estimate of a session, to a millionth of a CU/h.
+    fn rate(a: &RateAttribution, name: &str) -> Option<f64> {
+        a.rate_of(name).map(|r| (r * 1e6).round() / 1e6)
+    }
+
+    /// An A100 (11.77) and a T4 (1.76) that start in the same reading share
+    /// 6.765 each.
+    fn a100_and_t4_together() -> RateAttribution {
+        let mut a = RateAttribution::default();
+        read(&mut a, 0, 0.0, 0, &[]);
+        read(&mut a, 30, 13.53, 2, &["a100", "t4"]);
+        assert_eq!(rate(&a, "t4"), Some(6.765));
+        a
+    }
+
+    #[test]
+    fn a_session_left_alone_is_measured_once_the_rate_holds() {
+        let mut a = a100_and_t4_together();
+        // The A100 stops, and the rate falls in the same reading.
+        read(&mut a, 600, 1.76, 1, &["t4"]);
+        for at in [630, 660, 690] {
+            read(&mut a, at, 1.76, 1, &["t4"]);
+            assert_eq!(rate(&a, "t4"), Some(6.765), "at {at}");
+        }
+        read(&mut a, 720, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+        assert_eq!(a.rates(), BTreeMap::from([("t4".to_owned(), 1.76)]));
+    }
+
+    #[test]
+    fn a_rate_that_has_yet_to_fall_measures_nothing() {
+        let mut a = a100_and_t4_together();
+        // The A100 stops, and the account rate keeps its share for five minutes.
+        for at in (600..=900).step_by(30) {
+            read(&mut a, at, 13.53, 1, &["t4"]);
+            assert_eq!(rate(&a, "t4"), Some(6.765), "at {at}");
+        }
+        read(&mut a, 930, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(6.765));
+        read(&mut a, 1050, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+    }
+
+    /// An A100 and a T4 start together beside an unmanaged CPU (0.08), then
+    /// the A100 and the CPU stop. The rate falls by the A100 at 600 s and by
+    /// the CPU at `cpu_falls`.
+    fn two_runtimes_leave(cpu_falls: u64) -> RateAttribution {
+        let mut a = RateAttribution::default();
+        read(&mut a, 0, 0.08, 1, &[]);
+        read(&mut a, 30, 13.61, 3, &["a100", "t4"]);
+        assert_eq!(rate(&a, "t4"), Some(6.765));
+        for at in (600..cpu_falls).step_by(30) {
+            read(&mut a, at, 1.84, 1, &["t4"]);
+        }
+        a
+    }
+
+    #[test]
+    fn runtimes_that_leave_the_rate_one_after_the_other_are_measured_after_both() {
+        let mut a = two_runtimes_leave(660);
+        assert_eq!(rate(&a, "t4"), Some(6.765));
+        for at in (660..=750).step_by(30) {
+            read(&mut a, at, 1.76, 1, &["t4"]);
+            assert_eq!(rate(&a, "t4"), Some(6.765), "at {at}");
+        }
+        read(&mut a, 780, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+    }
+
+    #[test]
+    fn a_rate_that_moves_after_a_measurement_takes_it_back() {
+        // The CPU's rate leaves three minutes after the A100's: the first
+        // fall held for two minutes, so it was taken for the T4's.
+        let mut a = two_runtimes_leave(780);
+        assert_eq!(rate(&a, "t4"), Some(1.84));
+        read(&mut a, 780, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(6.765));
+        read(&mut a, 900, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+    }
+
+    #[test]
+    fn a_rate_that_moves_after_a_measurement_puts_back_the_one_before() {
+        let mut a = RateAttribution::default();
+        read(&mut a, 0, 0.0, 0, &[]);
+        read(&mut a, 30, 1.76, 1, &["t4"]);
+        read(&mut a, 150, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+        // An A100 and an unmanaged CPU join and go again; the rate falls by
+        // the A100 first, and by the CPU three minutes later.
+        read(&mut a, 300, 13.61, 3, &["a100", "t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+        for at in (600..780).step_by(30) {
+            read(&mut a, at, 1.84, 1, &["t4"]);
+        }
+        assert_eq!(rate(&a, "t4"), Some(1.84));
+        read(&mut a, 780, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+    }
+
+    #[test]
+    fn a_reading_the_listing_did_not_verify_measures_nothing() {
+        let mut a = a100_and_t4_together();
+        for at in (600..=720).step_by(30) {
+            a.observe_at(t(at), 1.76, 1, &set(&["t4"]), false);
+        }
+        assert_eq!(rate(&a, "t4"), Some(6.765));
+        read(&mut a, 750, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+    }
+
+    #[test]
+    fn a_measurement_stays_beside_new_sessions_and_ends_with_its_session() {
+        let mut a = a100_and_t4_together();
+        read(&mut a, 600, 1.76, 1, &["t4"]);
+        read(&mut a, 720, 1.76, 1, &["t4"]);
+        // An L4 (4.82) starts: its estimate is the rise, as before.
+        read(&mut a, 750, 6.58, 2, &["l4", "t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+        assert_eq!(rate(&a, "l4"), Some(4.82));
+        read(&mut a, 780, 4.82, 1, &["l4"]);
+        assert_eq!(rate(&a, "t4"), None);
+        assert_eq!(a.rates(), BTreeMap::from([("l4".to_owned(), 4.82)]));
+    }
+
+    #[test]
+    fn a_session_alone_from_the_first_reading_is_measured_once_the_rate_holds() {
+        // The app starts while the account rate still holds a runtime that
+        // went just before: the first reading takes it for the T4's.
+        let mut a = RateAttribution::default();
+        read(&mut a, 0, 13.53, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(13.53));
+        read(&mut a, 60, 1.76, 1, &["t4"]);
+        read(&mut a, 150, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(13.53));
+        read(&mut a, 180, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+    }
+
+    #[test]
+    fn a_system_time_set_back_starts_the_hold_again() {
+        let mut a = a100_and_t4_together();
+        read(&mut a, 600, 1.76, 1, &["t4"]);
+        read(&mut a, 300, 1.76, 1, &["t4"]);
+        read(&mut a, 390, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(6.765));
+        read(&mut a, 420, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+    }
+
     #[test]
     fn unmanaged_and_totals() {
         let mut a = AccountUsage::default();
-        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]));
+        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]), true);
         assert_eq!(a.unmanaged_runtimes(2), 1);
         let s1 = UsageSnapshot::new(u(10.0, 1.0, 1), t(0));
         let mut s2 = UsageSnapshot::new(u(5.0, 2.0, 1), t(0));
@@ -592,7 +848,7 @@ mod tests {
     fn unmanaged_count_stays_with_the_reading() {
         let mut a = AccountUsage::default();
         assert_eq!(a.unmanaged_runtimes(0), 0);
-        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]));
+        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]), true);
         assert_eq!(
             a.unmanaged_runtimes(1),
             1,
@@ -605,20 +861,20 @@ mod tests {
         );
         a.record_failure(Error::new(crate::ErrorKind::Http), t(30));
         assert_eq!(a.unmanaged_runtimes(3), 1);
-        a.record_success(u(79.0, 13.6, 5), t(60), &set(&["s1", "s2", "s3"]));
+        a.record_success(u(79.0, 13.6, 5), t(60), &set(&["s1", "s2", "s3"]), true);
         assert_eq!(
             a.unmanaged_runtimes(0),
             2,
             "a successful reading updates the count"
         );
-        a.record_success(u(78.0, 13.6, 1), t(90), &set(&["s1", "s2"]));
+        a.record_success(u(78.0, 13.6, 1), t(90), &set(&["s1", "s2"]), true);
         assert_eq!(a.unmanaged_runtimes(0), 0, "subtraction saturates");
     }
 
     #[test]
     fn older_usage_caches_fall_back_to_known_sessions() {
         let mut a = AccountUsage::default();
-        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]));
+        a.record_success(u(80.0, 13.6, 3), t(0), &set(&["s1", "s2"]), true);
         let mut value = serde_json::to_value(&a).unwrap();
         value.as_object_mut().unwrap().remove("managed_at_reading");
         value.as_object_mut().unwrap().remove("ownership_verified");

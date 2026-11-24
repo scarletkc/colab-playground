@@ -927,8 +927,7 @@ impl Inner {
             let entry = st.usage.entry(id.clone()).or_default();
             match res {
                 Ok(u) => {
-                    entry.record_success(u, now, &live);
-                    entry.ownership_verified = live.is_empty() || verified.contains(&id);
+                    entry.record_success(u, now, &live, verified.contains(&id));
                     let snap = entry.snapshot;
                     if let Some(s) = snap {
                         let _ = st.accounts.set_usage(&id, s);
