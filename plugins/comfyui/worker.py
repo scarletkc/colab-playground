@@ -22,6 +22,7 @@ lines; status.json written atomically; heavy download output to a file of its
 own.
 """
 
+import ast
 import json
 import os
 import re
@@ -680,6 +681,12 @@ def self_test():
         "lora_unet_down_blocks.0.to_q.lora_A.weight"])), (False, False, False))
 
     # ---------------------------------------------------------- the model family
+    check("the subprocess helper runs a command", run([sys.executable, "-c", "pass"]).returncode, 0)
+    # A name defined twice at the top level shadows the first one, and the
+    # shadowed one is usually a helper the worker calls.
+    tree = ast.parse(open(os.path.abspath(__file__), encoding="utf-8").read())
+    names = [n.name for n in tree.body if isinstance(n, ast.FunctionDef)]
+    check("no function is defined twice", sorted({n for n in names if names.count(n) > 1}), [])
     PRESET = "flux-schnell"
     check("Flux wants a 16 channel latent", generation_params("Comfy-Org/Flux-1-Schnell", "flux1-schnell-fp8.safetensors"),
           (4, 1.0, 1024, "EmptySD3LatentImage"))
@@ -698,7 +705,7 @@ def self_test():
 
     restore = patch(install_comfy=boom, check_torch=lambda: "A100", start_server=must_not_start)
     try:
-        expect_failure("a failed install", run)
+        expect_failure("a failed install", run_worker)
     finally:
         restore()
     check("a failed install is reported", json.load(open(STATUS_FILE))["state"], "failed")
@@ -721,7 +728,7 @@ def self_test():
                     warmup=lambda *a: (_ for _ in ()).throw(RuntimeError("the warm-up failed")),
                     gpu_used_mib=lambda: 4096)
     try:
-        expect_failure("a failed warm-up", run)
+        expect_failure("a failed warm-up", run_worker)
     finally:
         restore()
     check("a failed warm-up stops the server", pid_alive(server.pid), False)
@@ -848,7 +855,7 @@ def main():
                            % (_failure[0], log_tail(3)))
 
 
-def run():
+def run_worker():
     try:
         main()
     except SystemExit:
@@ -860,4 +867,4 @@ def run():
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
         sys.exit(self_test())
-    run()
+    run_worker()
