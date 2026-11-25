@@ -124,6 +124,7 @@ const SCENARIOS: &[(&str, StartWorld)] = &[
 const FAILURES: &[(&str, Inject)] = &[
     ("cli-missing", |f| f.cli_missing = true),
     ("install-fails", |f| f.install_fails = true),
+    ("install-off-path", |f| f.install_off_path = true),
     ("keyring", |f| f.keyring_unavailable = true),
     ("usage-fails", |f| f.usage_fetch_fails = true),
     ("login-invalid-code", |f| {

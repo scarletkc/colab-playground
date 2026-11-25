@@ -55,6 +55,8 @@ pub struct MockFailures {
     /// `colab` is not installed (until `install_cli` succeeds).
     pub cli_missing: bool,
     pub install_fails: bool,
+    /// The install succeeds but puts `colab` in a folder outside `PATH`, so it stays missing.
+    pub install_off_path: bool,
     pub keyring_unavailable: bool,
     pub login: Option<MockLoginFailure>,
     /// Accelerators the accounts are not entitled to.
@@ -119,6 +121,7 @@ impl Default for MockFailures {
         MockFailures {
             cli_missing: false,
             install_fails: false,
+            install_off_path: false,
             keyring_unavailable: false,
             login: None,
             not_entitled: vec![],
@@ -1279,6 +1282,13 @@ impl Backend for MockBackend {
             stream: Stream::Stdout,
             text: "Installed 1 executable: colab".into(),
         });
+        if self.w().failures.install_off_path {
+            let _ = log.send(Line {
+                stream: Stream::Stderr,
+                text: "warning: `/home/demo/tools/bin` is not on your PATH.".into(),
+            });
+            return Ok(());
+        }
         let mut w = self.w();
         w.cli_installed = true;
         w.failures.cli_missing = false;

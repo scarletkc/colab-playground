@@ -9,7 +9,7 @@ use std::time::Duration;
 use colab_playground_core::{Defaults, provision::MAX_ATTEMPTS_CAP};
 use gpui::{AppContext, Context};
 
-use super::{AppState, Op};
+use super::{AppState, InstallPhase, Op};
 use crate::backend;
 
 /// The shortest duration a defaults field accepts (zero would disable or spin).
@@ -150,6 +150,9 @@ impl AppState {
                 state.backend = built;
                 state.probe = super::Load::Idle;
                 state.accounts = super::Load::Idle;
+                // How the last install ended, and its log, belong to the host it ran on.
+                state.install.phase = InstallPhase::Idle;
+                state.install.lines = Default::default();
                 state.check_environment(cx);
             })
             .ok();

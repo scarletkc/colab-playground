@@ -187,9 +187,16 @@ pub(super) const MESSAGES: Messages = &[
     (INSTALL_START, "설치"),
     (INSTALL_RUNNING, "Colab CLI를 설치하는 중…"),
     (INSTALL_CANCELLING, "취소하는 중…"),
-    (INSTALL_DONE, "Colab CLI가 설치되었습니다."),
     (INSTALL_FAILED, "설치하지 못했습니다"),
     (INSTALL_CANCELLED, "설치가 취소되었습니다."),
+    (
+        INSTALL_NOT_FOUND_TITLE,
+        "설치는 완료되었지만 colab을 찾을 수 없습니다",
+    ),
+    (
+        INSTALL_NOT_FOUND_BODY,
+        "이 앱이 찾지 않는 폴더에 설치된 것 같습니다. 위치는 아래 로그에 나와 있을 수 있습니다. 설정의 “Colab CLI 위치”에 colab의 전체 경로를 입력하십시오.",
+    ),
     (SUMMARY_TITLE, "컴퓨팅 단위"),
     (SUMMARY_ACTIVE, "활성 계정: {email}"),
     (SUMMARY_BALANCE, "잔액"),

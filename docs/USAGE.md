@@ -120,7 +120,9 @@ cargo run -p colab-playground -- --mock-scenario signed-out --mock-fail cli-miss
 - `--mock-scenario demo` (default): two accounts; on the active one an A100 session, a T4 session
   and a runtime "opened in the browser"; one runtime on the second account.
   `single`: one account, nothing running. `signed-out`: first run, no account.
-- `--mock-fail a,b,…` injects failures: `cli-missing`, `install-fails`, `keyring`, `usage-fails`,
+- `--mock-fail a,b,…` injects failures: `cli-missing`, `install-fails`, `install-off-path` (the
+  install succeeds but `colab` is still not found, as when it lands in a folder outside `PATH`;
+  add `cli-missing`), `keyring`, `usage-fails`,
   `login-invalid-code`, `login-unverified`, `not-entitled` (A100 and H100), `no-answer` (Colab
   never answers a request for an A100: after a minute the progress says how long it has waited,
   after about ten minutes it fails, and cancelling it shows the cleanup of the runtime the request

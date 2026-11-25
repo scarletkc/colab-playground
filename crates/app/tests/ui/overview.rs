@@ -2,9 +2,12 @@
 
 use colab_playground::{
     platform::{EnvironmentKind, environment_kind},
+    route::Route,
     state::{EnvironmentStep, InstallPhase, Load, Op, StepState, checklist},
     ui::pages::overview::{
-        INSTALL_LOG_SELECTOR, INSTALL_SELECTOR, SIGN_IN_SELECTOR, SUMMARY_SELECTOR, step_selector,
+        CHECK_AGAIN_SELECTOR, INSTALL_LOG_SELECTOR, INSTALL_NOT_FOUND_SELECTOR,
+        INSTALL_OPEN_SETTINGS_SELECTOR, INSTALL_SELECTOR, SIGN_IN_SELECTOR, SUMMARY_SELECTOR,
+        step_selector,
     },
 };
 use colab_playground_core::{
@@ -98,6 +101,51 @@ fn a_failed_install_says_so_keeps_the_log_and_can_run_again(cx: &mut TestAppCont
         InstallPhase::Done
     );
     assert_eq!(step_state(&mut app, EnvironmentStep::Cli), StepState::Done);
+}
+
+#[gpui::test]
+fn an_install_that_still_misses_colab_points_to_settings(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(
+        cx,
+        Options {
+            failures: MockFailures {
+                cli_missing: true,
+                install_off_path: true,
+                ..MockFailures::default()
+            },
+            ..Options::scenario(MockScenario::signed_out())
+        },
+    );
+    assert!(!app.shown(INSTALL_NOT_FOUND_SELECTOR));
+
+    app.click(INSTALL_SELECTOR);
+    assert_eq!(
+        app.read(|state, _| state.install().phase.clone()),
+        InstallPhase::Done
+    );
+    assert_eq!(step_state(&mut app, EnvironmentStep::Cli), StepState::Todo);
+    assert!(
+        app.shown(INSTALL_NOT_FOUND_SELECTOR),
+        "the step says why it is not done"
+    );
+    assert!(
+        app.shown(INSTALL_LOG_SELECTOR),
+        "the log may name the folder"
+    );
+    assert!(
+        app.shown(INSTALL_SELECTOR),
+        "another method can still be tried"
+    );
+
+    app.click(INSTALL_OPEN_SETTINGS_SELECTOR);
+    assert_eq!(app.route(), Route::Settings);
+
+    // The user put the folder on PATH meanwhile.
+    app.set_failures(MockFailures::default());
+    app.click(Route::Overview.nav_selector());
+    app.click(CHECK_AGAIN_SELECTOR);
+    assert_eq!(step_state(&mut app, EnvironmentStep::Cli), StepState::Done);
+    assert!(!app.shown(INSTALL_NOT_FOUND_SELECTOR));
 }
 
 #[gpui::test]

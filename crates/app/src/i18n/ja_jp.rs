@@ -214,9 +214,16 @@ pub(super) const MESSAGES: Messages = &[
     (INSTALL_START, "インストール"),
     (INSTALL_RUNNING, "Colab CLI をインストールしています…"),
     (INSTALL_CANCELLING, "キャンセルしています…"),
-    (INSTALL_DONE, "Colab CLI がインストールされました。"),
     (INSTALL_FAILED, "インストールに失敗しました"),
     (INSTALL_CANCELLED, "インストールはキャンセルされました。"),
+    (
+        INSTALL_NOT_FOUND_TITLE,
+        "インストールは完了しましたが、colab が見つかりません",
+    ),
+    (
+        INSTALL_NOT_FOUND_BODY,
+        "このアプリが探さないフォルダーにある可能性があります。場所は下のログに表示されているかもしれません。設定の「Colab CLI の場所」に colab のフルパスを入力してください。",
+    ),
     (SUMMARY_TITLE, "コンピューティング ユニット"),
     (SUMMARY_ACTIVE, "使用中のアカウント：{email}"),
     (SUMMARY_BALANCE, "残高"),
