@@ -10,17 +10,17 @@
 //! A script is never interpolated into a command line. Every invocation is
 //!
 //! ```text
-//! bash -lc 'eval "$(printf %s "$0" | { base64 -d 2>/dev/null || base64 -D; })"' <b64 bootstrap> <b64 script> <job> <n-env> <b64 KEY=VALUE>... <b64 arg>...
+//! bash -lc 'eval "$(printf %s "$1" | { base64 -d 2>/dev/null || base64 -D; })"' bash <b64 bootstrap> <b64 script> <job> <n-env> <b64 KEY=VALUE>... <b64 arg>...
 //! ```
 //!
 //! The fixed bootstrap decodes the script, exports the environment, restores
 //! the positional arguments and evaluates the script. Only the short fixed
-//! `-lc` string and base64 text (`[A-Za-z0-9+/=]`) cross the Windows → WSL
-//! command line, so quoting cannot corrupt anything. Large payloads (Python
-//! helpers, plugin scripts) travel on stdin. Under WSL the environment is
-//! passed positionally (the Windows process environment does not reach WSL);
-//! locally it is set on the process so the login shell sees an overridden
-//! `HOME` before reading profile files.
+//! `-lc` string, the fixed `$0` and base64 text (`[A-Za-z0-9+/=]`) cross the
+//! Windows → WSL command line, so quoting cannot corrupt anything. Large
+//! payloads (Python helpers, plugin scripts) travel on stdin. Under WSL the
+//! environment is passed positionally (the Windows process environment does
+//! not reach WSL); locally it is set on the process so the login shell sees an
+//! overridden `HOME` before reading profile files.
 //!
 //! # Process trees
 //!
@@ -126,16 +126,22 @@ pub fn make_executable(_: &std::path::Path) -> std::io::Result<()> {
 
 /// The `bash -lc` string shared by every invocation; see the module docs.
 /// (`base64 -D` is the spelling of older macOS releases.)
-pub const BOOTSTRAP: &str = r#"eval "$(printf %s "$0" | { base64 -d 2>/dev/null || base64 -D; })""#;
+pub const BOOTSTRAP: &str = r#"eval "$(printf %s "$1" | { base64 -d 2>/dev/null || base64 -D; })""#;
+
+/// `$0` of every script. Bash starts its own messages with it
+/// (`bash: line 3: x: command not found`), so it is a short name, as in the
+/// usual `sh -c '…' sh`, and not one of the encoded arguments.
+const SCRIPT_NAME: &str = "bash";
 
 /// Decoder run by [`BOOTSTRAP`]. Positional layout after `$0`:
-/// `$1` script (b64), `$2` job flag, `$3` env count, then env pairs and args (b64).
+/// `$1` this decoder (b64), `$2` script (b64), `$3` job flag, `$4` env count,
+/// then env pairs and args (b64).
 const BOOT_BODY: &str = r#"__cpg_d() { printf '%s' "$1" | { base64 -d 2>/dev/null || base64 -D; } && printf x; }
-__cpg_s=$(__cpg_d "$1") || exit 125
+__cpg_s=$(__cpg_d "$2") || exit 125
 __cpg_s=${__cpg_s%x}
-__cpg_j=$2
-__cpg_n=$3
-shift 3
+__cpg_j=$3
+__cpg_n=$4
+shift 4
 while [ "$__cpg_n" -gt 0 ]; do
   __cpg_v=$(__cpg_d "$1") || exit 125
   export "${__cpg_v%x}"
@@ -331,6 +337,7 @@ pub(crate) fn encode_bash_args(
     let mut args = vec![
         "-lc".to_owned(),
         BOOTSTRAP.to_owned(),
+        SCRIPT_NAME.to_owned(),
         B64.encode(BOOT_BODY),
         B64.encode(&req.script),
         if job { "1" } else { "0" }.to_owned(),
@@ -1319,10 +1326,18 @@ mod tests {
         assert!(inv.no_window);
         assert_eq!(inv.env, vec![("WSL_UTF8".to_owned(), "1".to_owned())]);
         assert_eq!(
-            &inv.args[..6],
-            &["-d", "Ubuntu-24.04", "-e", "bash", "-lc", BOOTSTRAP]
+            &inv.args[..7],
+            &[
+                "-d",
+                "Ubuntu-24.04",
+                "-e",
+                "bash",
+                "-lc",
+                BOOTSTRAP,
+                SCRIPT_NAME
+            ]
         );
-        let rest = &inv.args[6..];
+        let rest = &inv.args[7..];
         let b64ish = |s: &str| {
             s.chars()
                 .all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c))
@@ -1342,7 +1357,7 @@ mod tests {
             .invocation(&ScriptRequest::new("true"), false)
             .unwrap();
         assert_eq!(&inv.args[..3], &["-e", "bash", "-lc"]);
-        assert_eq!(inv.args[6], "0");
+        assert_eq!(inv.args[7], "0");
     }
 
     #[test]
@@ -1380,8 +1395,8 @@ mod tests {
         let inv = Host::Local.invocation(&req, true).unwrap();
         assert_eq!(inv.program, "bash");
         assert_eq!(inv.env, vec![("HOME".to_owned(), "/tmp/x".to_owned())]);
-        assert_eq!(inv.args[5], "0");
-        assert_eq!(decode(&inv.args[6]), "a");
+        assert_eq!(inv.args[6], "0");
+        assert_eq!(decode(&inv.args[7]), "a");
     }
 
     #[cfg(windows)]
@@ -1578,6 +1593,31 @@ mod tests {
         assert!(out.stdout.contains("env=[v=1 ñ\n]"), "{}", out.stdout);
         assert!(out.stdout.contains("from stdin ✓"));
         assert!(!out.stderr.contains("CPG-PGID"));
+    }
+
+    /// Bash's own messages reach error details, so they must not start with
+    /// the encoded decoder.
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_command_is_reported_under_a_short_name() {
+        let out = Host::Local
+            .run_quiet(
+                ScriptRequest::new("cpg_no_such_command"),
+                &CancelToken::new(),
+            )
+            .unwrap();
+        assert_eq!(out.code, Some(127), "{}", out.stderr);
+        let line = out
+            .stderr
+            .lines()
+            .find(|l| l.contains("cpg_no_such_command"))
+            .unwrap_or_else(|| panic!("no message about the command: {}", out.stderr));
+        assert!(line.starts_with(&format!("{SCRIPT_NAME}: ")), "{line}");
+        assert!(
+            !out.stderr.contains(&B64.encode(BOOT_BODY)),
+            "{}",
+            out.stderr
+        );
     }
 
     #[test]
