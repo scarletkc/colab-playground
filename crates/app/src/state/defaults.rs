@@ -9,8 +9,8 @@ use std::time::Duration;
 use colab_playground_core::{Defaults, provision::MAX_ATTEMPTS_CAP};
 use gpui::{AppContext, Context};
 
-use super::{AppState, InstallPhase, Op};
-use crate::backend;
+use super::{AppState, InstallPhase, Op, SettingsFocus};
+use crate::{backend, route::Route};
 
 /// The shortest duration a defaults field accepts (zero would disable or spin).
 pub const MIN_DURATION: Duration = Duration::from_secs(1);
@@ -114,6 +114,13 @@ impl AppState {
         ))
         .severity(ely_gpui_component::primitives::Severity::Warning);
         self.toast(toast, cx);
+    }
+
+    /// Opens Settings with where the CLI lives at the top.
+    pub fn open_host_setting(&mut self, cx: &mut Context<Self>) {
+        self.navigate(Route::Settings, cx);
+        self.settings_focus = Some(SettingsFocus::Host);
+        cx.notify();
     }
 
     /// Whether host changes can be applied now (nothing else is running).

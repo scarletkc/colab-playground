@@ -4,10 +4,14 @@ use colab_playground::{
     platform::{EnvironmentKind, environment_kind},
     route::Route,
     state::{EnvironmentStep, InstallPhase, Load, Op, StepState, checklist},
-    ui::pages::overview::{
-        CHECK_AGAIN_SELECTOR, INSTALL_LOG_SELECTOR, INSTALL_NOT_FOUND_SELECTOR,
-        INSTALL_OPEN_SETTINGS_SELECTOR, INSTALL_SELECTOR, SIGN_IN_SELECTOR, SUMMARY_SELECTOR,
-        step_selector,
+    ui::pages::{
+        defaults::field_selector,
+        overview::{
+            CHECK_AGAIN_SELECTOR, INSTALL_LOG_SELECTOR, INSTALL_NOT_FOUND_SELECTOR,
+            INSTALL_OPEN_SETTINGS_SELECTOR, INSTALL_SELECTOR, SIGN_IN_SELECTOR, SUMMARY_SELECTOR,
+            step_selector,
+        },
+        settings::LANGUAGE_SELECTOR,
     },
 };
 use colab_playground_core::{
@@ -139,6 +143,10 @@ fn an_install_that_still_misses_colab_points_to_settings(cx: &mut TestAppContext
 
     app.click(INSTALL_OPEN_SETTINGS_SELECTOR);
     assert_eq!(app.route(), Route::Settings);
+    assert!(
+        host_comes_first(&mut app),
+        "the setting the alert names is the first one"
+    );
 
     // The user put the folder on PATH meanwhile.
     app.set_failures(MockFailures::default());
@@ -146,6 +154,20 @@ fn an_install_that_still_misses_colab_points_to_settings(cx: &mut TestAppContext
     app.click(CHECK_AGAIN_SELECTOR);
     assert_eq!(step_state(&mut app, EnvironmentStep::Cli), StepState::Done);
     assert!(!app.shown(INSTALL_NOT_FOUND_SELECTOR));
+
+    app.click(Route::Settings.nav_selector());
+    assert!(
+        !host_comes_first(&mut app),
+        "from the sidebar, Settings keeps its order"
+    );
+}
+
+/// Whether the colab path field sits above the language select on Settings.
+fn host_comes_first(app: &mut TestApp<'_>) -> bool {
+    let path = app.bounds(&field_selector("colab_path"));
+    let language = app.bounds(LANGUAGE_SELECTOR);
+    let (path, language) = path.zip(language).expect("both are drawn");
+    path.origin.y < language.origin.y
 }
 
 #[gpui::test]

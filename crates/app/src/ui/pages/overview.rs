@@ -509,9 +509,7 @@ fn install_not_found(handle: &Entity<AppState>, cx: &App) -> AnyElement {
         INSTALL_OPEN_SETTINGS_SELECTOR,
         Button::new("install-open-settings", tr(cx, keys::NEW_OPEN_SETTINGS))
             .size(ControlSize::Sm)
-            .on_click(move |_, _, cx| {
-                open.update(cx, |state, cx| state.navigate(Route::Settings, cx))
-            }),
+            .on_click(move |_, _, cx| open.update(cx, |state, cx| state.open_host_setting(cx))),
     ))
     .action(check_again_button(handle, cx));
     tagged(INSTALL_NOT_FOUND_SELECTOR, alert).into_any_element()
