@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.5.0](https://github.com/scarletkc/colab-playground/compare/v0.4.0...v0.5.0) (2026-11-26)
+
+
+### Added
+
+* **app:** show what the chosen hardware burns per hour when starting a session ([#73](https://github.com/scarletkc/colab-playground/issues/73)) ([3b5bcd3](https://github.com/scarletkc/colab-playground/commit/3b5bcd3028793e5b9d5886823c8c31d804d593c5))
+
+
+### Changed
+
+* **core:** write the session ledger once per usage round ([#76](https://github.com/scarletkc/colab-playground/issues/76)) ([146ce3a](https://github.com/scarletkc/colab-playground/commit/146ce3a301d907044dac3cdc7221ff60c3b3e4ae))
+
+
+### Fixed
+
+* **app:** name a new session after the hardware chosen in the form, not the default ([#74](https://github.com/scarletkc/colab-playground/issues/74)) ([bb17287](https://github.com/scarletkc/colab-playground/commit/bb17287ddc27a621f165b5f42a970002613c50e8))
+* **app:** point to Settings when colab is still not found after installing the CLI ([fa25d8c](https://github.com/scarletkc/colab-playground/commit/fa25d8c18eb0db2d36a2faadfd7cbb32f44e809e))
+* **core:** find a colab installed by uv when bash has no profile for it ([#69](https://github.com/scarletkc/colab-playground/issues/69)) ([ac9a0a1](https://github.com/scarletkc/colab-playground/commit/ac9a0a138c9a2a259a9b6966d62b6c483bab9683))
+* **core:** keep bash's job report out of logs and error details ([#89](https://github.com/scarletkc/colab-playground/issues/89)) ([373f565](https://github.com/scarletkc/colab-playground/commit/373f56594a3f895308bf568e3eb2d58df24cf2a1))
+* **core:** keep the llama.cpp outputs off other plugins' demo runs ([#91](https://github.com/scarletkc/colab-playground/issues/91)) ([94f87de](https://github.com/scarletkc/colab-playground/commit/94f87de35c1cf87249adff768b85183ee4a4f9ea))
+* **core:** show bash's error messages without a kilobyte of base64 in front ([#90](https://github.com/scarletkc/colab-playground/issues/90)) ([c0d3f4b](https://github.com/scarletkc/colab-playground/commit/c0d3f4b8de06680e0861f8e1ac7993f288f82a43))
+* **core:** take a session's burn rate from the account once it runs alone, not its even share ([#82](https://github.com/scarletkc/colab-playground/issues/82)) ([ce740d7](https://github.com/scarletkc/colab-playground/commit/ce740d761f8791b4d14349ff65b9dffc1725aff3))
+* **core:** take a session's burn rate from what the account burns beyond the sessions already measured ([#88](https://github.com/scarletkc/colab-playground/issues/88)) ([e4dd1c6](https://github.com/scarletkc/colab-playground/commit/e4dd1c6c71ff974bd8ba370cf70ca6148f2b3592))
+
 ## [0.4.0](https://github.com/scarletkc/colab-playground/compare/v0.3.0...v0.4.0) (2026-11-20)
 
 
