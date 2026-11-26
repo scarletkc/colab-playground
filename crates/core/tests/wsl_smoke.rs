@@ -103,6 +103,11 @@ exit 7"#;
         !out.stderr.contains("CPG-PGID"),
         "the job marker must be stripped"
     );
+    assert!(
+        !out.stderr.contains("__cpg"),
+        "bash's report of the finished job must not reach stderr: {}",
+        out.stderr
+    );
 
     // A long-running job is killed as a process group inside WSL.
     let cancel = CancelToken::new();
