@@ -130,6 +130,9 @@ pub const BOOTSTRAP: &str = r#"eval "$(printf %s "$0" | { base64 -d 2>/dev/null 
 
 /// Decoder run by [`BOOTSTRAP`]. Positional layout after `$0`:
 /// `$1` script (b64), `$2` job flag, `$3` env count, then env pairs and args (b64).
+///
+/// `wait` drops its stderr: bash reports the finished job there (`[1]+  Done …`, `Exit 7`, or
+/// the signal that killed it), and the exit status already says how it ended.
 const BOOT_BODY: &str = r#"__cpg_d() { printf '%s' "$1" | { base64 -d 2>/dev/null || base64 -D; } && printf x; }
 __cpg_s=$(__cpg_d "$1") || exit 125
 __cpg_s=${__cpg_s%x}
@@ -155,7 +158,7 @@ if [ "$__cpg_j" = 1 ]; then
   ( eval "$__cpg_s" ) &
   __cpg_p=$!
   printf '\036CPG-PGID %s\n' "$__cpg_p" >&2
-  wait "$__cpg_p"
+  wait "$__cpg_p" 2>/dev/null
   exit $?
 fi
 eval "$__cpg_s"
@@ -1578,6 +1581,19 @@ mod tests {
         assert!(out.stdout.contains("env=[v=1 ñ\n]"), "{}", out.stdout);
         assert!(out.stdout.contains("from stdin ✓"));
         assert!(!out.stderr.contains("CPG-PGID"));
+        // bash reports the finished job as `[1]+  Exit 7  ( eval "$__cpg_s" )`.
+        assert!(!out.stderr.contains("__cpg"), "{}", out.stderr);
+    }
+
+    /// A job ended by a signal leaves only its exit status (128 + the signal), with no report
+    /// from bash about it.
+    #[cfg(unix)]
+    #[test]
+    fn a_job_killed_by_a_signal_leaves_only_its_exit_status() {
+        let req = ScriptRequest::new("exec sh -c 'kill -KILL $$'");
+        let out = Host::Local.run_quiet(req, &CancelToken::new()).unwrap();
+        assert_eq!(out.code, Some(128 + 9));
+        assert!(!out.stderr.contains("__cpg"), "{}", out.stderr);
     }
 
     #[test]
