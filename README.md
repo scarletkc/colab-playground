@@ -47,7 +47,8 @@ runtime to your computer and runs plugins on the runtime. Written in Rust with G
 - **Plugins.** A manifest plus one script that runs only on the Colab runtime, never on your
   computer. Bundled: "Deploy a GGUF model" serves a Hugging Face GGUF model with llama.cpp
   (OpenAI-compatible API plus web chat) and picks the best quantisation that fits the GPU it gets.
-  Write your own with [docs/PLUGINS.md](docs/PLUGINS.md).
+  Write your own with [docs/PLUGINS.md](docs/PLUGINS.md) and get it listed for others in
+  [docs/COMMUNITY_PLUGINS.md](docs/COMMUNITY_PLUGINS.md).
 - **Languages and theme.** 简体中文, 繁體中文, 日本語, 한국어 and English; light, dark or follow the
   system.
 
@@ -94,6 +95,8 @@ Requirements, backend flags, demo scenarios and where settings are stored:
 - [docs/USAGE.md](docs/USAGE.md): install a release, build and run, demo data, where things are
   stored.
 - [docs/PLUGINS.md](docs/PLUGINS.md): writing a plugin (manifest, environment, status, security).
+- [docs/COMMUNITY_PLUGINS.md](docs/COMMUNITY_PLUGINS.md): plugins by others, and how to get yours
+  listed.
 - [docs/DESIGN.md](docs/DESIGN.md): the product principle, the scope and the rules every change
   follows.
 - [docs/TESTING.md](docs/TESTING.md): how a change is checked, and optional checklists for real

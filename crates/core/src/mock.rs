@@ -1103,6 +1103,9 @@ fn catalog() -> Vec<(&'static str, f64)> {
     ]
 }
 
+/// The bundled plugin whose worker's outputs a simulated run reports.
+const LLAMA_CPP: &str = "llama-cpp";
+
 fn mock_listing(repo: &str) -> GgufListing {
     let params = catalog()
         .into_iter()
@@ -1924,35 +1927,39 @@ impl Backend for MockBackend {
             }
         }
         let mut outputs = serde_json::Map::new();
-        if let Some(crate::plugins::InputValue::Text(repo)) = resolved.values.get("repo") {
-            let listing = mock_listing(repo);
-            let input = FitInput {
-                vram_mib: vram.unwrap_or(16_384),
-                ctx: 0,
-                model_ctx: Some(131_072),
-                kv_bytes_per_token: Some(65_536),
-                mmproj_bytes: 0,
-                kv: None,
-            };
-            if let Ok(choice) = fit_auto(&listing, &input) {
-                outputs.insert("quant".into(), choice.quant.clone().into());
-                outputs.insert("n_ctx".into(), choice.ctx.into());
-                outputs.insert("kv".into(), choice.kv.as_str().into());
+        // A worker reports outputs of its own choosing, and the mock knows only the llama.cpp
+        // worker's, so any other plugin's run reports none.
+        if plugin.manifest.id == LLAMA_CPP {
+            if let Some(crate::plugins::InputValue::Text(repo)) = resolved.values.get("repo") {
+                let listing = mock_listing(repo);
+                let input = FitInput {
+                    vram_mib: vram.unwrap_or(16_384),
+                    ctx: 0,
+                    model_ctx: Some(131_072),
+                    kv_bytes_per_token: Some(65_536),
+                    mmproj_bytes: 0,
+                    kv: None,
+                };
+                if let Ok(choice) = fit_auto(&listing, &input) {
+                    outputs.insert("quant".into(), choice.quant.clone().into());
+                    outputs.insert("n_ctx".into(), choice.ctx.into());
+                    outputs.insert("kv".into(), choice.kv.as_str().into());
+                }
+                outputs.insert(
+                    "model_id".into(),
+                    repo.rsplit('/')
+                        .next()
+                        .unwrap_or(repo)
+                        .trim_end_matches("-GGUF")
+                        .to_ascii_lowercase()
+                        .into(),
+                );
             }
-            outputs.insert(
-                "model_id".into(),
-                repo.rsplit('/')
-                    .next()
-                    .unwrap_or(repo)
-                    .trim_end_matches("-GGUF")
-                    .to_ascii_lowercase()
-                    .into(),
-            );
+            if let Some(v) = vram {
+                outputs.insert("vram_total_mib".into(), v.into());
+            }
+            outputs.insert("tok_per_s".into(), 64.2.into());
         }
-        if let Some(v) = vram {
-            outputs.insert("vram_total_mib".into(), v.into());
-        }
-        outputs.insert("tok_per_s".into(), 64.2.into());
         let status = RunStatus {
             state: RunState::Ready,
             stage: stages.last().cloned(),
@@ -2761,6 +2768,31 @@ mod tests {
             assert!(told, "the retry is only reported once provisioning is over");
             assert_eq!(run.join().unwrap().unwrap().status.state, RunState::Ready);
         });
+    }
+
+    #[test]
+    fn a_run_of_another_plugin_reports_none_of_the_llama_cpp_outputs() {
+        let (m, _) = mock(MockScenario::single());
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("plugin.toml"),
+            "api = 1\nid = \"images\"\nversion = \"0.1.0\"\n[name]\nen = \"Images\"\n\
+             [[inputs]]\nid = \"repo\"\ntype = \"text\"\n[inputs.label]\nen = \"Repository\"\n\
+             [run]\nscript = \"main.py\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("main.py"), "print('hi')\n").unwrap();
+        let preview = m.inspect_plugin_folder(dir.path()).unwrap();
+        m.install_plugin(&preview).unwrap();
+        let mut spec = m.plugin_run_template("images").unwrap();
+        spec.inputs.insert(
+            "repo".into(),
+            crate::plugins::InputValue::Text("someone/model".into()),
+        );
+        let (tx, _rx) = mpsc::channel();
+        let out = m.run_plugin(spec, tx, &nc()).unwrap();
+        assert_eq!(out.status.state, RunState::Ready);
+        assert!(out.status.outputs.is_empty(), "{:?}", out.status.outputs);
     }
 
     #[test]
