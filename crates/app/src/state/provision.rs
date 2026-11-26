@@ -324,7 +324,7 @@ impl AppState {
         self.close_overlay(cx);
         self.new_session = None;
         self.navigate(crate::route::Route::Settings, cx);
-        self.settings_focus = true;
+        self.settings_focus = Some(super::SettingsFocus::Limit);
         cx.notify();
     }
 }

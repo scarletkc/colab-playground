@@ -190,9 +190,16 @@ pub(super) const MESSAGES: Messages = &[
     (INSTALL_START, "Install"),
     (INSTALL_RUNNING, "Installing the Colab CLI…"),
     (INSTALL_CANCELLING, "Cancelling…"),
-    (INSTALL_DONE, "The Colab CLI is installed."),
     (INSTALL_FAILED, "Installation failed"),
     (INSTALL_CANCELLED, "Installation was cancelled."),
+    (
+        INSTALL_NOT_FOUND_TITLE,
+        "Installation finished, but colab wasn't found",
+    ),
+    (
+        INSTALL_NOT_FOUND_BODY,
+        "It's probably in a folder this app doesn't search; the log below may name it. Enter the full path to colab in Settings, under Colab CLI location.",
+    ),
     (SUMMARY_TITLE, "Compute units"),
     (SUMMARY_ACTIVE, "Active account: {email}"),
     (SUMMARY_BALANCE, "Balance"),

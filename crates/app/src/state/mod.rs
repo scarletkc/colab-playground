@@ -120,6 +120,15 @@ impl<T> Load<T> {
     }
 }
 
+/// The setting a button elsewhere sent the user to Settings for, shown above the others.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsFocus {
+    /// The session limit.
+    Limit,
+    /// Where the CLI lives.
+    Host,
+}
+
 /// Everything the shell shows. See the crate docs for the pattern.
 pub struct AppState {
     route: Route,
@@ -159,7 +168,7 @@ pub struct AppState {
     /// The user's stop waits for a runtime listing before asking for a star or feedback
     /// (`feedback`).
     feedback_waits_for_listing: bool,
-    settings_focus: bool,
+    settings_focus: Option<SettingsFocus>,
     update: updates::UpdateCheck,
     /// Whether this copy can replace itself (`None` until the backend has said).
     self_update: Option<SelfUpdate>,
@@ -296,7 +305,7 @@ impl AppState {
                 quit: quit::QuitState::default(),
                 stop_all_pending: false,
                 feedback_waits_for_listing: false,
-                settings_focus: false,
+                settings_focus: None,
                 update: updates::UpdateCheck::default(),
                 self_update: None,
                 installed: None,
@@ -420,14 +429,14 @@ impl AppState {
             log::info!("app: route {:?} -> {route:?}", self.route);
             self.route = route;
             if route != Route::Settings {
-                self.settings_focus = false;
+                self.settings_focus = None;
             }
             cx.notify();
         }
     }
 
-    /// Whether Settings opens with the session limit called out at the top.
-    pub fn settings_focus(&self) -> bool {
+    /// What Settings shows first, when a button elsewhere sent the user there.
+    pub fn settings_focus(&self) -> Option<SettingsFocus> {
         self.settings_focus
     }
 

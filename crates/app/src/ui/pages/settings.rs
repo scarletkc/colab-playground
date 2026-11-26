@@ -22,7 +22,7 @@ use crate::{
     i18n::{keys, tr, tr_args},
     route::Route,
     settings::LanguagePref,
-    state::{AppState, appearance_pref, ely_appearance},
+    state::{AppState, SettingsFocus, appearance_pref, ely_appearance},
     ui::{Inputs, overlays::unsupported_reason, tagged},
 };
 
@@ -51,15 +51,19 @@ pub fn language_label(pref: LanguagePref, state: &AppState, cx: &App) -> SharedS
 }
 
 pub fn render(state: &AppState, handle: &Entity<AppState>, inputs: &Inputs, cx: &App) -> Page {
+    let focus = state.settings_focus();
+    // Moved rather than repeated: each path field is one text input, drawn in one place.
+    let host_first = focus == Some(SettingsFocus::Host);
+    let host = || super::defaults::host_section(state, handle, inputs, cx);
     super::page(Route::Settings, keys::SETTINGS_SUBTITLE, cx)
         .children(
-            state
-                .settings_focus()
+            (focus == Some(SettingsFocus::Limit))
                 .then(|| super::defaults::limit_focus(state, handle, cx)),
         )
+        .children(host_first.then(host))
         .child(general(state, handle, cx))
         .child(super::defaults::defaults_section(state, handle, cx))
-        .child(super::defaults::host_section(state, handle, inputs, cx))
+        .children((!host_first).then(host))
         .child(about(state, handle, cx))
 }
 

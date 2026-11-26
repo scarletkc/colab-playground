@@ -5,7 +5,7 @@ use colab_playground_core::host::Stream;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant, IconButton},
     data_display::{Badge, Tone},
-    feedback::InlineMessage,
+    feedback::{Alert, InlineMessage},
     forms::{Choice, Select},
     layout::{Card, CardHeader, Page, ScrollArea, Well},
     lists::List,
@@ -48,6 +48,10 @@ pub const INSTALL_SELECTOR: &str = "install-start";
 /// Selector around the Cancel button of a running install.
 pub const INSTALL_CANCEL_SELECTOR: &str = "install-cancel";
 pub const INSTALL_LOG_SELECTOR: &str = "install-log";
+/// Selector of the alert shown when an install finished but `colab` is still not found.
+pub const INSTALL_NOT_FOUND_SELECTOR: &str = "install-not-found";
+/// Selector around that alert's button that opens Settings.
+pub const INSTALL_OPEN_SETTINGS_SELECTOR: &str = "install-open-settings";
 /// Selector around the sign-in button of the checklist.
 pub const SIGN_IN_SELECTOR: &str = "checklist-sign-in";
 pub const CHECK_AGAIN_SELECTOR: &str = "checklist-check-again";
@@ -376,10 +380,14 @@ fn install(
     let theme = cx.theme();
     let install = state.install();
     let running = state.is_busy(Op::Install);
+    // A finished install is followed by a check for `colab`; until it ends, the step still
+    // shows the report from before the install.
+    let checking = state.is_busy(Op::Environment);
     let mut extra: Vec<AnyElement> = Vec::new();
     let body = match &install.phase {
         InstallPhase::Running if running => None,
-        InstallPhase::Done => Some(tr(cx, keys::INSTALL_DONE)),
+        InstallPhase::Done if checking => Some(tr(cx, keys::STEP_CHECKING)),
+        InstallPhase::Done => None,
         InstallPhase::Cancelled => Some(tr(cx, keys::INSTALL_CANCELLED)),
         _ => Some(tr(cx, keys::STEP_CLI_TODO)),
     };
@@ -430,6 +438,9 @@ fn install(
                 handle,
                 cx,
             ));
+        }
+        if install.phase == InstallPhase::Done && !checking {
+            extra.push(install_not_found(handle, cx));
         }
         let methods = install_methods(state.probe().ready());
         let chosen = state.chosen_install_method();
@@ -482,6 +493,26 @@ fn install(
         extra.push(install_log(state, cx));
     }
     (body, extra)
+}
+
+/// The installer succeeded, yet the check after it misses `colab`: it went to a folder the probe
+/// does not search, where the same install would put it again.
+fn install_not_found(handle: &Entity<AppState>, cx: &App) -> AnyElement {
+    let open = handle.clone();
+    let alert = Alert::new(
+        INSTALL_NOT_FOUND_SELECTOR,
+        Severity::Warning,
+        tr(cx, keys::INSTALL_NOT_FOUND_TITLE),
+    )
+    .body(tr(cx, keys::INSTALL_NOT_FOUND_BODY))
+    .action(tagged(
+        INSTALL_OPEN_SETTINGS_SELECTOR,
+        Button::new("install-open-settings", tr(cx, keys::NEW_OPEN_SETTINGS))
+            .size(ControlSize::Sm)
+            .on_click(move |_, _, cx| open.update(cx, |state, cx| state.open_host_setting(cx))),
+    ))
+    .action(check_again_button(handle, cx));
+    tagged(INSTALL_NOT_FOUND_SELECTOR, alert).into_any_element()
 }
 
 /// The install's output: monospace, colours kept, following the newest line.

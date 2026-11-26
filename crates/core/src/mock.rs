@@ -55,6 +55,8 @@ pub struct MockFailures {
     /// `colab` is not installed (until `install_cli` succeeds).
     pub cli_missing: bool,
     pub install_fails: bool,
+    /// The install succeeds but puts `colab` in a folder outside `PATH`, so it stays missing.
+    pub install_off_path: bool,
     pub keyring_unavailable: bool,
     pub login: Option<MockLoginFailure>,
     /// Accelerators the accounts are not entitled to.
@@ -119,6 +121,7 @@ impl Default for MockFailures {
         MockFailures {
             cli_missing: false,
             install_fails: false,
+            install_off_path: false,
             keyring_unavailable: false,
             login: None,
             not_entitled: vec![],
@@ -581,8 +584,7 @@ impl World {
         let entry = self.usage.entry(id.clone()).or_default();
         match (fails, reading) {
             (false, Some(u)) => {
-                entry.record_success(u, now, &live);
-                entry.ownership_verified = live.is_empty() || verified;
+                entry.record_success(u, now, &live, verified);
                 if verified && let Some(name) = u.sole_session(&live) {
                     let reading = RateReading {
                         cu_per_hour: u.rate_cu_per_hour,
@@ -1280,6 +1282,13 @@ impl Backend for MockBackend {
             stream: Stream::Stdout,
             text: "Installed 1 executable: colab".into(),
         });
+        if self.w().failures.install_off_path {
+            let _ = log.send(Line {
+                stream: Stream::Stderr,
+                text: "warning: `/home/demo/tools/bin` is not on your PATH.".into(),
+            });
+            return Ok(());
+        }
         let mut w = self.w();
         w.cli_installed = true;
         w.failures.cli_missing = false;
@@ -2465,6 +2474,105 @@ mod tests {
             rate(Accelerator::A100).unwrap().cu_per_hour,
             mock_rate(Accelerator::A100)
         );
+    }
+
+    #[test]
+    fn a_session_left_alone_is_charged_what_the_account_burns() {
+        let (m, clock) = mock(MockScenario::single());
+        let start = |accelerator| {
+            let spec = ProvisionSpec {
+                accelerator,
+                min_vram_mib: None,
+                ..m.defaults().provision_spec(m.new_session_name(None))
+            };
+            let (tx, _rx) = mpsc::channel();
+            m.provision(spec, tx, &nc()).unwrap().name
+        };
+        let runtime = |name: &str| {
+            m.runtimes(&nc())
+                .unwrap()
+                .runtimes
+                .into_iter()
+                .find(|r| r.id.name.as_deref() == Some(name))
+                .unwrap()
+        };
+        let rate = |name: &str| runtime(name).estimated_rate_cu_per_hour.unwrap();
+        // An A100 and a T4 start between two readings, so they share the rise.
+        m.refresh_usage(&[], &nc()).unwrap();
+        let a100 = start(Accelerator::A100);
+        let t4 = start(Accelerator::T4);
+        m.refresh_usage(&[], &nc()).unwrap();
+        let shared = (mock_rate(Accelerator::A100) + mock_rate(Accelerator::T4)) / 2.0;
+        assert!((rate(&t4) - shared).abs() < 1e-9, "{}", rate(&t4));
+
+        m.stop_session(&runtime(&a100).id, StopOptions::default(), &nc())
+            .unwrap();
+        for _ in 0..4 {
+            m.refresh_usage(&[], &nc()).unwrap();
+            clock.advance(Duration::from_secs(30));
+        }
+        assert!((rate(&t4) - shared).abs() < 1e-9, "{}", rate(&t4));
+        m.refresh_usage(&[], &nc()).unwrap();
+        assert_eq!(rate(&t4), mock_rate(Accelerator::T4));
+    }
+
+    #[test]
+    fn a_session_beside_a_measured_one_is_charged_what_the_account_burns_beyond_it() {
+        let (m, clock) = mock(MockScenario::single());
+        let start = |accelerator| {
+            let spec = ProvisionSpec {
+                accelerator,
+                min_vram_mib: None,
+                ..m.defaults().provision_spec(m.new_session_name(None))
+            };
+            let (tx, _rx) = mpsc::channel();
+            m.provision(spec, tx, &nc()).unwrap().name
+        };
+        let runtime = |name: &str| {
+            m.runtimes(&nc())
+                .unwrap()
+                .runtimes
+                .into_iter()
+                .find(|r| r.id.name.as_deref() == Some(name))
+                .unwrap()
+        };
+        let rate = |name: &str| runtime(name).estimated_rate_cu_per_hour.unwrap();
+        let hold = || {
+            for _ in 0..4 {
+                m.refresh_usage(&[], &nc()).unwrap();
+                clock.advance(Duration::from_secs(30));
+            }
+            m.refresh_usage(&[], &nc()).unwrap();
+        };
+        // A T4 runs alone until it is measured.
+        m.refresh_usage(&[], &nc()).unwrap();
+        let t4 = start(Accelerator::T4);
+        hold();
+        // An A100 starts between the same two readings as a CPU in the
+        // browser, so its estimate holds the CPU's rate too.
+        let account = runtime(&t4).id.account;
+        let cpu = m.add_unmanaged_runtime(&account, Accelerator::None);
+        let a100 = start(Accelerator::A100);
+        m.refresh_usage(&[], &nc()).unwrap();
+        let both = mock_rate(Accelerator::A100) + mock_rate(Accelerator::None);
+        assert!((rate(&a100) - both).abs() < 1e-9, "{}", rate(&a100));
+
+        let browser = RuntimeRef {
+            account,
+            endpoint: cpu,
+            name: None,
+        };
+        m.stop_session(&browser, StopOptions::default(), &nc())
+            .unwrap();
+        for _ in 0..4 {
+            m.refresh_usage(&[], &nc()).unwrap();
+            clock.advance(Duration::from_secs(30));
+        }
+        assert!((rate(&a100) - both).abs() < 1e-9, "{}", rate(&a100));
+        m.refresh_usage(&[], &nc()).unwrap();
+        let a100_rate = mock_rate(Accelerator::A100);
+        assert!((rate(&a100) - a100_rate).abs() < 1e-9, "{}", rate(&a100));
+        assert_eq!(rate(&t4), mock_rate(Accelerator::T4));
     }
 
     #[test]

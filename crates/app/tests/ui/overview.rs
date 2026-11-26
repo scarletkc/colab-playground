@@ -2,9 +2,16 @@
 
 use colab_playground::{
     platform::{EnvironmentKind, environment_kind},
+    route::Route,
     state::{EnvironmentStep, InstallPhase, Load, Op, StepState, checklist},
-    ui::pages::overview::{
-        INSTALL_LOG_SELECTOR, INSTALL_SELECTOR, SIGN_IN_SELECTOR, SUMMARY_SELECTOR, step_selector,
+    ui::pages::{
+        defaults::field_selector,
+        overview::{
+            CHECK_AGAIN_SELECTOR, INSTALL_LOG_SELECTOR, INSTALL_NOT_FOUND_SELECTOR,
+            INSTALL_OPEN_SETTINGS_SELECTOR, INSTALL_SELECTOR, SIGN_IN_SELECTOR, SUMMARY_SELECTOR,
+            step_selector,
+        },
+        settings::LANGUAGE_SELECTOR,
     },
 };
 use colab_playground_core::{
@@ -98,6 +105,82 @@ fn a_failed_install_says_so_keeps_the_log_and_can_run_again(cx: &mut TestAppCont
         InstallPhase::Done
     );
     assert_eq!(step_state(&mut app, EnvironmentStep::Cli), StepState::Done);
+}
+
+#[gpui::test]
+fn an_install_that_still_misses_colab_points_to_settings(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(
+        cx,
+        Options {
+            failures: MockFailures {
+                cli_missing: true,
+                install_off_path: true,
+                ..MockFailures::default()
+            },
+            ..Options::scenario(MockScenario::signed_out())
+        },
+    );
+    assert!(!app.shown(INSTALL_NOT_FOUND_SELECTOR));
+
+    app.click(INSTALL_SELECTOR);
+    assert_eq!(
+        app.read(|state, _| state.install().phase.clone()),
+        InstallPhase::Done
+    );
+    assert_eq!(step_state(&mut app, EnvironmentStep::Cli), StepState::Todo);
+    assert!(
+        app.shown(INSTALL_NOT_FOUND_SELECTOR),
+        "the step says why it is not done"
+    );
+    assert!(
+        app.shown(INSTALL_LOG_SELECTOR),
+        "the log may name the folder"
+    );
+    assert!(
+        app.shown(INSTALL_SELECTOR),
+        "another method can still be tried"
+    );
+
+    // What Check again runs: until the check ends, the step waits for it instead of warning.
+    app.update_and_draw(|state, cx| state.check_environment(cx));
+    assert!(app.read(|state, _| state.is_busy(Op::Environment)));
+    assert!(
+        !app.shown(INSTALL_NOT_FOUND_SELECTOR),
+        "no warning while the check runs"
+    );
+    app.settle();
+    assert!(
+        app.shown(INSTALL_NOT_FOUND_SELECTOR),
+        "still not found after it"
+    );
+
+    app.click(INSTALL_OPEN_SETTINGS_SELECTOR);
+    assert_eq!(app.route(), Route::Settings);
+    assert!(
+        host_comes_first(&mut app),
+        "the setting the alert names is the first one"
+    );
+
+    // The user put the folder on PATH meanwhile.
+    app.set_failures(MockFailures::default());
+    app.click(Route::Overview.nav_selector());
+    app.click(CHECK_AGAIN_SELECTOR);
+    assert_eq!(step_state(&mut app, EnvironmentStep::Cli), StepState::Done);
+    assert!(!app.shown(INSTALL_NOT_FOUND_SELECTOR));
+
+    app.click(Route::Settings.nav_selector());
+    assert!(
+        !host_comes_first(&mut app),
+        "from the sidebar, Settings keeps its order"
+    );
+}
+
+/// Whether the colab path field sits above the language select on Settings.
+fn host_comes_first(app: &mut TestApp<'_>) -> bool {
+    let path = app.bounds(&field_selector("colab_path"));
+    let language = app.bounds(LANGUAGE_SELECTOR);
+    let (path, language) = path.zip(language).expect("both are drawn");
+    path.origin.y < language.origin.y
 }
 
 #[gpui::test]
