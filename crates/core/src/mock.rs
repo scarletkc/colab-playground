@@ -2517,6 +2517,65 @@ mod tests {
     }
 
     #[test]
+    fn a_session_beside_a_measured_one_is_charged_what_the_account_burns_beyond_it() {
+        let (m, clock) = mock(MockScenario::single());
+        let start = |accelerator| {
+            let spec = ProvisionSpec {
+                accelerator,
+                min_vram_mib: None,
+                ..m.defaults().provision_spec(m.new_session_name(None))
+            };
+            let (tx, _rx) = mpsc::channel();
+            m.provision(spec, tx, &nc()).unwrap().name
+        };
+        let runtime = |name: &str| {
+            m.runtimes(&nc())
+                .unwrap()
+                .runtimes
+                .into_iter()
+                .find(|r| r.id.name.as_deref() == Some(name))
+                .unwrap()
+        };
+        let rate = |name: &str| runtime(name).estimated_rate_cu_per_hour.unwrap();
+        let hold = || {
+            for _ in 0..4 {
+                m.refresh_usage(&[], &nc()).unwrap();
+                clock.advance(Duration::from_secs(30));
+            }
+            m.refresh_usage(&[], &nc()).unwrap();
+        };
+        // A T4 runs alone until it is measured.
+        m.refresh_usage(&[], &nc()).unwrap();
+        let t4 = start(Accelerator::T4);
+        hold();
+        // An A100 starts between the same two readings as a CPU in the
+        // browser, so its estimate holds the CPU's rate too.
+        let account = runtime(&t4).id.account;
+        let cpu = m.add_unmanaged_runtime(&account, Accelerator::None);
+        let a100 = start(Accelerator::A100);
+        m.refresh_usage(&[], &nc()).unwrap();
+        let both = mock_rate(Accelerator::A100) + mock_rate(Accelerator::None);
+        assert!((rate(&a100) - both).abs() < 1e-9, "{}", rate(&a100));
+
+        let browser = RuntimeRef {
+            account,
+            endpoint: cpu,
+            name: None,
+        };
+        m.stop_session(&browser, StopOptions::default(), &nc())
+            .unwrap();
+        for _ in 0..4 {
+            m.refresh_usage(&[], &nc()).unwrap();
+            clock.advance(Duration::from_secs(30));
+        }
+        assert!((rate(&a100) - both).abs() < 1e-9, "{}", rate(&a100));
+        m.refresh_usage(&[], &nc()).unwrap();
+        let a100_rate = mock_rate(Accelerator::A100);
+        assert!((rate(&a100) - a100_rate).abs() < 1e-9, "{}", rate(&a100));
+        assert_eq!(rate(&t4), mock_rate(Accelerator::T4));
+    }
+
+    #[test]
     fn provision_retries_to_80_gb_and_respects_the_session_cap() {
         let (m, _) = mock(MockScenario::single());
         let mut spec = m.defaults().provision_spec(m.new_session_name(None));

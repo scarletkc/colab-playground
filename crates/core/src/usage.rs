@@ -9,8 +9,10 @@
 //!   sessions, 5 min otherwise by default; manual refresh is always allowed).
 //! * [`RateAttribution`] — an *estimated* per-session burn rate, taken from the
 //!   change of the account rate observed when sessions start or stop, split
-//!   evenly when ambiguous, and from the account rate itself while a session
-//!   is the account's only runtime. All per-session figures are estimates (`≈`).
+//!   evenly when ambiguous, and measured from the account rate itself: a
+//!   session that is the account's only runtime burns all of it, and one whose
+//!   only neighbours are sessions measured before burns what they leave. All
+//!   per-session figures are estimates (`≈`).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, SystemTime};
@@ -27,11 +29,11 @@ pub const HISTORY_CAPACITY: usize = 120;
 /// A rate (CU/h) at or below this is rounding error, not a runtime burning.
 const NO_RATE: f64 = 1e-9;
 
-/// How long the account rate must hold, after it last moved, before it is
-/// taken for what a session alone on the account burns. Runtimes that go
-/// together can each leave the account rate at a time of their own, so the
-/// first fall need not be the last.
-const ALONE_HOLD: Duration = Duration::from_secs(120);
+/// How long the account rate must hold, after it last moved, before a
+/// session is measured from it. Runtimes that go together can each leave the
+/// account rate at a time of their own, so the first fall need not be the
+/// last.
+const MEASURE_HOLD: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
@@ -227,24 +229,31 @@ impl BalanceHistory {
 pub struct RateAttribution {
     last_rate: Option<f64>,
     rates: BTreeMap<String, Option<f64>>,
-    /// What a session burned while it was the account's only runtime. It
+    /// What a session burns, measured from the account rate while its only
+    /// neighbours on the account were sessions measured before, or none. It
     /// stands in for the estimate in `rates`, which stays as it was so that
     /// every other estimate is worked out as before.
     #[serde(default)]
     measured: BTreeMap<String, f64>,
+    /// Runtimes on the account at the previous reading.
     #[serde(skip)]
-    alone: Option<Alone>,
+    last_assignments: Option<u32>,
+    #[serde(skip)]
+    remainder: Option<Remainder>,
 }
 
-/// The session that is the account's only runtime, since the reading that
-/// found it alone.
+/// The session that burns what the account rate leaves beside the sessions
+/// measured before, since the reading that found every other runtime of the
+/// account to be one of those.
 #[derive(Debug, Clone, PartialEq)]
-struct Alone {
+struct Remainder {
     name: String,
+    /// Every session of the account then, this one included.
+    sessions: BTreeSet<String>,
     /// The account rate has moved since a runtime last came or went. Until
     /// it does, it can still hold what a runtime that went burned.
     followed: bool,
-    /// When the rate last moved, or the session was found alone.
+    /// When the rate last moved, or this began.
     since: SystemTime,
     /// What the first measurement of this spell replaced, to put back if the
     /// rate moves afterwards.
@@ -307,10 +316,11 @@ impl RateAttribution {
         self.last_rate = Some(rate);
     }
 
-    /// [`Self::observe`], and a measurement of a session that is the
-    /// account's only runtime: the account rate is what it burns, once that
-    /// rate has followed the last runtime that came or went and then held for
-    /// [`ALONE_HOLD`]. `verified` says the listing taken with this reading
+    /// [`Self::observe`], and a measurement of a session whose only
+    /// neighbours on the account are sessions measured before, or none: what
+    /// the account rate leaves beside them is what it burns, once that rate
+    /// has followed the last runtime that came or went and then held for
+    /// [`MEASURE_HOLD`]. `verified` says the listing taken with this reading
     /// matched each session in `live` to a runtime of the account.
     pub fn observe_at(
         &mut self,
@@ -322,45 +332,82 @@ impl RateAttribution {
     ) {
         let rate = account_rate.max(0.0);
         let moved = self.last_rate.map(|last| (last - rate).abs() > NO_RATE);
+        let recounted = self.last_assignments.replace(assignments) != Some(assignments);
+        let gone = self.rates.keys().any(|name| !live.contains(name));
         self.observe(account_rate, assignments, live);
         self.measured.retain(|name, _| live.contains(name));
-        let Some(name) = live.first().filter(|_| assignments == 1 && live.len() == 1) else {
-            self.alone = None;
+        // A runtime outside the app burns a part of the account rate that no
+        // measurement covers.
+        if live.len() != assignments as usize {
+            self.remainder = None;
             return;
-        };
-        let mut alone = match self.alone.take() {
-            Some(mut alone) if &alone.name == name => {
+        }
+        let mut remainder = match self.remainder.take() {
+            Some(mut remainder) if remainder.sessions == *live => {
                 if moved == Some(true) {
                     // The rate moved with nothing coming or going, so what
                     // this spell measured may have been only part of its way.
-                    if let Some(before) = alone.replaced.take() {
+                    if let Some(before) = remainder.replaced.take() {
                         match before {
-                            Some(r) => self.measured.insert(name.clone(), r),
-                            None => self.measured.remove(name),
+                            Some(r) => self.measured.insert(remainder.name.clone(), r),
+                            None => self.measured.remove(&remainder.name),
                         };
                     }
-                    alone.followed = true;
-                    alone.since = now;
-                } else if now < alone.since {
+                    remainder.followed = true;
+                    remainder.since = now;
+                } else if now < remainder.since {
                     // The system time was set back.
-                    alone.since = now;
+                    remainder.since = now;
                 }
-                alone
+                remainder
             }
-            _ => Alone {
-                name: name.clone(),
-                // The first reading has nothing to compare with.
-                followed: moved != Some(false),
-                since: now,
-                replaced: None,
-            },
+            _ => {
+                // The account's only runtime needs no other measurement, so it
+                // is measured again even if it was before.
+                let candidates: Vec<&String> = if live.len() == 1 {
+                    live.iter().collect()
+                } else {
+                    live.iter()
+                        .filter(|name| !self.measured.contains_key(*name))
+                        .collect()
+                };
+                let [name] = candidates.as_slice() else {
+                    self.remainder = None;
+                    return;
+                };
+                Remainder {
+                    name: (*name).clone(),
+                    sessions: live.clone(),
+                    // The first reading has nothing to compare with. With no
+                    // session gone and as many runtimes as before, the new
+                    // session is most likely one the account already ran while
+                    // the app set it up; one that took the place of a runtime
+                    // outside the app moves the rate before the hold is over,
+                    // as long as the rate follows within it.
+                    followed: moved != Some(false) || (!recounted && !gone),
+                    since: now,
+                    replaced: None,
+                }
+            }
         };
-        let held = now.duration_since(alone.since).unwrap_or_default() >= ALONE_HOLD;
-        if verified && alone.followed && held && rate.is_finite() && rate > NO_RATE {
-            let before = self.measured.insert(name.clone(), rate);
-            alone.replaced.get_or_insert(before);
+        let held = now.duration_since(remainder.since).unwrap_or_default() >= MEASURE_HOLD;
+        let beside: Option<f64> = remainder
+            .sessions
+            .iter()
+            .filter(|name| **name != remainder.name)
+            .map(|name| self.measured.get(name).copied())
+            .sum();
+        if let Some(left) = beside.map(|beside| rate - beside)
+            && verified
+            && remainder.followed
+            && held
+            && left.is_finite()
+            && left > NO_RATE
+        {
+            let before = self.measured.insert(remainder.name.clone(), left);
+            remainder.replaced.get_or_insert(before);
         }
-        self.alone = Some(alone);
+        self.remainder = Some(remainder);
     }
 
     /// Estimated rate of a session (CU/h).
@@ -827,6 +874,142 @@ mod tests {
         assert_eq!(rate(&a, "t4"), Some(6.765));
         read(&mut a, 420, 1.76, 1, &["t4"]);
         assert_eq!(rate(&a, "t4"), Some(1.76));
+    }
+
+    #[test]
+    fn sessions_none_of_which_was_measured_keep_their_estimates() {
+        let mut a = a100_and_t4_together();
+        for at in (60..=600).step_by(30) {
+            read(&mut a, at, 13.53, 2, &["a100", "t4"]);
+        }
+        assert_eq!(rate(&a, "a100"), Some(6.765));
+        assert_eq!(rate(&a, "t4"), Some(6.765));
+    }
+
+    /// The T4 of [`a100_and_t4_together`], measured once the A100 stopped at
+    /// 600 s. Its estimate behind the measurement is still 6.765.
+    fn t4_measured_after_the_a100() -> RateAttribution {
+        let mut a = a100_and_t4_together();
+        read(&mut a, 600, 1.76, 1, &["t4"]);
+        read(&mut a, 720, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+        a
+    }
+
+    #[test]
+    fn a_session_beside_a_measured_one_is_measured_once_the_rate_holds() {
+        let mut a = t4_measured_after_the_a100();
+        // A CPU (0.08) is set up: a reading shows its runtime and its rate
+        // before the app has the session, so the session brings no rise, and
+        // the T4's old share leaves it nothing.
+        read(&mut a, 750, 1.84, 2, &["t4"]);
+        for at in (780..=870).step_by(30) {
+            read(&mut a, at, 1.84, 2, &["cpu", "t4"]);
+            assert_eq!(rate(&a, "cpu"), None, "at {at}");
+        }
+        read(&mut a, 900, 1.84, 2, &["cpu", "t4"]);
+        assert_eq!(rate(&a, "cpu"), Some(0.08));
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+    }
+
+    #[test]
+    fn a_session_beside_a_measured_one_waits_for_its_rise() {
+        let mut a = t4_measured_after_the_a100();
+        // The CPU's rate shows two and a half minutes after the session.
+        read(&mut a, 750, 1.76, 2, &["cpu", "t4"]);
+        read(&mut a, 870, 1.76, 2, &["cpu", "t4"]);
+        assert_eq!(rate(&a, "cpu"), None);
+        read(&mut a, 900, 1.84, 2, &["cpu", "t4"]);
+        read(&mut a, 990, 1.84, 2, &["cpu", "t4"]);
+        assert_eq!(rate(&a, "cpu"), None);
+        read(&mut a, 1020, 1.84, 2, &["cpu", "t4"]);
+        assert_eq!(rate(&a, "cpu"), Some(0.08));
+    }
+
+    #[test]
+    fn a_session_that_went_while_the_count_held_waits_for_the_rate_to_move() {
+        let mut a = a100_and_t4_together();
+        // The listing fails in the round in which Colab already counts one
+        // runtime, so the A100 is still a session then. Its rate stays for
+        // five minutes.
+        a.observe_at(t(600), 13.53, 1, &set(&["a100", "t4"]), false);
+        for at in (630..=900).step_by(30) {
+            read(&mut a, at, 13.53, 1, &["t4"]);
+            assert_eq!(rate(&a, "t4"), Some(6.765), "at {at}");
+        }
+        read(&mut a, 930, 1.76, 1, &["t4"]);
+        read(&mut a, 1050, 1.76, 1, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+    }
+
+    #[test]
+    fn a_session_in_place_of_another_runtime_is_measured_after_both_show() {
+        let mut a = RateAttribution::default();
+        read(&mut a, 0, 0.0, 0, &[]);
+        read(&mut a, 30, 1.76, 1, &["t4"]);
+        read(&mut a, 150, 1.76, 1, &["t4"]);
+        // A CPU outside the app joins the T4.
+        read(&mut a, 180, 1.84, 2, &["t4"]);
+        // Between two readings the CPU stops and an A100 starts in its place.
+        // The rate shows the A100 90 s later and loses the CPU 90 s after
+        // that; until then the A100 takes the 0.08 the T4 leaves.
+        read(&mut a, 210, 1.84, 2, &["a100", "t4"]);
+        assert_eq!(rate(&a, "a100"), Some(0.08));
+        for at in (300..=360).step_by(30) {
+            read(&mut a, at, 13.61, 2, &["a100", "t4"]);
+            assert_eq!(rate(&a, "a100"), Some(0.08), "at {at}");
+        }
+        for at in (390..=480).step_by(30) {
+            read(&mut a, at, 13.53, 2, &["a100", "t4"]);
+            assert_eq!(rate(&a, "a100"), Some(0.08), "at {at}");
+        }
+        read(&mut a, 510, 13.53, 2, &["a100", "t4"]);
+        assert_eq!(rate(&a, "a100"), Some(11.77));
+    }
+
+    #[test]
+    fn two_sessions_beside_a_measured_one_are_measured_once_one_is_left() {
+        let mut a = t4_measured_after_the_a100();
+        // An A100 and a CPU start together and share their rise.
+        for at in (750..=1050).step_by(30) {
+            read(&mut a, at, 13.61, 3, &["a100", "cpu", "t4"]);
+        }
+        assert_eq!(rate(&a, "a100"), Some(5.925));
+        assert_eq!(rate(&a, "cpu"), Some(5.925));
+        read(&mut a, 1080, 1.84, 2, &["cpu", "t4"]);
+        read(&mut a, 1170, 1.84, 2, &["cpu", "t4"]);
+        assert_eq!(rate(&a, "cpu"), Some(5.925));
+        read(&mut a, 1200, 1.84, 2, &["cpu", "t4"]);
+        assert_eq!(rate(&a, "cpu"), Some(0.08));
+    }
+
+    #[test]
+    fn sessions_beside_a_runtime_outside_the_app_measure_nothing() {
+        let mut a = t4_measured_after_the_a100();
+        // A CPU outside the app joins the T4, then an A100 starts. A runtime
+        // that came does not take back what the T4 alone measured.
+        read(&mut a, 750, 1.84, 2, &["t4"]);
+        assert_eq!(rate(&a, "t4"), Some(1.76));
+        for at in (780..=1050).step_by(30) {
+            read(&mut a, at, 13.61, 3, &["a100", "t4"]);
+        }
+        assert_eq!(rate(&a, "a100"), Some(11.77));
+    }
+
+    #[test]
+    fn an_estimate_that_holds_a_runtime_outside_the_app_is_measured_once_it_stops() {
+        let mut a = t4_measured_after_the_a100();
+        // An A100 starts in the reading in which a CPU outside the app does,
+        // so its rise holds both.
+        for at in (750..=1050).step_by(30) {
+            read(&mut a, at, 13.61, 3, &["a100", "t4"]);
+        }
+        assert_eq!(rate(&a, "a100"), Some(11.85));
+        read(&mut a, 1080, 13.53, 2, &["a100", "t4"]);
+        read(&mut a, 1170, 13.53, 2, &["a100", "t4"]);
+        assert_eq!(rate(&a, "a100"), Some(11.85));
+        read(&mut a, 1200, 13.53, 2, &["a100", "t4"]);
+        assert_eq!(rate(&a, "a100"), Some(11.77));
     }
 
     #[test]
