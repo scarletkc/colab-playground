@@ -141,6 +141,19 @@ fn an_install_that_still_misses_colab_points_to_settings(cx: &mut TestAppContext
         "another method can still be tried"
     );
 
+    // What Check again runs: until the check ends, the step waits for it instead of warning.
+    app.update_and_draw(|state, cx| state.check_environment(cx));
+    assert!(app.read(|state, _| state.is_busy(Op::Environment)));
+    assert!(
+        !app.shown(INSTALL_NOT_FOUND_SELECTOR),
+        "no warning while the check runs"
+    );
+    app.settle();
+    assert!(
+        app.shown(INSTALL_NOT_FOUND_SELECTOR),
+        "still not found after it"
+    );
+
     app.click(INSTALL_OPEN_SETTINGS_SELECTOR);
     assert_eq!(app.route(), Route::Settings);
     assert!(
