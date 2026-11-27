@@ -109,6 +109,7 @@ Requirements, backend flags, demo scenarios and where settings are stored:
 - [docs/COLAB_NOTES.md](docs/COLAB_NOTES.md): Colab and CLI behaviour the app is built around.
 - [docs/ROADMAP.md](docs/ROADMAP.md): planned but not built.
 - [docs/RELEASING.md](docs/RELEASING.md): how a release is made and what each download contains.
+- [CONTRIBUTING.md](CONTRIBUTING.md): issues and pull requests from outside the project.
 
 ## License
 
