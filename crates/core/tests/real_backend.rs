@@ -348,8 +348,10 @@ fn per_account_state_files_switching_and_cross_account_stop() {
     let rt = f.b.runtimes(&nc()).unwrap();
     assert!(rt.errors.is_empty(), "{:?}", rt.errors);
     assert_eq!(rt.runtimes.len(), 3);
-    // Each runtime's region comes from its proxy host; the proxy token stays in the helper.
-    assert!(!format!("{rt:?}").contains("fake-proxy-token"));
+    // Each runtime's region comes from its proxy host; the proxy token never leaves the helper.
+    let accounts = [alice.id.as_str().to_owned(), bob.id.as_str().to_owned()];
+    let reply = f.helper().call("assignments", &accounts, &nc()).unwrap();
+    assert!(!reply.to_string().contains("fake-proxy-token"), "{reply}");
     let bobs = rt.runtimes.iter().find(|r| r.id.account == bob.id).unwrap();
     assert!(!bobs.on_active_account && bobs.managed);
     assert_eq!(bobs.region.as_deref(), Some("us-west1"));
