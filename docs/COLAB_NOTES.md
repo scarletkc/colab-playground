@@ -94,9 +94,10 @@ when changing either.
   ssh once blocked the tunnel (and vice versa). The tunnel owns the ssh slot;
   everything else uses `colab exec`.
 - **Cost trap:** `colab ssh --proxy-mode -s NAME` *creates* a runtime when
-  `NAME` is not in its state file. A tunnel reconnecting after its session was
-  stopped would silently start a new billed VM. Check that the session is still
-  recorded before every (re)connect.
+  `NAME` is not in its state file, and so does a bare `colab ssh` (no `-s`)
+  when the state file holds no session; both go through `colab new`. A tunnel
+  reconnecting after its session was stopped would silently start a new billed
+  VM. Check that the session is still recorded before every (re)connect.
 - The server accepts ed25519/ecdsa keys only (RSA is rejected). The CLI sends
   the first of `~/.ssh/id_ed25519.pub`, `id_ecdsa.pub`.
 - The tunnel lives with the process that started it; the VM keeps running when

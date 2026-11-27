@@ -71,15 +71,15 @@ They apply to every contributor and agent.
      state file it is given every record the signed-in account does not hold, the app keeps one
      such file per account, and `stop` of a name its file does not know prints "not found" and
      exits 0.
-   - List `colab sessions` before `new`, and before a `colab ssh` whose session is not in its
-     state file (a bare `colab ssh` on an empty file included), which creates one through `new`.
-     Either can fail after allocating a runtime, which then shows as a new `[?]` that `stop`
-     cannot name: release it from the app's Sessions page, or as
-     [COLAB_NOTES.md](COLAB_NOTES.md#the-clis-state---config) describes.
-   - The signed-in account must not change from `new` to the last `sessions`: the CLI keeps one
-     token for the whole machine, not one per state file, and the app swaps it when the user
-     switches accounts. If `colab whoami` shows that it changed anyway, stop the runtime from the
-     app's Sessions page, which lists the runtimes of every saved account, not with `stop`.
+   - List `colab sessions` before `new`, and before a `colab ssh` that can create a runtime
+     ([COLAB_NOTES.md](COLAB_NOTES.md#colab-ssh) says which). Each can fail after allocating a
+     runtime, which then shows as a new `[?]` that `stop` cannot name: release it from the app's
+     Sessions page, or as [COLAB_NOTES.md](COLAB_NOTES.md#the-clis-state---config) describes.
+   - The signed-in account must not change from the command that creates the runtime to the last
+     `sessions`: the CLI keeps one token for the whole machine, not one per state file, and the
+     app swaps it when the user switches accounts. If `colab whoami` shows that it changed anyway,
+     stop the runtime from the app's Sessions page, which lists the runtimes of every saved
+     account, not with `stop`.
 2. Debug builds default to the **mock** backend. The real backend needs `--real` (or
    `COLAB_PLAYGROUND_BACKEND=real`). Release builds default to real; `--mock` forces mock.
    The app on the real backend acts on the user's own accounts, state files and runtimes, not on
