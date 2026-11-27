@@ -251,8 +251,7 @@ pub enum Code {
     AlreadyStopping,
     /// Extending and forwarding need the runtime's account to be the active one.
     AccountNotActive,
-    /// The runtime has no auto-stop to extend: it was opened elsewhere, or its auto-stop was
-    /// cancelled.
+    /// The runtime has no auto-stop to extend: it was opened elsewhere, or its auto-stop is off.
     NoAutoStop,
     /// The runtime's auto-stop is being extended, set or cancelled already.
     AutoStopChanging,

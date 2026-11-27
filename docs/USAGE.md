@@ -251,7 +251,7 @@ or runs `colab`.
 | `no_such_runtime`, `ambiguous_runtime` | `stop`, `extend` or `forward` named no listed runtime, or more than one. |
 | `already_stopping` | That runtime is being stopped already. |
 | `account_not_active` | `extend` and `forward` act only on runtimes of the active account, as the window does; accounts are switched in the window. |
-| `no_auto_stop` | `extend` named a runtime without an auto-stop: one opened in the browser or another tool, or one whose auto-stop was cancelled (the window can set one again). |
+| `no_auto_stop` | `extend` named a runtime without an auto-stop: one opened in the browser or another tool, or one whose auto-stop is off because it was started without one or cancelled (the window can set one). |
 | `auto_stop_changing` | That runtime's auto-stop is being extended, set or cancelled already. |
 | `unnamed_runtime` | `forward` named a runtime opened in the browser, which has no session name to reach it by. |
 | `port_in_use` | Another forward of the app listens on that port of this computer. |
@@ -340,9 +340,9 @@ Changing things:
   limits (spending cap, balance floor, idle stop) still apply. `<runtime>` and `--account` name it
   as for `stop`, and only a runtime with an auto-stop can be extended. The preview holds `runtime`
   (as in `sessions`) and `extend_by`, not the new time: the app reads the time left from the
-  runtime as it extends. Once the operation succeeded, its `outcome` holds `auto_stop_at` and
-  `auto_stop_on_runtime_at` as `sessions` will list them (`null` for the second: the stop holds
-  only while the app runs).
+  runtime as it extends. Once the operation succeeded, its `outcome` holds `auto_stop_at`, the new
+  auto-stop, and `auto_stop_on_runtime_at`, when the runtime stops itself also with the app closed
+  (`null`: the stop holds only while the app runs).
 - **`forward <runtime>`** forwards a port of a runtime on the active account to this computer, as
   the window's "Forward a port" does. `--port` is the port on the runtime (8000 when left out, as
   in the dialog; never 8080, which Colab keeps), `--local-port` the port on this computer (the

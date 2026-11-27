@@ -167,7 +167,7 @@ enum Kind {
     },
 }
 
-/// Where an extension put the auto-stop, as `sessions` will list it.
+/// Where an extension put the auto-stop.
 #[derive(Serialize)]
 struct ExtendOutcome {
     #[serde(serialize_with = "serde_secs::option::serialize")]
@@ -797,8 +797,8 @@ impl AppState {
         // one, which is the card's "Set auto-stop", not an extension.
         if runtime.id.name.is_none() || runtime.auto_stop_at.is_none() {
             let why = if runtime.managed {
-                "its auto-stop was cancelled, so it bills until it is stopped; the window can set \
-                 one again"
+                "its auto-stop is off (it was started without one, or it was cancelled), so it \
+                 bills until it is stopped; the window can set one"
             } else {
                 "it was not started by this app, which has no auto-stop on it"
             };
@@ -1149,8 +1149,8 @@ impl AppState {
         ) = (result, self.operations.find_mut(id))
         {
             *outcome = Some(ExtendOutcome {
-                // The runtime's own deadline when it has one; else the app's limit, which the
-                // extension sets to the same time.
+                // The runtime's own deadline, the earlier of the two stops, when it has one; else
+                // the app's limit, which the backend set from its clock a moment before this.
                 auto_stop_at: set
                     .watchdog
                     .deadline

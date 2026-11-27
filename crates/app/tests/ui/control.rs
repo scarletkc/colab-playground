@@ -1180,6 +1180,45 @@ fn an_extension_moves_the_auto_stop_as_the_card_does(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn an_extension_the_runtime_could_not_take_says_so(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, changes_allowed(CHANGES_ALLOWED, MockScenario::demo()));
+    let a100 = app.read(|state, _| {
+        state
+            .runtimes()
+            .ready()
+            .and_then(|view| {
+                view.runtimes
+                    .iter()
+                    .find(|runtime| runtime.id.name.as_deref() == Some("a100-7f3a"))
+            })
+            .map(|runtime| runtime.id.clone())
+            .expect("the A100 session")
+    });
+    // Cancelled, then set again in the window while the watchdog cannot start: the stop is
+    // the app's alone.
+    app.update(|state, cx| state.cancel_auto_stop(a100.clone(), cx));
+    app.set_failures(MockFailures {
+        watchdog_restart_fails: true,
+        ..MockFailures::default()
+    });
+    app.update(|state, cx| state.set_auto_stop(a100, cx));
+    let listed = listed_runtime(&mut app, "a100-7f3a");
+    assert!(listed["auto_stop_at"].is_u64(), "{listed}");
+    assert_eq!(listed["auto_stop_on_runtime_at"], Value::Null);
+
+    let (_, id) = followed(ask(&mut app, extend("a100-7f3a", None, true)));
+    app.settle();
+    let (ended, _) = followed(ask(&mut app, operation(&id)));
+    assert_eq!(ended["state"], "succeeded", "{ended}");
+    assert!(ended["outcome"]["auto_stop_at"].is_u64(), "{ended}");
+    assert_eq!(
+        ended["outcome"]["auto_stop_on_runtime_at"],
+        Value::Null,
+        "the stop holds only while the app runs, and the answer says so"
+    );
+}
+
+#[gpui::test]
 fn an_extension_is_refused_where_the_card_offers_none(cx: &mut TestAppContext) {
     let mut app = TestApp::with(cx, changes_allowed(CHANGES_ALLOWED, MockScenario::demo()));
     assert_eq!(
