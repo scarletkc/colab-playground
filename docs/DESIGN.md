@@ -71,9 +71,11 @@ They apply to every contributor and agent.
      state file it is given every record the signed-in account does not hold, the app keeps one
      such file per account, and `stop` of a name its file does not know prints "not found" and
      exits 0.
-   - List `colab sessions` before `new`. A `new` that fails can still have allocated a runtime,
-     which then shows as a new `[?]` that `stop` cannot name: release it from the app's Sessions
-     page, or as [COLAB_NOTES.md](COLAB_NOTES.md#the-clis-state---config) describes.
+   - List `colab sessions` before `new`, and before a `colab ssh` whose session is not in its
+     state file (a bare `colab ssh` on an empty file included), which creates one through `new`.
+     Either can fail after allocating a runtime, which then shows as a new `[?]` that `stop`
+     cannot name: release it from the app's Sessions page, or as
+     [COLAB_NOTES.md](COLAB_NOTES.md#the-clis-state---config) describes.
    - The signed-in account must not change from `new` to the last `sessions`: the CLI keeps one
      token for the whole machine, not one per state file, and the app swaps it when the user
      switches accounts. If `colab whoami` shows that it changed anyway, stop the runtime from the
