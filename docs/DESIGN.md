@@ -63,16 +63,21 @@ Non-goals (v1)
 They apply to every contributor and agent.
 
 1. **A real `colab` command spends compute units and changes real state, so whoever runs one
-   cleans up after it.** Pass one throw-away state file (`--config`) to every command, from `new`
-   to the last `sessions`: `sessions` prunes from the state file it is given every record the
-   signed-in account does not hold, the app keeps one such file per account, and `stop` of a name
-   its file does not know prints "not found" and exits 0. The sign-in is not in that file: the
-   CLI keeps one token for the whole machine, and the app swaps it when the user switches
-   accounts, so stop and check under the account that created the runtime (`colab whoami`).
-   Prefer a CPU runtime, stop every runtime you start, and confirm with `colab sessions` that it
-   is gone. No test runs a real `colab` (rules 3 and 4). The CLI is open source
-   (github.com/googlecolab/google-colab-cli, installed version 0.8.0), and its source answers
-   most questions without a runtime.
+   cleans up after it.** Prefer a CPU runtime, stop every runtime you start, and confirm with
+   `colab sessions` that it is gone. No test runs a real `colab` (rules 3 and 4). The CLI is open
+   source (github.com/googlecolab/google-colab-cli, installed version 0.8.0), and its source
+   answers most questions without a runtime.
+   - Pass one throw-away state file (`--config`) to every command: `sessions` prunes from the
+     state file it is given every record the signed-in account does not hold, the app keeps one
+     such file per account, and `stop` of a name its file does not know prints "not found" and
+     exits 0.
+   - List `colab sessions` before `new`. A `new` that fails can still have allocated a runtime,
+     which then shows as a new `[?]` that `stop` cannot name: release it from the app's Sessions
+     page, or as [COLAB_NOTES.md](COLAB_NOTES.md#the-clis-state---config) describes.
+   - The signed-in account must not change from `new` to the last `sessions`: the CLI keeps one
+     token for the whole machine, not one per state file, and the app swaps it when the user
+     switches accounts. If `colab whoami` shows that it changed anyway, stop the runtime from the
+     app's Sessions page, which lists the runtimes of every saved account, not with `stop`.
 2. Debug builds default to the **mock** backend. The real backend needs `--real` (or
    `COLAB_PLAYGROUND_BACKEND=real`). Release builds default to real; `--mock` forces mock.
    The app on the real backend acts on the user's own accounts, state files and runtimes, not on
