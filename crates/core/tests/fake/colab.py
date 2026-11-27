@@ -343,6 +343,11 @@ def cmd_stop(state_path, args):
         out("[colab] Session '%s' not found." % session)
         return 0
     out("[colab] Stopping session '%s'..." % session)
+    # The real CLI drops the record last, after shutting the kernel down and releasing the
+    # runtime over the network; `stop_hold` stretches that time for a test.
+    end = time.time() + 60
+    while fc.knob("stop_hold") and time.time() < end:
+        time.sleep(0.05)
     s = fc.server()
     mine = fc.account_state(s, name)["assignments"]
     # Like the CLI: a record without token expiry is refreshed from the

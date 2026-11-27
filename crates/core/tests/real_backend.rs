@@ -130,7 +130,10 @@ impl Fixture {
     fn edit_server(&self, f: impl FnOnce(&mut Value)) {
         let mut v = self.server();
         f(&mut v);
-        std::fs::write(self.state.join("server.json"), v.to_string()).unwrap();
+        // Replaced in one step: a fake call can be reading it (`stop_hold` is polled).
+        let tmp = self.state.join("server.json.edit");
+        std::fs::write(&tmp, v.to_string()).unwrap();
+        std::fs::rename(tmp, self.state.join("server.json")).unwrap();
     }
 
     fn knob(&self, k: &str, v: Value) {
@@ -1034,6 +1037,60 @@ fn tunnel_uses_per_account_proxy_command_and_never_auto_creates() {
         }) => assert!(error.is(ErrorKind::SessionGone), "{error}"),
         other => panic!("{other:?}"),
     }
+    assert!(
+        f.server().get("autocreated").is_none(),
+        "a runtime was auto-created"
+    );
+    assert!(f.assignments("alice").is_empty());
+}
+
+/// `colab stop` drops the session's record only at its end, so a forward started during a stop
+/// could pass its check and then have `--proxy-mode` create a runtime under the name.
+#[test]
+fn a_forward_asked_for_while_its_session_stops_is_refused_and_creates_nothing() {
+    let f = fixture();
+    let alice = f.adopt_alice();
+    f.provision("race", Accelerator::T4);
+    let target = f.b.runtimes(&nc()).unwrap().runtimes[0].id.clone();
+    let spec = TunnelSpec {
+        account: alice.id.clone(),
+        session: "race".into(),
+        local_port: free_port(),
+        remote_port: 8000,
+        health_path: None,
+    };
+    // Read without `calls()`: the fake can be appending a line meanwhile.
+    let stops = || {
+        std::fs::read_to_string(f.state.join("calls.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|c| {
+                c["argv"]
+                    .as_array()
+                    .is_some_and(|a| a.contains(&json!("stop")))
+            })
+            .count()
+    };
+    let stops_before = stops();
+    f.knob("stop_hold", json!(true));
+    std::thread::scope(|scope| {
+        let stopping = scope.spawn(|| f.b.stop_session(&target, StopOptions::default(), &nc()));
+        let end = Instant::now() + Duration::from_secs(30);
+        while stops() == stops_before && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(stops() > stops_before, "`colab stop` never started");
+        let (tx, _rx) = channel();
+        let opened = f.b.open_tunnel(spec, tx);
+        f.knob("stop_hold", json!(false));
+        stopping.join().unwrap().unwrap();
+        match opened {
+            Err(error) => assert!(error.is(ErrorKind::SessionGone), "{error}"),
+            Ok(id) => panic!("forward {id:?} opened while its session was being stopped"),
+        }
+    });
+    assert!(f.b.tunnels().is_empty());
     assert!(
         f.server().get("autocreated").is_none(),
         "a runtime was auto-created"
