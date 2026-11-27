@@ -488,8 +488,8 @@ mod tests {
     use std::{fs, path::Path};
 
     use super::{
-        AppearancePref, LanguagePref, LoadOutcome, OnByDefault, SETTINGS_FILE, Settings,
-        SettingsStore, config_dir,
+        AppearancePref, LanguagePref, LoadOutcome, SETTINGS_FILE, Settings, SettingsStore,
+        config_dir,
     };
 
     fn store() -> (tempfile::TempDir, SettingsStore) {
@@ -515,6 +515,7 @@ mod tests {
         let (_dir, real, demo) = two_copies();
         let start = Settings {
             wsl_distro: Some("Debian".into()),
+            allow_cli_control: true,
             ..Settings::default()
         };
         real.save(&start).expect("saved");
@@ -522,7 +523,7 @@ mod tests {
         let mut in_demo = demo.load().settings;
 
         in_real.defaults.max_spend_cu = Some(40.0);
-        in_real.check_updates = OnByDefault(false);
+        in_real.allow_cli_control = false;
         in_real.wsl_distro = None;
         real.save(&in_real).expect("saved");
         in_demo.appearance = AppearancePref::Dark;
@@ -535,7 +536,7 @@ mod tests {
             Some(40.0),
             "the limit set in the real copy is not put back"
         );
-        assert_eq!(saved.check_updates, OnByDefault(false), "nor the switch");
+        assert!(!saved.allow_cli_control, "nor the switch turned off there");
         assert_eq!(saved.wsl_distro, None, "nor the cleared distribution");
         assert_eq!(saved.appearance, AppearancePref::Dark);
         assert_eq!(saved.defaults.max_attempts, 5);
@@ -550,7 +551,7 @@ mod tests {
         assert_eq!(saved.language, LanguagePref::JaJp);
         assert_eq!(saved.defaults.max_spend_cu, Some(40.0));
         assert_eq!(saved.defaults.max_attempts, 5);
-        assert_eq!(saved.check_updates, OnByDefault(false));
+        assert!(!saved.allow_cli_control);
     }
 
     /// What the file holds after loading `text` and saving one change, and what loads then.
