@@ -240,7 +240,7 @@ and does nothing on its own: it never starts the app, signs in or runs `colab`.
 | `no_active_account` | No account is active: none is signed in, the CLI is not set up, or it is signed in to an account the app has not saved. |
 | `account_changing` | An account is being added, switched or removed in the window; for `start`, also while the switch or sign-in dialog is open there. |
 | `already_starting` | A runtime is being started already, from the window or the command line. |
-| `form_open` | The New session form is open in the window; it is left alone until it is started or closed there. |
+| `form_open` | The New session dialog is open in the window with what was entered there (the form, or a start that failed or was cancelled); it is left alone until it is started or closed there. |
 | `session_limit_reached` | The active account has as many runtimes as this app starts per account (Settings → Defaults); the message names them. |
 | `no_such_runtime`, `ambiguous_runtime` | `stop` named no listed runtime, or more than one. |
 | `already_stopping` | That runtime is being stopped already. |
@@ -308,9 +308,9 @@ Starting and stopping:
   runtime limit, spending cap, balance floor, idle stop or session limit): those stay with you in
   the window. Without `--name` a name is made up, and a start after a preview uses the name it
   showed. The preview holds `account` (`id`, `email`), `name`, `accelerator`, `high_mem`,
-  `min_vram_mib`, `attempts`, `estimated_rate_cu_per_hour` (an estimate, `≈` in the window; `null`
-  when there is none) with `rate_source` (`measured`, by the app on this hardware at
-  `rate_measured_at`, or `published` by other users), `policy` (when it stops on its own:
+  `min_vram_mib`, `attempts`, `estimated_rate_cu_per_hour` (an estimate, `≈` in the window) with
+  `rate_source` (`measured`, by the app on this hardware at `rate_measured_at`, or `published` by
+  other users), `policy` (when it stops on its own:
   `max_runtime`, `max_spend_cu`, `min_balance_cu`, `idle_timeout`) and `session_limit` (`limit`;
   `counted`, the runtimes that count; `allows`; both `null` while the runtimes are not listed, and
   the start is checked again as it begins).

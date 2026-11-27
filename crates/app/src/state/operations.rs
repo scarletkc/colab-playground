@@ -180,9 +180,9 @@ struct StartPreview<'a> {
     high_mem: bool,
     min_vram_mib: Option<u32>,
     attempts: u32,
-    /// An estimate (`≈` in the window); `null` when there is none.
-    estimated_rate_cu_per_hour: Option<f64>,
-    rate_source: Option<RateSource>,
+    /// An estimate (`≈` in the window).
+    estimated_rate_cu_per_hour: f64,
+    rate_source: RateSource,
     #[serde(serialize_with = "serde_secs::option::serialize")]
     rate_measured_at: Option<SystemTime>,
     /// When it stops on its own.
@@ -400,16 +400,19 @@ impl AppState {
                 format!("{name} is being started already; wait for it, or cancel it, first"),
             ));
         }
-        let filling_in = matches!(self.overlay, Some(Overlay::NewSession))
+        // The open dialog holds what someone entered: the form, or after a start that failed or
+        // was cancelled, the values to try again with and why it ended. One that shows a
+        // runtime it started holds nothing more to act on.
+        let holds_a_form = matches!(self.overlay, Some(Overlay::NewSession))
             && self
                 .new_session
                 .as_ref()
-                .is_some_and(|session| session.phase == ProvisionPhase::Editing);
-        if filling_in {
+                .is_some_and(|session| !matches!(session.phase, ProvisionPhase::Ready(_)));
+        if holds_a_form {
             return Err(Refusal::new(
                 Code::FormOpen,
-                "the New session form is open in the window; it stays as it is until it is \
-                 started or closed there",
+                "the New session dialog is open in the window with what was entered there; it \
+                 stays as it is until it is started or closed there",
             ));
         }
         if let Some(reached) = self.session_limit_reached() {
@@ -517,8 +520,8 @@ impl AppState {
             high_mem: spec.high_mem && spec.accelerator.supports_high_mem(),
             min_vram_mib: spec.min_vram_mib,
             attempts: spec.attempts(),
-            estimated_rate_cu_per_hour: Some(rate),
-            rate_source: Some(source),
+            estimated_rate_cu_per_hour: rate,
+            rate_source: source,
             rate_measured_at: measured_at,
             policy: &spec.guard,
             session_limit: LimitAnswer {

@@ -94,7 +94,7 @@ pub(super) const MESSAGES: Messages = &[
     ),
     (
         SETTINGS_CONTROL_DESCRIPTION,
-        "Programs you run on this computer can then read your accounts, runtimes and usage with the command colab-playground ctl, as this window shows them. This alone lets them change nothing.",
+        "Programs you run on this computer can then read your accounts, runtimes and usage with the command colab-playground ctl, as this window shows them. With only this on, they cannot change anything.",
     ),
     (
         SETTINGS_CONTROL_CHANGES_TITLE,

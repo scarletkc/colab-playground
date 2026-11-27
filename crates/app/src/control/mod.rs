@@ -185,7 +185,7 @@ pub enum Code {
     AccountChanging,
     /// A runtime is being started already.
     AlreadyStarting,
-    /// Someone is filling in the New session form in the window.
+    /// The New session dialog is open in the window with what someone entered there.
     FormOpen,
     /// The active account has as many runtimes as this app starts per account.
     SessionLimitReached,

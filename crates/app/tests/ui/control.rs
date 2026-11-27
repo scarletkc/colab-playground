@@ -892,6 +892,49 @@ fn a_start_is_refused_while_one_runs_or_the_form_is_open(cx: &mut TestAppContext
 }
 
 #[gpui::test]
+fn a_start_leaves_a_dialog_that_holds_what_was_entered(cx: &mut TestAppContext) {
+    let options = Options {
+        failures: MockFailures {
+            not_entitled: vec![Accelerator::H100],
+            ..MockFailures::default()
+        },
+        ..changes_allowed(CHANGES_ALLOWED_ROOMY, MockScenario::single())
+    };
+    let mut app = TestApp::with(cx, options);
+    let phase = |app: &mut TestApp<'_>| {
+        app.read(|state, _| state.new_session().map(|session| session.phase.clone()))
+    };
+    on_sessions(&mut app);
+    app.click(NEW_SESSION_SELECTOR);
+    app.update(|state, cx| {
+        state.edit_new_session(|spec| spec.accelerator = Accelerator::H100, cx);
+        state.start_provision("mine".into(), cx);
+    });
+    assert!(matches!(phase(&mut app), Some(ProvisionPhase::Failed(_))));
+    assert_eq!(
+        refusal(ask(&mut app, start(None, None, true))),
+        Code::FormOpen,
+        "why it failed, and the values to try again with, stay"
+    );
+    assert!(matches!(phase(&mut app), Some(ProvisionPhase::Failed(_))));
+
+    app.set_failures(MockFailures::default());
+    app.update(|state, cx| state.start_provision("mine".into(), cx));
+    assert!(matches!(phase(&mut app), Some(ProvisionPhase::Ready(_))));
+    assert!(matches!(
+        app.read(|state, _| state.overlay().cloned()),
+        Some(Overlay::NewSession)
+    ));
+    let (_, id) = followed(ask(&mut app, start(None, None, true)));
+    app.settle();
+    assert_eq!(
+        followed(ask(&mut app, operation(&id))).0["state"],
+        "succeeded",
+        "a dialog that shows the runtime it started holds nothing to keep"
+    );
+}
+
+#[gpui::test]
 fn a_start_is_refused_at_the_limit_while_accounts_change_or_the_app_closes(
     cx: &mut TestAppContext,
 ) {
