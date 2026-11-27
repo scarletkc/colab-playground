@@ -137,8 +137,8 @@ impl BackendKind {
         let mock = args.iter().any(|arg| arg.as_ref() == "--mock");
         let real = args.iter().any(|arg| arg.as_ref() == "--real");
         let asked = match (mock, real) {
-            (true, true) => return Err(BackendError::ConflictingFlags),
-            (true, false) => "--mock".to_owned(),
+            (true, true) if build.mock => return Err(BackendError::ConflictingFlags),
+            (true, _) => "--mock".to_owned(),
             (false, true) => return Ok(BackendKind::Real),
             (false, false) => match env.map(str::trim) {
                 None | Some("") => return Self::build_default(build),
@@ -485,6 +485,11 @@ mod tests {
         assert_eq!(
             kind_from_args(&["--mock"], None, DOWNLOAD),
             Err(BackendError::NoDemoData("--mock".into()))
+        );
+        assert_eq!(
+            kind_from_args(&["--mock", "--real"], None, DOWNLOAD),
+            Err(BackendError::NoDemoData("--mock".into())),
+            "not a conflict with a flag the build does not have"
         );
         assert_eq!(
             kind_from_args(&none, Some("mock"), DOWNLOAD),
