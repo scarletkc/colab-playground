@@ -166,6 +166,7 @@ fn about(state: &AppState, handle: &Entity<AppState>, cx: &App) -> impl IntoElem
         )
         .row(SettingsRow::new(tr(cx, keys::SETTINGS_PROJECT_TITLE)).control(project_link()))
         .row(feedback_row(cx))
+        .row(sponsor_row(cx))
         .row(updates_row(state, handle, cx))
         .row(auto_check_row(state, handle, cx))
         // Only a build with demo data has a backend to choose (release downloads have none).
@@ -372,5 +373,20 @@ fn feedback_row(cx: &App) -> SettingsRow {
                 .size(ControlSize::Sm)
                 .icon(IconName::ExternalLink)
                 .on_click(move |_, _, cx| cx.open_url(&url)),
+        ))
+}
+
+pub const SPONSOR_LINK_SELECTOR: &str = "about-sponsor";
+
+/// Sponsoring lives here only: the prompt asks for what costs nothing.
+fn sponsor_row(cx: &App) -> SettingsRow {
+    SettingsRow::new(tr(cx, keys::SETTINGS_SPONSOR_TITLE))
+        .description(tr(cx, keys::SETTINGS_SPONSOR_DESCRIPTION))
+        .control(tagged(
+            SPONSOR_LINK_SELECTOR,
+            Button::new(SPONSOR_LINK_SELECTOR, tr(cx, keys::SETTINGS_SPONSOR))
+                .size(ControlSize::Sm)
+                .icon(IconName::Heart)
+                .on_click(|_, _, cx| cx.open_url(crate::state::SPONSOR_PAGE)),
         ))
 }

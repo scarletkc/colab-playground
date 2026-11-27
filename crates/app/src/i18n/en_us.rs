@@ -1342,4 +1342,10 @@ pub(super) const MESSAGES: Messages = &[
         PROV_RATE_PUBLISHED,
         "A figure other users published. The app's own measurement replaces it.",
     ),
+    (SETTINGS_SPONSOR_TITLE, "Sponsor"),
+    (
+        SETTINGS_SPONSOR_DESCRIPTION,
+        "Colab Playground is free and open source. Sponsoring it on GitHub supports its development.",
+    ),
+    (SETTINGS_SPONSOR, "Sponsor on GitHub"),
 ];

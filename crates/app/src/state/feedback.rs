@@ -22,6 +22,10 @@ pub const ASK_AGAIN_AFTER: Duration = Duration::from_secs(30 * 24 * 3600);
 /// The project's page on GitHub (the package repository), where it can be starred.
 pub const PROJECT_PAGE: &str = env!("CARGO_PKG_REPOSITORY");
 
+/// The author's GitHub Sponsors page, the account `.github/FUNDING.yml` names so the project
+/// page shows the same one.
+pub const SPONSOR_PAGE: &str = "https://github.com/sponsors/scarletkc";
+
 /// Ids of text fields that every issue form in `.github/ISSUE_TEMPLATE/` has. Released apps keep
 /// linking them, so renaming one leaves it empty for every user of those versions.
 const VERSION_FIELD: &str = "version";
@@ -130,8 +134,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        ASK_AGAIN_AFTER, MOST_ASKS, PROJECT_PAGE, READY_BEFORE_ASKING, SYSTEM_FIELD, VERSION_FIELD,
-        due, feedback_page,
+        ASK_AGAIN_AFTER, MOST_ASKS, PROJECT_PAGE, READY_BEFORE_ASKING, SPONSOR_PAGE, SYSTEM_FIELD,
+        VERSION_FIELD, due, feedback_page,
     };
     use crate::settings::Settings;
 
@@ -214,5 +218,20 @@ mod tests {
             forms += 1;
         }
         assert!(forms > 0, "no issue forms in {}", dir.display());
+    }
+
+    #[test]
+    fn the_sponsor_page_is_the_one_the_project_page_shows() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/FUNDING.yml");
+        let funding = std::fs::read_to_string(&path).expect("the funding file");
+        let account = SPONSOR_PAGE
+            .strip_prefix("https://github.com/sponsors/")
+            .expect("a GitHub Sponsors page");
+        let named = format!("github: {account}");
+        assert!(
+            funding.lines().any(|line| line.trim() == named),
+            "{} does not name `{account}`",
+            path.display()
+        );
     }
 }

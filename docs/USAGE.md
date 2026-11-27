@@ -79,6 +79,8 @@ The app checks GitHub for a newer release, and installs it when you ask.
   either link.
 - **What is sent:** opening the issue forms passes the app's version and operating system to
   GitHub in the link. Nothing is posted until you submit the form, and the app itself sends nothing.
+- **Sponsoring:** Settings → About → "Sponsor on GitHub" opens the author's GitHub Sponsors page
+  in your browser. The app never asks for it.
 
 ## Requirements
 

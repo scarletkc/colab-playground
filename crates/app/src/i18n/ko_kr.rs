@@ -1345,4 +1345,10 @@ pub(super) const MESSAGES: Messages = &[
         PROV_RATE_PUBLISHED,
         "다른 사용자가 공개한 값입니다. 앱이 측정하면 그 값으로 바뀝니다.",
     ),
+    (SETTINGS_SPONSOR_TITLE, "후원"),
+    (
+        SETTINGS_SPONSOR_DESCRIPTION,
+        "Colab Playground는 무료 오픈 소스 소프트웨어입니다. GitHub에서 후원하면 개발을 계속 이어 가는 데 도움이 됩니다.",
+    ),
+    (SETTINGS_SPONSOR, "GitHub에서 후원하기"),
 ];

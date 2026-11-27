@@ -5,7 +5,7 @@ use colab_playground::{
     route::Route,
     state::{
         ASK_AGAIN_AFTER, MOST_ASKS, Overlay, PROJECT_PAGE, ProvisionPhase, READY_BEFORE_ASKING,
-        RunPhase, feedback_page, runtime_label,
+        RunPhase, SPONSOR_PAGE, feedback_page, runtime_label,
     },
     ui::{
         overlays::{
@@ -14,7 +14,7 @@ use colab_playground::{
         pages::{
             plugins::RUN_START,
             sessions::{NEW_SESSION_SELECTOR, stop_selector},
-            settings::FEEDBACK_LINK_SELECTOR,
+            settings::{FEEDBACK_LINK_SELECTOR, SPONSOR_LINK_SELECTOR},
         },
     },
 };
@@ -245,6 +245,18 @@ fn about_offers_feedback_at_any_time(cx: &mut TestAppContext) {
     app.click(Route::Settings.nav_selector());
     app.click(FEEDBACK_LINK_SELECTOR);
     assert_eq!(app.opened_url(), Some(feedback_page()));
+    assert!(
+        !app.saved_settings().is_some_and(|s| s.feedback_answered),
+        "only an answer to the prompt ends the asks"
+    );
+}
+
+#[gpui::test]
+fn about_opens_the_sponsor_page(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
+    app.click(Route::Settings.nav_selector());
+    app.click(SPONSOR_LINK_SELECTOR);
+    assert_eq!(app.opened_url().as_deref(), Some(SPONSOR_PAGE));
     assert!(
         !app.saved_settings().is_some_and(|s| s.feedback_answered),
         "only an answer to the prompt ends the asks"

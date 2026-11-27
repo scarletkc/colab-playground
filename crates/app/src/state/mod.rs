@@ -48,7 +48,9 @@ pub use environment::{
     Checklist, EnvironmentStep, InstallPhase, InstallState, Step, StepState, checklist,
     install_methods,
 };
-pub use feedback::{ASK_AGAIN_AFTER, MOST_ASKS, PROJECT_PAGE, READY_BEFORE_ASKING, feedback_page};
+pub use feedback::{
+    ASK_AGAIN_AFTER, MOST_ASKS, PROJECT_PAGE, READY_BEFORE_ASKING, SPONSOR_PAGE, feedback_page,
+};
 pub use operations::ENDED_OPERATIONS_KEPT;
 pub use ops::{Op, key_of};
 pub use plugins::{HF_TOKEN, InstallPrompt, RemovePrompt, is_git_source};

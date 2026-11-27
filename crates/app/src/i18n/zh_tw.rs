@@ -1146,4 +1146,10 @@ pub(super) const MESSAGES: Messages = &[
         PROV_RATE_PUBLISHED,
         "其他使用者公布的數值，本應用程式測得後會取代。",
     ),
+    (SETTINGS_SPONSOR_TITLE, "贊助"),
+    (
+        SETTINGS_SPONSOR_DESCRIPTION,
+        "Colab Playground 是免費的開放原始碼軟體。在 GitHub 上贊助能支持它的持續開發。",
+    ),
+    (SETTINGS_SPONSOR, "在 GitHub 上贊助"),
 ];
