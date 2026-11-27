@@ -294,12 +294,28 @@ impl AppState {
         let Some(by) = self.rearm_duration() else {
             return;
         };
+        self.extend_session_for(target, by, None, cx);
+    }
+
+    /// [`Self::extend_session`] by `by`, for the command-line operation `operation` when there
+    /// is one. The caller has checked that `target` is listed and that its auto-stop is not
+    /// being changed already.
+    pub(super) fn extend_session_for(
+        &mut self,
+        target: RuntimeRef,
+        by: Duration,
+        operation: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let work_target = target.clone();
         self.run_backend(
             Op::Extend(key_of(&target)),
             cx,
             move |backend, cancel| backend.extend_session(&work_target, by, cancel),
             move |state, result, cx| {
+                if let Some(id) = &operation {
+                    state.operation_extended(id, result.as_ref());
+                }
                 match result {
                     Ok(set) => {
                         state.sessions.warnings.remove(&target);

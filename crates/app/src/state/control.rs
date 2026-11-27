@@ -223,14 +223,14 @@ impl AppState {
         self.settings.allow_cli_control
     }
 
-    /// Whether `colab-playground ctl` may also start and stop runtimes.
+    /// Whether `colab-playground ctl` may also change things.
     pub fn allows_cli_changes(&self) -> bool {
         self.settings.allow_cli_control && self.settings.allow_cli_changes
     }
 
-    /// Either way, starting and stopping end up off, so turning control on allows reading only
-    /// until they are allowed as well. Also when turning it on: the file may still hold their
-    /// switch as on, left by another copy of the app that turned only this one off.
+    /// Either way, changes end up off, so turning control on allows reading only until they are
+    /// allowed as well. Also when turning it on: the file may still hold their switch as on, left
+    /// by another copy of the app that turned only this one off.
     pub fn set_cli_control(&mut self, on: bool, cx: &mut Context<Self>) {
         log::info!("control: from the command line -> {on}");
         self.settings.allow_cli_control = on;
@@ -240,7 +240,7 @@ impl AppState {
     }
 
     pub fn set_cli_changes(&mut self, on: bool, cx: &mut Context<Self>) {
-        log::info!("control: starting and stopping from the command line -> {on}");
+        log::info!("control: changes from the command line -> {on}");
         self.settings.allow_cli_changes = on && self.settings.allow_cli_control;
         self.persist_settings(cx);
         cx.notify();
@@ -289,6 +289,9 @@ impl AppState {
             Command::Operation(args) => self.control_operation(&args.id),
             Command::Start(args) => self.control_start(args, cx),
             Command::Stop(args) => self.control_stop(args, cx),
+            Command::Extend(args) => self.control_extend(args, cx),
+            Command::Forward(args) => self.control_forward(args, cx),
+            Command::CloseForward(args) => self.control_close_forward(args, cx),
             Command::Cancel(args) => self.control_cancel(args, cx),
             Command::Activate => Ok(serde_json::json!({})),
         };
@@ -435,7 +438,7 @@ impl AppState {
         }
     }
 
-    fn account_email(&self, id: &AccountId) -> Option<&str> {
+    pub(super) fn account_email(&self, id: &AccountId) -> Option<&str> {
         self.accounts
             .ready()?
             .accounts

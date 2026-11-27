@@ -96,13 +96,10 @@ pub(super) const MESSAGES: Messages = &[
         SETTINGS_CONTROL_DESCRIPTION,
         "Programs you run on this computer can then read your accounts, runtimes and usage with the command colab-playground ctl, as this window shows them. With only this on, they cannot change anything.",
     ),
-    (
-        SETTINGS_CONTROL_CHANGES_TITLE,
-        "Also allow starting and stopping runtimes",
-    ),
+    (SETTINGS_CONTROL_CHANGES_TITLE, "Also allow changes"),
     (
         SETTINGS_CONTROL_CHANGES_DESCRIPTION,
-        "Those programs can then start runtimes on the active account, which use compute units until they stop, and stop runtimes on any saved account. Your defaults and limits still apply, and only this window can change them.",
+        "Those programs can then start runtimes on the active account, extend their auto-stop and forward their ports, and stop runtimes on any saved account. Runtimes use compute units until they stop. Your defaults and limits still apply, and only this window can change them.",
     ),
     (
         CONTROL_OFF,
@@ -110,7 +107,7 @@ pub(super) const MESSAGES: Messages = &[
     ),
     (
         CONTROL_CHANGES_OFF,
-        "Starting and stopping runtimes from the command line is turned off. Turn it on in {app}: {page} → {section} → {setting}.",
+        "Changes from the command line are turned off. Turn them on in {app}: {page} → {section} → {setting}.",
     ),
     (
         CTL_STARTING_TOAST,
@@ -123,6 +120,18 @@ pub(super) const MESSAGES: Messages = &[
     (
         CTL_CANCELLING_TOAST,
         "Cancelling the start of {name}, as asked from the command line",
+    ),
+    (
+        CTL_EXTENDING_TOAST,
+        "Extending the auto-stop of {name}, as asked from the command line",
+    ),
+    (
+        CTL_FORWARDING_TOAST,
+        "Forwarding port {port} of {name}, as asked from the command line",
+    ),
+    (
+        CTL_CLOSING_FORWARD_TOAST,
+        "Closing the forward at localhost:{port}, as asked from the command line",
     ),
     (TOAST_OPEN_FOLDER_FAILED_TITLE, "Couldn't open the folder"),
     (TOAST_SAVE_FAILED_TITLE, "Couldn't save settings"),

@@ -84,10 +84,10 @@ pub(super) const MESSAGES: Messages = &[
         SETTINGS_CONTROL_DESCRIPTION,
         "开启后，你在这台电脑上运行的程序可以用 colab-playground ctl 命令读取账号、运行时和用量，内容与此窗口显示的一致。只开启这一项时，它们无法更改任何内容。",
     ),
-    (SETTINGS_CONTROL_CHANGES_TITLE, "同时允许启动和停止运行时"),
+    (SETTINGS_CONTROL_CHANGES_TITLE, "同时允许更改"),
     (
         SETTINGS_CONTROL_CHANGES_DESCRIPTION,
-        "开启后，这些程序可以在当前账号上启动运行时（运行时在停止前会一直消耗计算单元），也可以停止任何已保存账号上的运行时。你的默认值和限制依然适用，且只能在此窗口中更改。",
+        "开启后，这些程序可以在当前账号上启动运行时、延长其自动停止时间、转发其端口，也可以停止任何已保存账号上的运行时。运行时在停止前会一直消耗计算单元。你的默认值和限制依然适用，且只能在此窗口中更改。",
     ),
     (
         CONTROL_OFF,
@@ -95,11 +95,23 @@ pub(super) const MESSAGES: Messages = &[
     ),
     (
         CONTROL_CHANGES_OFF,
-        "通过命令行启动和停止运行时已关闭。请在 {app} 中开启：{page} → {section} → {setting}。",
+        "通过命令行进行更改已关闭。请在 {app} 中开启：{page} → {section} → {setting}。",
     ),
     (CTL_STARTING_TOAST, "正在按命令行的请求启动 {name}"),
     (CTL_STOPPING_TOAST, "正在按命令行的请求停止 {name}"),
     (CTL_CANCELLING_TOAST, "正在按命令行的请求取消启动 {name}"),
+    (
+        CTL_EXTENDING_TOAST,
+        "正在按命令行的请求延长 {name} 的自动停止时间",
+    ),
+    (
+        CTL_FORWARDING_TOAST,
+        "正在按命令行的请求转发 {name} 的端口 {port}",
+    ),
+    (
+        CTL_CLOSING_FORWARD_TOAST,
+        "正在按命令行的请求关闭 localhost:{port} 上的转发",
+    ),
     (TOAST_OPEN_FOLDER_FAILED_TITLE, "无法打开文件夹"),
     (TOAST_SAVE_FAILED_TITLE, "无法保存设置"),
     (TOAST_SETTINGS_RESET_TITLE, "设置已重置"),

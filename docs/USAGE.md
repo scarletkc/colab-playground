@@ -187,17 +187,18 @@ any saved account.
 
 ## Control from the command line
 
-`colab-playground ctl` lets a script or an AI agent read what the running app shows, and start and
-stop runtimes through it, so the window shows what they do as it happens. It asks the running app
-and does nothing on its own: it never starts the app, signs in or runs `colab`.
+`colab-playground ctl` lets a script or an AI agent read what the running app shows, and start,
+stop and extend runtimes and forward their ports through it, so the window shows what they do as
+it happens. It asks the running app and does nothing on its own: it never starts the app, signs in
+or runs `colab`.
 
 1. Turn it on in Settings → Command line → "Allow control from the command line". It is off until
    you do, and while it is off every command answers `control_off`. On its own it lets programs
    read, not change anything.
-2. To let them start and stop runtimes too, also turn on "Also allow starting and stopping
-   runtimes" below it. A runtime started this way uses compute units like any other. Until you do,
-   `start`, `stop` and `cancel` answer `changes_off`; turning the first switch off turns this one
-   off as well.
+2. To let them change things too, also turn on "Also allow changes" below it: starting, stopping
+   and extending runtimes, and opening and closing port forwards. A runtime started or extended
+   this way uses compute units like any other. Until you do, every command that takes `--yes`
+   answers `changes_off`; turning the first switch off turns this one off as well.
 3. Call the program you start the app with (the downloaded `.exe` on Windows;
    `cargo run -p colab-playground -- ctl status` from source):
 
@@ -208,7 +209,10 @@ and does nothing on its own: it never starts the app, signs in or runs `colab`.
    colab-playground ctl usage       # compute units per account and in total
    colab-playground ctl start --hardware T4         # what a start would do; --yes starts it
    colab-playground ctl stop a100-7f3a              # what a stop would do; --yes stops it
-   colab-playground ctl operation <id> --wait 600   # follow a start or a stop until it ends
+   colab-playground ctl extend a100-7f3a            # what an extension would do; --yes extends
+   colab-playground ctl forward a100-7f3a --port 8000   # what a forward would do; --yes opens it
+   colab-playground ctl close-forward 8000 --yes    # close the forward on localhost:8000
+   colab-playground ctl operation <id> --wait 600   # follow a change until it ends
    colab-playground ctl cancel <id> --yes           # cancel a start and give back what it got
    ```
 
@@ -235,19 +239,27 @@ and does nothing on its own: it never starts the app, signs in or runs `colab`.
 | `invalid_arguments` | The command line was wrong. |
 | `not_running` | No copy of the app runs on that backend (for demo data: with that config folder). |
 | `control_off` | Control from the command line is turned off; the message says where to turn it on. |
-| `changes_off` | Starting and stopping runtimes from the command line is turned off; the message says where to turn it on. |
+| `changes_off` | Changes from the command line are turned off; the message says where to turn them on. |
 | `quitting` | The app is closing, or restarting into an update (also while it asks whether to quit, or downloads an update). Ask again in a moment. |
 | `timeout` | The app did not answer in time. It leaves undone a request nobody waits for any more, so a change asked this way almost never still happens; after a `start --yes` that ended like this, look at `sessions` before asking again. |
 | `not_ready` | What the command needs is still loading (the accounts, the runtime list), or could not be loaded; the message says which. |
 | `no_active_account` | No account is active: none is signed in, the CLI is not set up, or it is signed in to an account the app has not saved. |
-| `account_changing` | An account is being added, switched or removed in the window; for `start`, also while the switch or sign-in dialog is open there. |
+| `account_changing` | An account is being added, switched or removed in the window; for `start`, `extend` and `forward`, also while the switch or sign-in dialog is open there. |
 | `already_starting` | A runtime is being started already, from the window or the command line. |
 | `form_open` | The New session dialog is open in the window with what was entered there (the form, or a start that failed or was cancelled); it is left alone until it is started or closed there. |
 | `session_limit_reached` | The active account has as many runtimes as this app starts per account (Settings → Defaults); the message names them. |
-| `no_such_runtime`, `ambiguous_runtime` | `stop` named no listed runtime, or more than one. |
+| `no_such_runtime`, `ambiguous_runtime` | `stop`, `extend` or `forward` named no listed runtime, or more than one. |
 | `already_stopping` | That runtime is being stopped already. |
+| `account_not_active` | `extend` and `forward` act only on runtimes of the active account, as the window does; accounts are switched in the window. |
+| `no_auto_stop` | `extend` named a runtime without an auto-stop: one opened in the browser or another tool, or one whose auto-stop was cancelled (the window can set one again). |
+| `auto_stop_changing` | That runtime's auto-stop is being extended, set or cancelled already. |
+| `unnamed_runtime` | `forward` named a runtime opened in the browser, which has no session name to reach it by. |
+| `port_in_use` | Another forward of the app listens on that port of this computer. |
+| `already_forwarding` | That port of that runtime is being forwarded already. |
+| `no_such_forward`, `ambiguous_forward` | `close-forward` named a port that no forward listens on, or one that more than one forward is listed on (close those in the window). |
+| `already_closing` | That forward is being closed already. |
 | `unknown_operation` | This run of the app has no operation with that id. |
-| `operation_ended`, `not_cancellable` | `cancel` was asked for an operation that has ended, or for a stop. |
+| `operation_ended`, `not_cancellable` | `cancel` was asked for an operation that has ended, or for one that is not a start. |
 | `connection_failed`, `bad_response` | Something other than the app answered, or the connection broke. |
 | `unauthorized`, `invalid_request`, `unsupported_version`, `wrong_backend` | The request did not come from this version of `ctl`, for example after an update replaced the program while an older copy still runs. Restart the app. |
 
@@ -294,16 +306,16 @@ What the answers hold:
   old), `eta_secs` (time left at the current rate), `unmanaged_runtimes` (`null`
   when not known), `error` and `history` (recent balances).
 
-Starting and stopping:
+Changing things:
 
-- **A preview first.** `start`, `stop` and `cancel` change nothing without `--yes`: they answer
+- **A preview first.** The commands that take `--yes` change nothing without it: they answer
   `{"preview": {…}}` with what they would do, from what the window's own confirmation shows, or
   with the code the change would be refused with. With `--yes` they go through the window's own
   steps: the window shows the progress and a notice that the command line asked, closing the window
   counts the runtime like any other, and the same limits apply.
 - **Refused, not queued.** A change that cannot happen now (another start under way, an account
-  being switched, the limit reached, the app closing) is refused with its code, and nothing waits
-  to happen later.
+  being switched, the limit reached, the app closing, that runtime's auto-stop or forward being
+  changed already) is refused with its code, and nothing waits to happen later.
 - **`start`** starts a runtime on the active account. `--hardware` is `CPU`, `T4`, `L4`, `G4`,
   `A100`, `H100`, `V5E1` or `V6E1` (any case), `--name` a session name; everything else comes from
   Settings → Defaults, as the New session dialog fills it in. No option changes a limit (the
@@ -322,16 +334,39 @@ Starting and stopping:
   one account, for a name that two accounts have. The preview holds `runtime` (as in `sessions`)
   and `ends`: `billing` and `files` (everything on the runtime is wiped), and `port_forwards` when
   it has any.
-- **Operations.** `start --yes` and `stop --yes` answer at once with `{"operation": {…}}`, as
-  `ctl operation <id>` shows it. A stop gets an id too: it runs `colab stop` and checks that the
-  runtime is gone, which takes seconds or longer, and the app answers one request at a time. An
-  operation has `id`, `kind` (`start` or `stop`), `state` (`running`, `succeeded`, `failed` with an
-  `error`, or `cancelled`), `cancelling`, `started_at`, `ended_at`, `account` (`id`, `email`) and
-  `runtime` (for a start `name`, `accelerator`, `high_mem`; for a stop `id`, `label`). A start also
-  has `progress`, its steps as the window lists them (each with an `event` such as `allocating`,
-  `probed`, `releasing`, `retrying` or `ready`), and once it succeeded `outcome` (`name`,
-  `hardware`, `attempts`, `below_spec`, `watchdog`, `started_at`). `ok` only says that the app
-  answered; how the operation went is its `state`.
+- **`extend <runtime>`** moves the auto-stop of a runtime on the active account later by what the
+  window's "Extend by …" adds: the runtime limit in Settings → Defaults, or two hours without one.
+  No option chooses another amount. Each extension adds that much again, as each click in the window does, and the other
+  limits (spending cap, balance floor, idle stop) still apply. `<runtime>` and `--account` name it
+  as for `stop`, and only a runtime with an auto-stop can be extended. The preview holds `runtime`
+  (as in `sessions`) and `extend_by`, not the new time: the app reads the time left from the
+  runtime as it extends. Once the operation succeeded, its `outcome` holds `auto_stop_at` and
+  `auto_stop_on_runtime_at` as `sessions` will list them (`null` for the second: the stop holds
+  only while the app runs).
+- **`forward <runtime>`** forwards a port of a runtime on the active account to this computer, as
+  the window's "Forward a port" does. `--port` is the port on the runtime (8000 when left out, as
+  in the dialog; never 8080, which Colab keeps), `--local-port` the port on this computer (the
+  same number when left out), and `--health` a path the app checks through the forward. A runtime
+  opened in the browser has no session name and cannot be forwarded. The preview holds `runtime`
+  and `forward` (`session`, `remote_port`, `local_port`, `health_path`, `url`). The operation ends
+  once the forward is up (`succeeded`), when it fails first (`failed`, with the forward's error,
+  such as `ssh_busy` or `port_in_use`), or when it is closed or its runtime stops before that
+  (`cancelled`). After that, `sessions` shows how the forward is doing.
+- **`close-forward <local-port>`** closes the forward that listens on that port of this computer,
+  or clears one there that failed, as its close button in the window does. Its runtime keeps running and
+  billing: the preview holds `forward` (as in `sessions`, with its `url`) and `stops_billing`,
+  which is always `false`.
+- **Operations.** Every change answers `--yes` at once with `{"operation": {…}}`, as
+  `ctl operation <id>` shows it: each waits on Colab or on a forward's connection, which takes
+  seconds or longer, and the app answers one request at a time. An operation has `id`, `kind`
+  (`start`, `stop`, `extend`, `forward` or `close_forward`), `state` (`running`, `succeeded`,
+  `failed` with an `error`, or `cancelled`), `cancelling`, `started_at`, `ended_at` and `account`
+  (`id`, `email`). By kind, it has `runtime` (for a start `name`, `accelerator`, `high_mem`; for a
+  stop or an extension `id`, `label`) or `forward` (as in the preview of `forward`); an extension
+  also has `extend_by` and `outcome`. A start also has `progress`, its steps as the window lists
+  them (each with an `event` such as `allocating`, `probed`, `releasing`, `retrying` or `ready`),
+  and once it succeeded `outcome` (`name`, `hardware`, `attempts`, `below_spec`, `watchdog`,
+  `started_at`). `ok` only says that the app answered; how the operation went is its `state`.
 - **Waiting:** `operation <id> --wait <seconds>` asks again until the operation ends or the time
   is up, then answers as `operation <id>` does. A wait that runs out answers with the operation
   still `running`: that is not a failure, and the operation goes on.
@@ -341,9 +376,9 @@ Starting and stopping:
   as `failed` with the error `orphan_suspected` instead, and that runtime may still bill:
   `sessions` lists it, unless its account is among `unlisted_accounts`, and `stop` ends it. Cancel
   in the window ends the operation the same way.
-  A stop cannot be cancelled (`not_cancellable`), nor an operation that has ended
-  (`operation_ended`). Nothing else cancels: a `ctl` that is stopped or killed while it waits
-  leaves the operation running.
+  Only a start can be cancelled (`not_cancellable` for the others: a forward that is still coming
+  up ends when `close-forward` closes it), and not once it has ended (`operation_ended`). Nothing
+  else cancels: a `ctl` that is stopped or killed while it waits leaves the operation running.
 - **How long an id lasts:** until the app quits, and the app keeps the 100 operations that ended
   last. For an id from before that, from before a restart, or one it never gave, `operation`
   answers `unknown_operation`, which says nothing about how the operation went: `sessions` shows

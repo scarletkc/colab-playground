@@ -146,6 +146,18 @@ impl AppState {
         from_dialog: bool,
         cx: &mut Context<Self>,
     ) {
+        self.open_tunnel_for(spec, from_dialog, None, cx);
+    }
+
+    /// [`Self::open_tunnel`], for the command-line operation `operation` when there is one. The
+    /// caller has checked that no forward of `spec`'s runtime and port is being opened already.
+    pub(super) fn open_tunnel_for(
+        &mut self,
+        spec: TunnelSpec,
+        from_dialog: bool,
+        operation: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let work_spec = spec.clone();
         self.run_backend(
             Op::Forward(forward_key(&spec)),
@@ -167,6 +179,10 @@ impl AppState {
                                 healthy: None,
                             },
                         );
+                        // Before the events, which may already say how it went.
+                        if let Some(operation) = &operation {
+                            state.operation_follows_tunnel(operation, id);
+                        }
                         let open = state.drain_tunnel(&received).open;
                         let failed = match state.sessions.tunnels.get(&id).map(|t| &t.state) {
                             Some(TunnelState::Failed { error }) => Some(error.clone()),
@@ -187,7 +203,12 @@ impl AppState {
                             }
                         }
                     }
-                    Err(error) => state.forward_failed(error, from_dialog, cx),
+                    Err(error) => {
+                        if let Some(operation) = &operation {
+                            state.operation_ended(operation, Err(&error));
+                        }
+                        state.forward_failed(error, from_dialog, cx);
+                    }
                 }
                 cx.notify();
             },
@@ -229,6 +250,9 @@ impl AppState {
     fn apply_tunnel_event(&mut self, event: TunnelEvent) {
         match event {
             TunnelEvent::State { id, state } => {
+                // From the event, not the list: a listing may drop a forward it read before
+                // the forward opened, and only the events go on reporting it.
+                self.operation_tunnel_state(id, &state);
                 if let Some(tunnel) = self.sessions.tunnels.get_mut(&id) {
                     tunnel.state = state;
                 }
@@ -243,12 +267,27 @@ impl AppState {
 
     /// Closes a forward; the runtime keeps running and billing, and the toast says so.
     pub fn close_forward(&mut self, id: TunnelId, cx: &mut Context<Self>) {
+        self.close_forward_for(id, None, cx);
+    }
+
+    /// [`Self::close_forward`], for the command-line operation `operation` when there is one.
+    /// The caller has checked that the forward is not being closed already.
+    pub(super) fn close_forward_for(
+        &mut self,
+        id: TunnelId,
+        operation: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         self.run_backend(
             Op::CloseForward(id.0),
             cx,
             move |backend, _| backend.close_tunnel(id),
             move |state, result, cx| {
                 state.sessions.tunnels.remove(&id);
+                // The backend refuses only a forward it no longer has: closed either way.
+                if let Some(operation) = &operation {
+                    state.operation_ended(operation, Ok(None));
+                }
                 match result {
                     Ok(()) => state.toast(
                         Toast::new(tr(cx, keys::FORWARD_CLOSED))

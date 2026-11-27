@@ -13,12 +13,15 @@ use std::{
 
 use colab_playground_core::{
     backend::BackendKind as Flavor,
+    cli::RESERVED_VM_PORT,
     sessions::{Accelerator, validate_session_name},
+    tunnel::validate_health_path,
 };
 
 use super::{
-    CancelArgs, Code, Command, Endpoint, OperationArgs, OperationState, PROTOCOL_VERSION, Request,
-    Response, StartArgs, StopArgs, endpoint_file, kind_name, owner::ANSWER_TIMEOUT, state_dir,
+    CancelArgs, CloseForwardArgs, Code, Command, Endpoint, ExtendArgs, ForwardArgs, OperationArgs,
+    OperationState, PROTOCOL_VERSION, Request, Response, StartArgs, StopArgs, endpoint_file,
+    kind_name, owner::ANSWER_TIMEOUT, state_dir,
 };
 use crate::backend::{BackendError, BackendKind, Build};
 
@@ -35,20 +38,26 @@ const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 const WAIT_POLL: Duration = Duration::from_secs(1);
 
 /// The commands `ctl` offers, in the order its usage lists them.
-const COMMANDS: [&str; 8] = [
+const COMMANDS: [&str; 11] = [
     "status",
     "accounts",
     "sessions",
     "usage",
     "start",
     "stop",
+    "extend",
+    "forward",
+    "close-forward",
     "operation",
     "cancel",
 ];
 const RUNTIME: &str = "a runtime: its session name or endpoint, as `sessions` lists them";
-const OPERATION_ID: &str = "the operation's id, as start or stop answered it";
+const LOCAL_PORT: &str = "the port on this computer that the forward listens on";
+const OPERATION_ID: &str = "the operation's id, as the command that began it answered";
 const NAME_RULE: &str =
     "a session name: 1 to 63 letters, digits, '.', '_' or '-', starting with a letter or digit";
+const PORT_RULE: &str = "a port number from 1 to 65535";
+const HEALTH_RULE: &str = "a path that starts with '/' and has no spaces";
 
 /// A checked `ctl` command line.
 #[derive(Clone, Debug, PartialEq)]
@@ -76,7 +85,7 @@ pub enum CtlError {
         flag: &'static str,
         command: &'static str,
     },
-    /// `stop`, `operation` or `cancel` without what it acts on.
+    /// A command that acts on something, without it.
     MissingTarget {
         command: &'static str,
         what: &'static str,
@@ -134,14 +143,32 @@ pub fn usage() -> String {
   status | accounts | sessions | usage
   start [--hardware <{hardware}>] [--name <name>] [--yes]
   stop <runtime> [--account <email>] [--yes]
+  extend <runtime> [--account <email>] [--yes]
+  forward <runtime> [--port <port>] [--local-port <port>] [--health <path>]
+          [--account <email>] [--yes]
+  close-forward <local-port> [--yes]
   operation <id> [--wait <seconds>]
   cancel <id> [--yes]
 Prints the running Colab Playground's answer as one line of JSON. It must allow control from
-the command line (Settings); start, stop and cancel need it to allow starting and stopping
-runtimes too. Without --yes those three change nothing and answer with what they would do.
-<runtime> is a session name or endpoint as `sessions` lists them. start and stop answer with
-an operation <id>; a wait that runs out leaves the operation running."
+the command line (Settings); the commands that take --yes need it to allow changes too, and
+without --yes they change nothing and answer with what they would do. <runtime> is a session
+name or endpoint as `sessions` lists them. A change answers with an operation <id>; a wait
+that runs out leaves the operation running."
     )
+}
+
+/// A port number, or the error that names `flag` and `expected`.
+fn port(flag: &'static str, value: &str, expected: &str) -> Result<u16, CtlError> {
+    value
+        .trim()
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port > 0)
+        .ok_or_else(|| CtlError::InvalidValue {
+            flag,
+            value: value.to_owned(),
+            expected: expected.to_owned(),
+        })
 }
 
 /// The value of `flag`: after `=`, or the next argument unless that is a flag too.
@@ -174,6 +201,7 @@ pub fn parse_args<S: AsRef<str>>(
     let mut given: Vec<&'static str> = Vec::new();
     let (mut help, mut yes) = (false, false);
     let (mut hardware, mut name, mut account, mut wait) = (None, None, None, None);
+    let (mut remote_port, mut local_port, mut health) = (None, None, None);
     let mut rest = args.iter().map(AsRef::as_ref);
     while let Some(arg) = rest.next() {
         let (flag, inline) = match arg.split_once('=') {
@@ -204,6 +232,18 @@ pub fn parse_args<S: AsRef<str>>(
                 wait = Some(value_of("--wait", inline, &mut rest)?);
                 given.push("--wait");
             }
+            ("--port", _) => {
+                remote_port = Some(value_of("--port", inline, &mut rest)?);
+                given.push("--port");
+            }
+            ("--local-port", _) => {
+                local_port = Some(value_of("--local-port", inline, &mut rest)?);
+                given.push("--local-port");
+            }
+            ("--health", _) => {
+                health = Some(value_of("--health", inline, &mut rest)?);
+                given.push("--health");
+            }
             _ if arg.starts_with('-') => return Err(CtlError::UnknownArgument(arg.to_owned())),
             _ => words.push(arg),
         }
@@ -219,7 +259,12 @@ pub fn parse_args<S: AsRef<str>>(
     };
     let (takes, target): (&[&str], Option<&'static str>) = match command {
         Some("start") => (&["--yes", "--hardware", "--name"], None),
-        Some("stop") => (&["--yes", "--account"], Some(RUNTIME)),
+        Some("stop" | "extend") => (&["--yes", "--account"], Some(RUNTIME)),
+        Some("forward") => (
+            &["--yes", "--account", "--port", "--local-port", "--health"],
+            Some(RUNTIME),
+        ),
+        Some("close-forward") => (&["--yes"], Some(LOCAL_PORT)),
         Some("operation") => (&["--wait"], Some(OPERATION_ID)),
         Some("cancel") => (&["--yes"], Some(OPERATION_ID)),
         _ => (&[], None),
@@ -268,6 +313,30 @@ pub fn parse_args<S: AsRef<str>>(
                 })
         })
         .transpose()?;
+    // The runtime's port 8080 is Colab's own.
+    let on_runtime = format!("{PORT_RULE} other than {RESERVED_VM_PORT}, which Colab keeps");
+    let remote_port = remote_port
+        .map(|value| match port("--port", value, &on_runtime)? {
+            RESERVED_VM_PORT => Err(CtlError::InvalidValue {
+                flag: "--port",
+                value: value.to_owned(),
+                expected: on_runtime.clone(),
+            }),
+            port => Ok(port),
+        })
+        .transpose()?;
+    let local_port = local_port
+        .map(|value| port("--local-port", value, PORT_RULE))
+        .transpose()?;
+    if let Some(path) = health
+        && validate_health_path(path).is_err()
+    {
+        return Err(CtlError::InvalidValue {
+            flag: "--health",
+            value: path.to_owned(),
+            expected: HEALTH_RULE.to_owned(),
+        });
+    }
     if help {
         return Ok(None);
     }
@@ -290,6 +359,23 @@ pub fn parse_args<S: AsRef<str>>(
         ("stop", Some(runtime)) => Command::Stop(StopArgs {
             runtime,
             account: account.map(str::to_owned),
+            yes,
+        }),
+        ("extend", Some(runtime)) => Command::Extend(ExtendArgs {
+            runtime,
+            account: account.map(str::to_owned),
+            yes,
+        }),
+        ("forward", Some(runtime)) => Command::Forward(ForwardArgs {
+            runtime,
+            account: account.map(str::to_owned),
+            remote_port,
+            local_port,
+            health_path: health.map(str::to_owned),
+            yes,
+        }),
+        ("close-forward", Some(local)) => Command::CloseForward(CloseForwardArgs {
+            local_port: port("close-forward", &local, PORT_RULE)?,
             yes,
         }),
         ("operation", Some(id)) => Command::Operation(OperationArgs { id }),
@@ -502,7 +588,8 @@ mod tests {
     use crate::{
         backend::{BackendError, Build},
         control::{
-            CancelArgs, Code, Command, OperationArgs, Response, StartArgs, StopArgs, listen,
+            CancelArgs, CloseForwardArgs, Code, Command, ExtendArgs, ForwardArgs, OperationArgs,
+            Response, StartArgs, StopArgs, listen,
         },
     };
 
@@ -741,6 +828,100 @@ mod tests {
             parsed(&["--yes=1", "start"]),
             Err(CtlError::UnknownArgument("--yes=1".into()))
         );
+    }
+
+    #[test]
+    fn extending_and_forwarding_take_their_own_arguments() {
+        assert_eq!(
+            command(&["extend", "a100-7f3a", "--account=ada@example.com", "--yes"]),
+            Command::Extend(ExtendArgs {
+                runtime: "a100-7f3a".into(),
+                account: Some("ada@example.com".into()),
+                yes: true,
+            })
+        );
+        assert_eq!(
+            command(&["forward", "a100-7f3a"]),
+            Command::Forward(ForwardArgs {
+                runtime: "a100-7f3a".into(),
+                account: None,
+                remote_port: None,
+                local_port: None,
+                health_path: None,
+                yes: false,
+            }),
+            "the ports are the app's to fill in, as its dialog does"
+        );
+        assert_eq!(
+            command(&[
+                "forward",
+                "t4-91c2",
+                "--port",
+                "7860",
+                "--local-port=17860",
+                "--health",
+                "/health",
+                "--yes"
+            ]),
+            Command::Forward(ForwardArgs {
+                runtime: "t4-91c2".into(),
+                account: None,
+                remote_port: Some(7860),
+                local_port: Some(17860),
+                health_path: Some("/health".into()),
+                yes: true,
+            })
+        );
+        assert!(
+            matches!(command(&["forward", "close"]), Command::Forward(args) if args.runtime == "close"),
+            "a runtime may be called close"
+        );
+        assert_eq!(
+            command(&["close-forward", "8000"]),
+            Command::CloseForward(CloseForwardArgs {
+                local_port: 8000,
+                yes: false,
+            })
+        );
+
+        let invalid = |flag: &'static str, value: &str| matches!(parsed(&["forward", "a100-7f3a", flag, value]), Err(CtlError::InvalidValue { flag: f, .. }) if f == flag);
+        assert!(
+            invalid("--port", "8080"),
+            "the runtime's port 8080 is Colab's"
+        );
+        assert!(invalid("--port", "0"));
+        assert!(invalid("--port", "65536"));
+        assert!(invalid("--local-port", "http"));
+        assert!(invalid("--health", "health"));
+        assert!(invalid("--health", "/a b"));
+        assert!(matches!(
+            parsed(&["close-forward", "localhost:8000"]),
+            Err(CtlError::InvalidValue {
+                flag: "close-forward",
+                ..
+            })
+        ));
+        assert_eq!(
+            parsed(&["extend", "a100-7f3a", "--port", "8000"]),
+            Err(CtlError::NotForCommand {
+                flag: "--port",
+                command: "extend"
+            })
+        );
+        assert_eq!(
+            parsed(&["close-forward", "8000", "--account", "lin@example.com"]),
+            Err(CtlError::NotForCommand {
+                flag: "--account",
+                command: "close-forward"
+            }),
+            "a port of this computer belongs to no account"
+        );
+        for command in ["extend", "forward", "close-forward"] {
+            assert!(
+                matches!(parsed(&[command, "--yes"]), Err(CtlError::MissingTarget { command: c, .. }) if c == command),
+                "{command}"
+            );
+        }
     }
 
     /// Answers like the owner about an operation, in turn from `states`, the last one for good.

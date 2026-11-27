@@ -648,6 +648,8 @@ mod tests {
             r#""command":"stop","args":{"runtime":"t4-91c2","force":true}"#,
             r#""command":"stop","args":{"runtime":"t4-91c2"},"yes":true"#,
             r#""args":{"runtime":"t4-91c2"}"#,
+            r#""command":"extend","args":{"runtime":"t4-91c2","by":86400}"#,
+            r#""command":"close_forward","args":{"local_port":0.5}"#,
         ] {
             assert_eq!(
                 answer(&asked(refused), &mut handler).code(),
