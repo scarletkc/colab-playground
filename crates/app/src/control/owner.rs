@@ -2,7 +2,7 @@
 
 use std::{
     fs::{self, File, OpenOptions, TryLockError},
-    io::{self, BufRead, BufReader, Read, Write},
+    io::{self, Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
     path::{Path, PathBuf},
     sync::{
@@ -32,9 +32,11 @@ use crate::state::AppState;
 /// closing (an update starts the new version before the old one has quit).
 const OWNER_WAIT: Duration = Duration::from_secs(10);
 const CLAIM_RETRY: Duration = Duration::from_millis(150);
-/// A client that has connected sends its line at once; one that does not is dropped, so it
-/// cannot hold up the next.
+/// A client that has connected sends its line at once; one whose whole line has not arrived by
+/// then is dropped, so it cannot hold up the next.
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// Bytes asked of the connection at a time; a request fits in one.
+const READ_CHUNK: usize = 1024;
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long the listener waits for the foreground, which answers from memory and makes no
 /// backend call.
@@ -232,16 +234,40 @@ fn answer_connection<H>(
 where
     H: FnMut(Command) -> Response,
 {
-    stream.set_read_timeout(Some(READ_TIMEOUT))?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-    let mut line = String::new();
-    BufReader::new(stream.take(MAX_REQUEST_BYTES)).read_line(&mut line)?;
+    let line = read_request(stream, Instant::now() + READ_TIMEOUT)?;
     let response = respond(&line, token, flavor, handler);
     let mut text = serde_json::to_string(&response)?;
     text.push('\n');
     let mut writer = stream;
     writer.write_all(text.as_bytes())?;
     writer.flush()
+}
+
+/// Reads the request line, giving up at `deadline` however the bytes arrive. A read timeout
+/// alone bounds each read, not the line: connections are answered one at a time, so a client
+/// that sent a byte now and then, and never the newline, would keep every other one waiting.
+fn read_request(stream: &TcpStream, deadline: Instant) -> io::Result<String> {
+    let mut line = Vec::new();
+    let mut chunk = [0u8; READ_CHUNK];
+    let mut reader = stream;
+    while (line.len() as u64) < MAX_REQUEST_BYTES {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        stream.set_read_timeout(Some(left))?;
+        let read = reader.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        if let Some(end) = chunk[..read].iter().position(|byte| *byte == b'\n') {
+            line.extend_from_slice(&chunk[..end]);
+            break;
+        }
+        line.extend_from_slice(&chunk[..read]);
+    }
+    Ok(String::from_utf8_lossy(&line).into_owned())
 }
 
 /// Every field optional, so the token is checked before anything else about the request.
@@ -358,17 +384,17 @@ pub fn answer(command: Command, state: &Entity<AppState>, cx: &mut App) -> Respo
 #[cfg(test)]
 mod tests {
     use std::{
-        io::{BufRead, BufReader, Write},
-        net::{Ipv4Addr, TcpStream},
+        io::{self, BufRead, BufReader, Write},
+        net::{Ipv4Addr, TcpListener, TcpStream},
         sync::mpsc,
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use colab_playground_core::backend::BackendKind as Flavor;
     use futures::StreamExt;
 
-    use super::{Claim, Owner, claim_within, listen, respond};
+    use super::{Claim, Owner, claim_within, listen, read_request, respond};
     use crate::control::{
         Code, Command, Endpoint, PROTOCOL_VERSION, Response, Token, ctl, endpoint_file,
     };
@@ -442,6 +468,32 @@ mod tests {
             handled.try_recv().is_err(),
             "nothing reached the app without the token"
         );
+    }
+
+    #[test]
+    fn a_request_that_trickles_in_is_dropped_at_the_deadline() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a port");
+        let port = listener.local_addr().expect("an address").port();
+        // Every byte arrives well within the deadline; the newline never does.
+        let trickle = thread::spawn(move || {
+            let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("connects");
+            while stream.write_all(b"x").is_ok() {
+                thread::sleep(SHORT / 20);
+            }
+        });
+        let (stream, _) = listener.accept().expect("a client");
+        let started = Instant::now();
+        let error = read_request(&stream, started + SHORT).expect_err("no line arrived");
+        assert!(
+            matches!(
+                error.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            ),
+            "{error}"
+        );
+        assert!(started.elapsed() < SHORT * 10, "{:?}", started.elapsed());
+        drop(stream);
+        trickle.join().expect("the client saw the connection close");
     }
 
     #[test]
