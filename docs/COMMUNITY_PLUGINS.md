@@ -12,6 +12,7 @@ receives what you type into its form, plus your saved Hugging Face token if it a
 
 | Plugin | What it does | Tested on | Receives |
 | --- | --- | --- | --- |
+| [MiniMax H3 & ComfyUI 30s + 2K/4K Video Studio](https://github.com/vecyang1/colab-plugin-minimax-h3-studio) | Run MiniMax H3 30s seamless & multi-shot batch video generation (:8189 Web UI) plus ComfyUI (:8188) and cloud GPU 2K/4K upscaling (FlashVSR v1.1 / SeedVR2). | L4, A100, T4 | Its form and your Hugging Face token |
 
 ## Getting a plugin listed
 
