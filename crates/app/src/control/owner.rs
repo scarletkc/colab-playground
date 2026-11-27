@@ -76,6 +76,8 @@ struct Job {
     command: Command,
     reply: mpsc::Sender<Response>,
     claim: Arc<AtomicU8>,
+    /// The connection the answer goes to, which tells whether its client still waits.
+    client: Option<TcpStream>,
 }
 
 /// Where a job stands between the listener, which waits only so long, and the foreground. It
@@ -86,12 +88,34 @@ const TAKEN: u8 = 1;
 const ABANDONED: u8 = 2;
 
 impl Job {
-    /// Takes the job for the foreground to do. False when the listener stopped waiting for it.
+    /// Takes the job for the foreground to do. False when nobody waits for its answer any more:
+    /// the listener answered `timeout`, or the client hung up (it waits only so long itself,
+    /// from before its request was read, and it may have been stopped).
     fn take(&self) -> bool {
+        if self.client.as_ref().is_some_and(hung_up) {
+            return false;
+        }
         self.claim
             .compare_exchange(PENDING, TAKEN, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
     }
+}
+
+/// Whether the other end closed the connection. A client keeps it open until it has its answer
+/// and sends nothing after its request, so a read that would end at once means it left.
+fn hung_up(stream: &TcpStream) -> bool {
+    if stream.set_nonblocking(true).is_err() {
+        return false;
+    }
+    let gone = match stream.peek(&mut [0u8; 1]) {
+        Ok(read) => read == 0,
+        Err(error) => error.kind() != io::ErrorKind::WouldBlock,
+    };
+    // The listener writes the answer to this connection, and waits for the write.
+    if let Err(error) = stream.set_nonblocking(false) {
+        log::warn!("control: could not set a connection back to blocking: {error}");
+    }
+    gone
 }
 
 /// Set when the app is on its way out, so a second launch waits for the lock instead of
@@ -153,8 +177,9 @@ impl Owner {
         let (jobs, inbox) = unbounded();
         let quitting = self.quitting.clone();
         let flavor = self.flavor;
-        let endpoint = listen(&self.dir, flavor, move |command| {
-            forward(&jobs, &quitting, flavor, command, ANSWER_TIMEOUT)
+        let endpoint = listen_with(&self.dir, flavor, move |command, client: &TcpStream| {
+            let client = client.try_clone().ok();
+            forward(&jobs, &quitting, flavor, command, client, ANSWER_TIMEOUT)
         })?;
         self.endpoint = Some(endpoint.clone());
         Ok(Service {
@@ -188,11 +213,11 @@ fn forward(
     quitting: &AtomicBool,
     flavor: Flavor,
     command: Command,
+    client: Option<TcpStream>,
     wait: Duration,
 ) -> Response {
-    let gone = || Response::failure(Some(flavor), Code::Quitting, None);
     if quitting.load(Ordering::SeqCst) {
-        return gone();
+        return Response::failure(Some(flavor), Code::Quitting, None);
     }
     let (reply, answer) = mpsc::channel();
     let claim = Arc::new(AtomicU8::new(PENDING));
@@ -200,10 +225,23 @@ fn forward(
         command,
         reply,
         claim: claim.clone(),
+        client,
     };
     if jobs.unbounded_send(job).is_err() {
-        return gone();
+        return Response::failure(Some(flavor), Code::Quitting, None);
     }
+    await_answer(&answer, &claim, flavor, wait)
+}
+
+/// Waits up to `wait` for the foreground to begin on a job, and then for its answer.
+fn await_answer(
+    answer: &mpsc::Receiver<Response>,
+    claim: &AtomicU8,
+    flavor: Flavor,
+    wait: Duration,
+) -> Response {
+    // The job was dropped undone: the app is on its way out, or the client hung up.
+    let gone = || Response::failure(Some(flavor), Code::Quitting, None);
     match answer.recv_timeout(wait) {
         Ok(response) => response,
         Err(RecvTimeoutError::Timeout) => {
@@ -226,6 +264,14 @@ fn forward(
 pub fn listen<H>(dir: &Path, flavor: Flavor, mut handler: H) -> io::Result<PathBuf>
 where
     H: FnMut(Command) -> Response + Send + 'static,
+{
+    listen_with(dir, flavor, move |command, _: &TcpStream| handler(command))
+}
+
+/// [`listen`], with a handler that also gets the connection its answer goes to.
+fn listen_with<H>(dir: &Path, flavor: Flavor, mut handler: H) -> io::Result<PathBuf>
+where
+    H: FnMut(Command, &TcpStream) -> Response + Send + 'static,
 {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();
@@ -265,11 +311,13 @@ fn answer_connection<H>(
     handler: &mut H,
 ) -> io::Result<()>
 where
-    H: FnMut(Command) -> Response,
+    H: FnMut(Command, &TcpStream) -> Response,
 {
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let line = read_request(stream, Instant::now() + READ_TIMEOUT)?;
-    let response = respond(&line, token, flavor, handler);
+    let response = respond(&line, token, flavor, &mut |command| {
+        handler(command, stream)
+    });
     let mut text = serde_json::to_string(&response)?;
     text.push('\n');
     let mut writer = stream;
@@ -391,7 +439,7 @@ pub fn serve(service: Service, state: Entity<AppState>, cx: &mut App) {
         while let Some(job) = jobs.next().await {
             if !job.take() {
                 log::warn!(
-                    "control: left {} undone; its client was told the app did not answer in time",
+                    "control: left {} undone; nobody waits for its answer any more",
                     job.command.name()
                 );
                 continue;
@@ -440,7 +488,7 @@ mod tests {
     use std::{
         io::{self, BufRead, BufReader, Write},
         net::{Ipv4Addr, TcpListener, TcpStream},
-        sync::mpsc,
+        sync::{Arc, atomic::AtomicU8, mpsc},
         thread,
         time::{Duration, Instant},
     };
@@ -448,7 +496,10 @@ mod tests {
     use colab_playground_core::backend::BackendKind as Flavor;
     use futures::StreamExt;
 
-    use super::{Claim, Job, Owner, claim_within, forward, listen, read_request, respond};
+    use super::{
+        Claim, Job, Owner, PENDING, await_answer, claim_within, forward, hung_up, listen,
+        read_request, respond,
+    };
     use crate::control::{
         Code, Command, Endpoint, PROTOCOL_VERSION, Response, Token, ctl, endpoint_file,
     };
@@ -677,23 +728,59 @@ mod tests {
 
         // The foreground is busy for longer than the listener waits.
         let (jobs, mut inbox) = futures::channel::mpsc::unbounded::<Job>();
-        let answer = forward(&jobs, &quitting, flavor, start(), wait);
+        let answer = forward(&jobs, &quitting, flavor, start(), None, wait);
         assert_eq!(answer.code(), Some(Code::Timeout));
         let late = futures::executor::block_on(inbox.next()).expect("still queued");
         assert!(!late.take(), "the foreground leaves it undone");
 
-        // The foreground began before the wait ran out: its answer is the one given.
-        let (jobs, mut inbox) = futures::channel::mpsc::unbounded::<Job>();
+        // The foreground began on it before the wait ran out: its answer is the one given.
+        let (reply, answer) = mpsc::channel();
+        let job = Job {
+            command: start(),
+            reply,
+            claim: Arc::new(AtomicU8::new(PENDING)),
+            client: None,
+        };
+        assert!(job.take());
+        let claim = job.claim.clone();
         let foreground = thread::spawn(move || {
-            let job = futures::executor::block_on(inbox.next()).expect("queued");
-            assert!(job.take());
             thread::sleep(SHORT);
             let done = Response::success(flavor, serde_json::json!({ "operation": "x-1" }));
             job.reply.send(done).expect("the listener still waits");
         });
-        let answer = forward(&jobs, &quitting, flavor, start(), wait);
+        let answer = await_answer(&answer, &claim, flavor, wait);
         foreground.join().expect("the foreground ran");
         assert!(answer.ok, "{answer:?}");
+    }
+
+    #[test]
+    fn a_request_whose_client_hung_up_is_left_undone() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("binds");
+        let client = TcpStream::connect(listener.local_addr().expect("an address")).expect("up");
+        let (server, _) = listener.accept().expect("accepts");
+        let job = || Job {
+            command: Command::Start(crate::control::StartArgs::default()),
+            reply: mpsc::channel().0,
+            claim: Arc::new(AtomicU8::new(PENDING)),
+            client: server.try_clone().ok(),
+        };
+        assert!(job().take(), "its client still waits");
+        // Looking did not change how the answer is written and read.
+        (&server).write_all(b"answer\n").expect("written");
+        let mut answer = String::new();
+        BufReader::new(&client)
+            .read_line(&mut answer)
+            .expect("read");
+        assert_eq!(answer, "answer\n");
+
+        drop(client);
+        // The close reaches this end a moment later.
+        let deadline = Instant::now() + SHORT;
+        while !hung_up(&server) {
+            assert!(Instant::now() < deadline, "the close never arrived");
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!job().take(), "nobody waits for the answer");
     }
 
     #[test]

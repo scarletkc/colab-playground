@@ -138,8 +138,9 @@ Properties the code must keep. A change that breaks one is wrong even if every t
   something answers with what it would do and changes nothing unless `--yes` is given. No command
   loosens a cost guard: a runtime it starts gets the Defaults and the limits, which only the
   window changes. A change that cannot happen now (the app busy starting, closing, updating or
-  changing accounts) is refused, not queued. A client that goes away cancels nothing; an
-  operation ends on its own or when it is cancelled by name.
+  changing accounts) is refused, not queued. A request whose client stopped waiting before the
+  app began on it is left undone. Once an operation has begun, a client that goes away cancels
+  nothing: it ends on its own or when it is cancelled by name.
 - **The number of sessions the app creates is capped**, so a retry loop cannot fan out into many
   billed VMs.
 - **The app replaces itself only when the user asks, and only with a download whose signature

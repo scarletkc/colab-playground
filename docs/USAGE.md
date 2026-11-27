@@ -235,7 +235,7 @@ and does nothing on its own: it never starts the app, signs in or runs `colab`.
 | `control_off` | Control from the command line is turned off; the message says where to turn it on. |
 | `changes_off` | Starting and stopping runtimes from the command line is turned off; the message says where to turn it on. |
 | `quitting` | The app is closing, or restarting into an update (also while it asks whether to quit, or downloads an update). Ask again in a moment. |
-| `timeout` | The app did not answer in time. |
+| `timeout` | The app did not answer in time. It leaves undone a request nobody waits for any more, so a change asked this way almost never still happens; after a `start --yes` that ended like this, look at `sessions` before asking again. |
 | `not_ready` | What the command needs is still loading (the accounts, the runtime list), or could not be loaded; the message says which. |
 | `no_active_account` | No account is active: none is signed in, the CLI is not set up, or it is signed in to an account the app has not saved. |
 | `account_changing` | An account is being added, switched or removed in the window; for `start`, also while the switch or sign-in dialog is open there. |
@@ -337,7 +337,8 @@ Starting and stopping:
   answers at once, with the operation still `running` and `cancelling`. The operation ends as
   `cancelled` once nothing it got is left billing. If a runtime could not be given back, it ends
   as `failed` with the error `orphan_suspected` instead, and that runtime may still bill:
-  `sessions` lists it, and `stop` ends it. Cancel in the window ends the operation the same way.
+  `sessions` lists it, unless its account is among `unlisted_accounts`, and `stop` ends it. Cancel
+  in the window ends the operation the same way.
   A stop cannot be cancelled (`not_cancellable`), nor an operation that has ended
   (`operation_ended`). Nothing else cancels: a `ctl` that is stopped or killed while it waits
   leaves the operation running.
