@@ -2,7 +2,7 @@
 //! switches, never makes an HTTP request and never replaces a file (`MockBackend` counts what
 //! it was asked).
 
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
 use colab_playground::{
     i18n::keys,
@@ -18,7 +18,6 @@ use colab_playground::{
     },
 };
 use colab_playground_core::{
-    backend::Backend,
     mock::{MockFailures, mock_app_folder},
     update::{self, Version},
     updater::{SelfUpdate, Unsupported, UpdateProgress},
@@ -70,7 +69,6 @@ fn a_found_release_is_announced_once_and_stays_marked(cx: &mut TestAppContext) {
     assert!(app.shown(UPDATE_MARK_SELECTOR), "marked in the sidebar");
     let saved = app.saved_settings().expect("saved");
     assert_eq!(saved.update_latest.as_deref(), Some(version.as_str()));
-    assert!(saved.update_checked_at.is_some());
 
     assert!(
         app.shown(UPDATE_NOTICE_INSTALL),
@@ -102,29 +100,20 @@ fn a_found_release_is_announced_once_and_stays_marked(cx: &mut TestAppContext) {
 #[gpui::test]
 fn after_a_restart_the_dismissed_release_is_not_announced_again(cx: &mut TestAppContext) {
     let version = next_version();
-    // What the earlier run saved: checked "now" on the mock's clock, release found, dismissed.
-    let now = Backend::now(&colab_playground_core::mock::MockBackend::new(
-        colab_playground_core::mock::MockConfig::headless(
-            colab_playground_core::mock::MockScenario::demo(),
-        )
-        .0,
-    ));
-    let checked = now.duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let saved = format!(
-        r#"{{ "update_checked_at": {checked}, "update_latest": "{version}", "update_dismissed": "{version}" }}"#
-    );
+    // What the earlier run saved: release found, then dismissed.
+    let saved = format!(r#"{{ "update_latest": "{version}", "update_dismissed": "{version}" }}"#);
     let options = Options {
         failures: available(),
         config: ConfigDir::TempWith(saved),
         ..Options::default()
     };
     let mut app = TestApp::with(cx, options);
-    app.advance(POLL_CHECK);
-    assert_eq!(
-        app.mock.update_checks(),
-        0,
-        "already checked within the day"
+    assert!(
+        app.shown(UPDATE_MARK_SELECTOR),
+        "the release is still marked before any check"
     );
+    app.advance(POLL_CHECK);
+    assert_eq!(app.mock.update_checks(), 1, "every start checks");
     assert!(
         app.shown(UPDATE_MARK_SELECTOR),
         "the release is still marked"
@@ -132,13 +121,6 @@ fn after_a_restart_the_dismissed_release_is_not_announced_again(cx: &mut TestApp
     assert!(
         !app.shown(UPDATE_NOTICE_SELECTOR),
         "but not announced again"
-    );
-
-    later(&mut app, colab_playground::state::UPDATE_INTERVAL);
-    assert_eq!(app.mock.update_checks(), 1, "the next day it checks");
-    assert!(
-        !app.shown(UPDATE_NOTICE_SELECTOR),
-        "the same version stays dismissed"
     );
 }
 
@@ -211,11 +193,6 @@ fn an_automatic_failure_stays_quiet(cx: &mut TestAppContext) {
     );
     app.click(Route::Settings.nav_selector());
     assert!(app.shown("update-status failed"), "shown in About");
-    assert_eq!(
-        app.saved_settings().and_then(|s| s.update_checked_at),
-        None,
-        "a failed check is not recorded as a completed daily check"
-    );
     later(&mut app, Duration::from_secs(600));
     assert_eq!(app.mock.update_checks(), 1, "throttled within the hour");
 
@@ -223,16 +200,22 @@ fn an_automatic_failure_stays_quiet(cx: &mut TestAppContext) {
     later(&mut app, Duration::from_secs(3600));
     assert_eq!(app.mock.update_checks(), 2, "retried after an hour");
     assert!(app.shown(UPDATE_MARK_SELECTOR));
+    later(&mut app, Duration::from_secs(3600));
+    assert_eq!(
+        app.mock.update_checks(),
+        2,
+        "answered, so not again within the day"
+    );
 }
 
 #[gpui::test]
-fn it_checks_once_a_day(cx: &mut TestAppContext) {
+fn it_checks_at_start_then_once_a_day(cx: &mut TestAppContext) {
     let mut app = TestApp::new(cx);
     app.advance(POLL_CHECK);
     assert_eq!(app.mock.update_checks(), 1);
     later(&mut app, Duration::from_secs(3600));
     assert_eq!(app.mock.update_checks(), 1, "not again within the day");
-    later(&mut app, Duration::from_secs(23 * 3600));
+    later(&mut app, colab_playground::state::UPDATE_INTERVAL);
     assert_eq!(app.mock.update_checks(), 2, "again after a day");
 }
 

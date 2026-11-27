@@ -36,10 +36,9 @@ A download is a release build without demo data: it always uses the real Colab C
 
 The app checks GitHub for a newer release, and installs it when you ask.
 
-- **Automatic check:** shortly after start-up, then at most once a day while the app runs. The time
-  of the last check that got an answer is kept in the settings file, so restarting does not check
-  again within the day. A check that fails is tried again after an hour, or at the next start.
-  Turn it off in Settings → About → "Check for updates automatically".
+- **Automatic check:** shortly after each start, then once a day while the app runs. A check that
+  fails is tried again every hour until one gets an answer. Turn it off in Settings → About →
+  "Check for updates automatically".
 - **By hand:** Settings → About → "Check for updates".
 - **When a newer version exists:** a notice appears once for that version, and the Settings entry
   stays marked until you have updated. "Download and restart", on the notice and in Settings →

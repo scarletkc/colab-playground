@@ -328,7 +328,7 @@ impl AppState {
             // A provisioning progress shows how long Colab has not answered.
             cx.notify();
         }
-        // The update check needs no account; its own daily cadence decides whether it asks.
+        // The update check needs no account; it decides itself whether it still has to ask.
         self.maybe_check_updates(cx);
         let signing_in = matches!(self.dialog, Some(AccountDialog::Add(_)));
         let has_accounts = self
