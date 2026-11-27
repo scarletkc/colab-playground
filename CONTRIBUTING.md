@@ -15,7 +15,7 @@ Issues are welcome, for bugs and ideas alike.
 
 ## Pull requests
 
-Only fixes are accepted, each for a problem described in an issue.
+From outside the project, only fixes are accepted, each for a problem described in an issue.
 
 - **No feature pull requests.** A pull request that adds a feature or changes how one works is
   closed without review. Suggest the feature in an issue instead, or build it as a plugin in a
