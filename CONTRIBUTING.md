@@ -27,20 +27,21 @@ Only fixes are accepted, each for a problem described in an issue.
 - **The one exception:** a pull request that adds your plugin to the community list needs no
   issue; it follows [Getting a plugin listed](docs/COMMUNITY_PLUGINS.md#getting-a-plugin-listed).
 
-A fix follows the rules every change here follows:
+A fix follows the same rules as every change here:
 
-- the pull request's title is a conventional commit, because it becomes the changelog line, and
-  uses this repository's own types
-  ([Writing commits for the changelog](docs/RELEASING.md#writing-commits-for-the-changelog));
-  how a pull request lands is in [Landing a change](docs/DEVELOPMENT.md#landing-a-change);
-- the product principle, the scope, the hard safety rules and the invariants in
-  [DESIGN.md](docs/DESIGN.md);
-- [Docs and comments](docs/DEVELOPMENT.md#docs-and-comments);
-- CI runs the whole test suite on the pull request, so locally run only the checks of what you
-  changed ([A check is made once](docs/TESTING.md#a-check-is-made-once)).
+- **Title:** a conventional commit with this repository's own types, because it becomes the
+  changelog line
+  ([Writing commits for the changelog](docs/RELEASING.md#writing-commits-for-the-changelog)).
+- **Design:** the product principle, the scope, the hard safety rules and the invariants in
+  [DESIGN.md](docs/DESIGN.md).
+- **Docs and comments:** written as
+  [Docs and comments](docs/DEVELOPMENT.md#docs-and-comments) says.
+- **Checks:** CI runs the whole test suite on the pull request, so locally run only the checks of
+  what you changed ([A check is made once](docs/TESTING.md#a-check-is-made-once)).
+- **Screenshots:** if the fix changes the interface, attach screenshots of the running app to the
+  pull request ([Screenshots](docs/TESTING.md#screenshots)).
+- **Real Colab:** the maintainers do not run outside changes on a real Colab runtime, and no test
+  does. If the fix changes what happens there, say in the pull request how you tried it.
 
-If the fix changes the interface, attach screenshots of the running app to the pull request
-([Screenshots](docs/TESTING.md#screenshots)). Nobody else runs your change on a real Colab
-runtime: if it changes what happens there, say how you tried it.
-
-A coding agent working in this repository reads [AGENTS.md](AGENTS.md).
+The steps from branch to merge are in [Landing a change](docs/DEVELOPMENT.md#landing-a-change).
+If you use a coding agent, it finds these rules in [AGENTS.md](AGENTS.md).
