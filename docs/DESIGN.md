@@ -62,11 +62,14 @@ Non-goals (v1)
 
 They apply to every contributor and agent.
 
-1. **A real `colab` command spends compute units and changes real state, so whoever runs one
-   cleans up after it.** Prefer a CPU runtime, stop every runtime you start, and confirm with
-   `colab sessions` that it is gone. No test runs a real `colab` (rules 3 and 4). The CLI is open
-   source (github.com/googlecolab/google-colab-cli, installed version 0.8.0), and its source
-   answers most questions without a runtime.
+1. **A real `colab` command spends compute units and changes real state, so an agent runs one
+   only with the user's approval, and whoever runs one cleans up after it.** An agent asks before
+   the first one a task needs, saying what it will run and on which hardware; a yes covers that
+   task only. Afterwards it tells the user what ran and that every runtime it started is gone.
+   Prefer a CPU runtime, stop every runtime you start, and confirm with `colab sessions` that it
+   is gone. No test runs a real `colab` (rules 3 and 4). The CLI is open source
+   (github.com/googlecolab/google-colab-cli, installed version 0.8.0), and its source answers
+   most questions without a runtime.
    - Pass one throw-away state file (`--config`) to every command: `sessions` prunes from the
      state file it is given every record the signed-in account does not hold, the app keeps one
      such file per account, and `stop` of a name its file does not know prints "not found" and

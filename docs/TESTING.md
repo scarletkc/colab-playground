@@ -13,8 +13,8 @@ Nothing is checked twice, and nothing waits for a person to check it by hand.
   The CI jobs still report, because `main` waits for them, with every step skipped.
 - What the mock backend or the fake CLI covers is not checked again on the real backend.
 - A check that a test, a script or an agent can make is automated, never left to a person. A
-  check on the real Colab spends compute units, so whoever makes it cleans up after it
-  ([hard safety rules](DESIGN.md#hard-safety-rules)).
+  check on the real Colab spends compute units, so an agent makes one only with the user's
+  approval and cleans up after it ([hard safety rules](DESIGN.md#hard-safety-rules)).
 - What is left, the real Colab and a real update, is found out in use. A problem that shows up
   there is fixed when it shows up.
 
