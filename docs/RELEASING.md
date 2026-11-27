@@ -80,6 +80,11 @@ does, and what Package checks before anything is attached:
 - The build sets `COLAB_PLAYGROUND_RELEASE_BUILD`, which marks the binary as a release download:
   only such a binary replaces itself with a newer release. Any other build (`cargo run`, a local
   release build, a distribution's package) offers the download page instead.
+- **No demo data.** The build leaves out the default `mock` feature (`--no-default-features`), so a
+  download runs only the real backend ([hard safety rules](DESIGN.md#hard-safety-rules)). A build
+  that sets `COLAB_PLAYGROUND_RELEASE_BUILD` but keeps the mock does not compile, so the two cannot
+  drift apart. Nothing else builds a download's configuration, so CI's Linux job lints it on every
+  pull request.
 - Release builds use `[profile.release]` in [`Cargo.toml`](../Cargo.toml) and are compiled from
   scratch, without a build cache.
 

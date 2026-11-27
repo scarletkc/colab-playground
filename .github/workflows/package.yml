@@ -112,7 +112,9 @@ jobs:
           # Marks the binary as a release download, the only kind that replaces itself with a
           # newer release (crates/core/src/updater/layout.rs).
           COLAB_PLAYGROUND_RELEASE_BUILD: "1"
-        run: cargo build --release --locked -p colab-playground --target "$BUILD_TARGET"
+        # Without the default `mock` feature: a download has no demo data and runs only the real
+        # backend. With the marker above, a build that keeps the mock does not compile.
+        run: cargo build --release --locked -p colab-playground --no-default-features --target "$BUILD_TARGET"
 
       - name: Package (Windows, bare exe)
         if: runner.os == 'Windows'

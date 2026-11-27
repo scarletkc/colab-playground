@@ -8,10 +8,13 @@ publish.workspace = true
 repository.workspace = true
 
 [features]
-default = ["http"]
+default = ["http", "mock"]
 # Blocking HTTPS client used for Hugging Face lookups. Disabled builds keep the
 # whole API and report `ErrorKind::HttpUnavailable` instead.
 http = ["dep:ureq"]
+# The simulated backend behind demo data and the UI tests. Release downloads leave it out
+# (docs/RELEASING.md), so they can only ever run the real one.
+mock = []
 
 [dependencies]
 base64 = "0.22"

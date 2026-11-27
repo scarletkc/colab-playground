@@ -9,7 +9,8 @@ disagree. The few rules that exist only here say so.
 - All [hard safety rules](docs/DESIGN.md#hard-safety-rules) apply to agents, including asking the
   user before a real `colab` command and cleaning up after it.
 - One of them is easy to break by accident: the app runs on the real backend only when you are
-  asked to run it there, and a release build is on it unless `--mock` is given.
+  asked to run it there, and a release build is on it unless `--mock` is given (a release
+  download always is).
 - Never push to `main`. Stated only here: never use the admin bypass of the `main` ruleset unless
   asked.
 - Stated only here: no `Co-Authored-By` trailer that credits a coding agent (Claude, Devin and
