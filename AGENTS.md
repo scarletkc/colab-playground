@@ -6,10 +6,8 @@ disagree. The few rules that exist only here say so.
 
 ## Never
 
-- **Never run a real `colab` command** other than `colab help [CMD]` and `colab version`, and do
-  not use the `colab-operator` skill in `.claude/skills/` or `.agents/skills/` to try things; read
-  the CLI's source instead. All [hard safety rules](docs/DESIGN.md#hard-safety-rules) apply to
-  agents.
+- All [hard safety rules](docs/DESIGN.md#hard-safety-rules) apply to agents, including asking the
+  user before a real `colab` command and cleaning up after it.
 - One of them is easy to break by accident: the app runs on the real backend only when you are
   asked to run it there, and a release build is on it unless `--mock` is given.
 - Never push to `main`. Stated only here: never use the admin bypass of the `main` ruleset unless
