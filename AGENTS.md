@@ -62,6 +62,8 @@ Stated only here.
   [Writing commits for the changelog](docs/RELEASING.md#writing-commits-for-the-changelog).
 - Review bot comments are leads, not verdicts, and only a problem that can really happen gets
   fixed: [Automated review comments](docs/DEVELOPMENT.md#automated-review-comments).
+- What is accepted from outside the project, and what is closed:
+  [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Read before touching
 
