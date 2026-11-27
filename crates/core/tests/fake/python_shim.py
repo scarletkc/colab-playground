@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Fake "CLI interpreter" for the account helper in integration tests.
+"""Fake "CLI interpreter" for the account helper and the tunnel's proxy guard in integration tests.
 
-Invoked exactly like the real one (``<python> -c <loader> <op> [args...]``),
-it installs fake ``keyring`` / ``google-auth`` / ``requests`` /
-``colab_cli.client`` modules and then runs the loader, which executes the
-*real* ``account_helper.py`` read from stdin. Never resolves the system's
-packages (see fake_common).
+Invoked exactly like the real one (``<python> -c <loader> <op> [args...]`` for the
+helper, ``<python> -P -c <loader> <guard> [args...]`` in a ProxyCommand), it installs
+fake ``keyring`` / ``google-auth`` / ``requests`` / ``colab_cli`` modules and then
+runs the loader, which executes the *real* ``account_helper.py`` read from stdin or
+the real ``proxy_guard.py`` passed in base64. Never resolves the system's packages
+(see fake_common).
 """
 
 import os
@@ -16,10 +17,14 @@ import fake_common  # noqa: E402
 
 fake_common.install_fake_modules()
 
-if len(sys.argv) < 3 or sys.argv[1] != "-c":
-    sys.stderr.write("fake python: only `-c CODE` is supported\n")
+args = sys.argv[1:]
+# A ProxyCommand passes `-P` first; the shim's module path does not depend on it.
+if args[:1] == ["-P"]:
+    args = args[1:]
+if len(args) < 2 or args[0] != "-c":
+    sys.stderr.write("fake python: only `[-P] -c CODE` is supported\n")
     sys.exit(2)
 
-code = sys.argv[2]
-sys.argv = ["-c"] + sys.argv[3:]
+code = args[1]
+sys.argv = ["-c"] + args[2:]
 exec(compile(code, "<string>", "exec"), {"__name__": "__main__"})

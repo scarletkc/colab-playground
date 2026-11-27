@@ -3,7 +3,8 @@
 Everything lives under the directory named by ``CPG_FAKE_STATE`` (a test's
 temporary directory). Nothing here ever imports the real ``keyring``,
 ``google-auth`` or ``colab_cli``: the fake interpreter installs stand-ins for
-those modules in ``sys.modules`` before running the real account helper.
+those modules in ``sys.modules`` before running the real account helper or the
+tunnel's real proxy guard.
 
 Files:
   keyring.json   {"<service>\\u0000<user>": "<value>"}  (fake OS keyring)
@@ -46,9 +47,10 @@ DEFAULT_KNOBS = {
     "plugin_log_skipped": 0,        # bytes the first poll of a plugin run reports as left out
     "ssh_busy": False,              # proxy-mode answers HTTP 429
     "stop_hold": False,             # `stop` waits while set, before it ends the session
+    "proxy_record_pruned": False,   # `ssh --proxy-mode` finds its session's record gone
     "watchdog_start_fails": False,  # a started watchdog exits at once
     "keyring_locked": False,        # keyring reads fail
-    "cli_api_broken": False,        # colab_cli.client cannot be imported
+    "cli_api_broken": False,        # colab_cli cannot be imported
     "keyring_during_refresh": None,  # {"<service>\u0000<user>": value or null}, applied by the next token refresh
 }
 
@@ -170,6 +172,91 @@ def usage_of(s, name):
     return {"currentBalance": a["balance"], "consumptionRateHourly": rate, "assignmentsCount": len(a["assignments"])}
 
 
+def allocate(s, name, session, acc, high_mem):
+    s["counter"] += 1
+    ep = "gpu-%s-s-%04d" % (acc.lower(), s["counter"]) if acc != "NONE" else "m-s-%04d" % s["counter"]
+    vram = {"T4": 15360, "L4": 23034, "G4": 97887, "H100": 81559}.get(acc)
+    if acc == "A100":
+        seq = s["knobs"]["a100_sequence"]
+        idx = s.setdefault("a100_count", 0)
+        vram = seq[min(idx, len(seq) - 1)]
+        s["a100_count"] = idx + 1
+    variant = "GPU" if acc in ("T4", "L4", "G4", "A100", "H100") else ("TPU" if acc.startswith("V") else "DEFAULT")
+    account_state(s, name)["assignments"][ep] = {
+        "accelerator": acc, "variant": variant, "shape": "HIGH_RAM" if high_mem else "STANDARD",
+        "vram": vram, "created": time.time(), "session": session,
+    }
+    return ep
+
+
+# ------------------------------------------------------------- fake colab_cli
+
+
+class _Named:
+    def __init__(self, name):
+        self.name = name
+        self.value = name
+
+
+class _Assignment:
+    def __init__(self, endpoint, a):
+        self.endpoint = endpoint
+        self.accelerator = _Named(a["accelerator"])
+        self.variant = _Named(a.get("variant", "GPU"))
+        self.machine_shape = _Named(a.get("shape", "STANDARD"))
+        # A host shaped like a real one; the token must never reach the app.
+        self.runtime_proxy_info = types.SimpleNamespace(
+            url=a.get("proxy_url", "https://8080-%s-b.us-west1.prod.r.colab.dev" % endpoint),
+            token="fake-proxy-token",
+        )
+
+
+class ColabRequestError(Exception):
+    def __init__(self, status):
+        super().__init__("HTTP %d" % status)
+        self.response = types.SimpleNamespace(status_code=status)
+
+
+class Prod:
+    pass
+
+
+class Client:
+    """`colab_cli.client.Client`, for the account helper and the fake CLI alike."""
+
+    def __init__(self, env, session, name=None):
+        # The helper passes an authorised session; the fake CLI, its signed-in account.
+        self.name = name or account_of_token({"token": session.creds.token})
+
+    def list_assignments(self):
+        a = account_state(server(), self.name)
+        return [_Assignment(ep, x) for ep, x in a["assignments"].items()]
+
+    def unassign(self, endpoint):
+        s = server()
+        a = account_state(s, self.name)
+        if endpoint not in a["assignments"]:
+            raise ColabRequestError(404)
+        del a["assignments"][endpoint]
+        save_server(s)
+
+    def assign(self, session, accelerator, high_mem=False):
+        """The fake CLI's only way to allocate a runtime, as the real `assign` is the real CLI's
+        (which takes a notebook hash and the runtime's shape instead of a session name)."""
+        s = server()
+        ep = allocate(s, self.name, session, accelerator, high_mem)
+        save_server(s)
+        return ep
+
+
+def run_cli():
+    """`colab_cli.cli.main`: runs the fake `colab`, which the fixture installs next to this file,
+    in this process with the current `sys.argv`."""
+    import runpy  # noqa: PLC0415
+
+    runpy.run_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "colab"), run_name="__main__")
+
+
 # ---------------------------------------------------------------- fake modules
 
 
@@ -178,7 +265,7 @@ class _FakeKeyringBackend:
 
 
 def install_fake_modules():
-    """Stand-ins for keyring, google-auth, requests and colab_cli.client."""
+    """Stand-ins for keyring, google-auth, requests, colab_cli.client and colab_cli.cli."""
 
     errors = types.ModuleType("keyring.errors")
 
@@ -308,55 +395,18 @@ def install_fake_modules():
         # a real installation can never be picked up instead.
         modules["colab_cli"] = None
         modules["colab_cli.client"] = None
+        modules["colab_cli.cli"] = None
     else:
         colab_cli = types.ModuleType("colab_cli")
         client = types.ModuleType("colab_cli.client")
-
-        class _Named:
-            def __init__(self, name):
-                self.name = name
-                self.value = name
-
-        class _Assignment:
-            def __init__(self, endpoint, a):
-                self.endpoint = endpoint
-                self.accelerator = _Named(a["accelerator"])
-                self.variant = _Named(a.get("variant", "GPU"))
-                self.machine_shape = _Named(a.get("shape", "STANDARD"))
-                # A host shaped like a real one; the token must never reach the app.
-                self.runtime_proxy_info = types.SimpleNamespace(
-                    url=a.get("proxy_url", "https://8080-%s-b.us-west1.prod.r.colab.dev" % endpoint),
-                    token="fake-proxy-token",
-                )
-
-        class ColabRequestError(Exception):
-            def __init__(self, status):
-                super().__init__("HTTP %d" % status)
-                self.response = types.SimpleNamespace(status_code=status)
-
-        class Prod:
-            pass
-
-        class Client:
-            def __init__(self, env, session):
-                self.name = account_of_token({"token": session.creds.token})
-
-            def list_assignments(self):
-                a = account_state(server(), self.name)
-                return [_Assignment(ep, x) for ep, x in a["assignments"].items()]
-
-            def unassign(self, endpoint):
-                s = server()
-                a = account_state(s, self.name)
-                if endpoint not in a["assignments"]:
-                    raise ColabRequestError(404)
-                del a["assignments"][endpoint]
-                save_server(s)
-
         client.Client = Client
         client.Prod = Prod
+        cli = types.ModuleType("colab_cli.cli")
+        cli.main = run_cli
         colab_cli.client = client
+        colab_cli.cli = cli
         modules["colab_cli"] = colab_cli
         modules["colab_cli.client"] = client
+        modules["colab_cli.cli"] = cli
 
     sys.modules.update(modules)

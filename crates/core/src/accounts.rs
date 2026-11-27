@@ -263,8 +263,10 @@ pub struct Helper {
 
 /// Starts the helper: a fixed loader reads `<len>\n<source>` from stdin and
 /// executes it, leaving the rest of stdin for values such as secrets (which
-/// therefore never appear in argv or the environment).
-const RUN_HELPER: &str = r#"exec "$CPG_PY" -c 'import sys
+/// therefore never appear in argv or the environment). `-P` keeps the working
+/// directory out of the module path, where a file such as `json.py` would stand
+/// in for the module of that name.
+const RUN_HELPER: &str = r#"exec "$CPG_PY" -P -c 'import sys
 n = int(sys.stdin.buffer.readline())
 src = sys.stdin.buffer.read(n)
 exec(compile(src, "account_helper.py", "exec"), {"__name__": "__main__"})' "$@""#;
