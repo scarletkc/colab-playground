@@ -10,6 +10,7 @@
 mod support;
 
 mod accounts;
+mod control;
 mod counts;
 mod defaults;
 mod feedback;

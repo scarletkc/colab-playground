@@ -211,6 +211,30 @@ pub fn is_launcher_argument(arg: &str) -> bool {
     cfg!(target_os = "macos") && arg.starts_with("-psn_")
 }
 
+/// Gives `colab-playground ctl` the console it was typed into. A Windows release build is a
+/// GUI-subsystem program, which starts with no console: what it prints to an interactive
+/// console is lost, while a pipe or a file it was handed works as it is. Elsewhere there is
+/// nothing to do.
+pub fn attach_console() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle as _;
+        if !std::io::stdout().as_raw_handle().is_null() {
+            return;
+        }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn AttachConsole(process: u32) -> i32;
+        }
+        const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
+        // SAFETY: AttachConsole takes a process id by value and touches no memory of ours. It
+        // fails harmlessly when the parent has no console, and output then stays lost as before.
+        unsafe {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
 /// The operating system and processor this build is for, as Rust names them (`windows,
 /// x86_64`), for a bug report.
 pub fn system() -> String {

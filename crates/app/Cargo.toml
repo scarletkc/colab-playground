@@ -37,6 +37,9 @@ anyhow = "1"
 dirs = "6"
 futures = "0.3"
 env_logger = "0.11"
+# The OS's random source, for the token of control from the command line. Already built for
+# gpui (through `rand`); std offers no cryptographic randomness.
+getrandom = "0.3"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

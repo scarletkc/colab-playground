@@ -80,6 +80,20 @@ pub(super) const MESSAGES: Messages = &[
         "저장되지 않음: 구성 폴더를 찾지 못했습니다.",
     ),
     (SETTINGS_FILE_OPEN, "폴더 열기"),
+    (SETTINGS_CONTROL_SECTION_TITLE, "명령줄"),
+    (
+        SETTINGS_CONTROL_SECTION_DESCRIPTION,
+        "이 컴퓨터의 스크립트와 AI 에이전트가 Colab Playground와 함께 작동하게 합니다.",
+    ),
+    (SETTINGS_CONTROL_TITLE, "명령줄에서 제어 허용"),
+    (
+        SETTINGS_CONTROL_DESCRIPTION,
+        "켜면 이 컴퓨터에서 직접 실행하는 프로그램이 colab-playground ctl 명령으로 계정, 런타임, 사용량을 이 창에 표시된 그대로 읽을 수 있습니다. 아무것도 변경할 수는 없습니다.",
+    ),
+    (
+        CONTROL_OFF,
+        "명령줄 제어가 꺼져 있습니다. {app}의 {page} → {section} → {setting}에서 켜십시오.",
+    ),
     (TOAST_OPEN_FOLDER_FAILED_TITLE, "폴더를 열지 못했습니다"),
     (TOAST_SAVE_FAILED_TITLE, "설정을 저장하지 못했습니다"),
     (TOAST_SETTINGS_RESET_TITLE, "설정이 초기화되었습니다"),

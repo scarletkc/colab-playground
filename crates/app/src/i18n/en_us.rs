@@ -83,6 +83,23 @@ pub(super) const MESSAGES: Messages = &[
         "Not saved: no configuration folder was found.",
     ),
     (SETTINGS_FILE_OPEN, "Open folder"),
+    (SETTINGS_CONTROL_SECTION_TITLE, "Command line"),
+    (
+        SETTINGS_CONTROL_SECTION_DESCRIPTION,
+        "Let scripts and AI agents on this computer work with Colab Playground.",
+    ),
+    (
+        SETTINGS_CONTROL_TITLE,
+        "Allow control from the command line",
+    ),
+    (
+        SETTINGS_CONTROL_DESCRIPTION,
+        "Programs you run on this computer can then read your accounts, runtimes and usage with the command colab-playground ctl, as this window shows them. They cannot change anything.",
+    ),
+    (
+        CONTROL_OFF,
+        "Control from the command line is turned off. Turn it on in {app}: {page} → {section} → {setting}.",
+    ),
     (TOAST_OPEN_FOLDER_FAILED_TITLE, "Couldn't open the folder"),
     (TOAST_SAVE_FAILED_TITLE, "Couldn't save settings"),
     (TOAST_SETTINGS_RESET_TITLE, "Settings were reset"),

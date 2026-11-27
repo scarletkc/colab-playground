@@ -92,6 +92,20 @@ pub(super) const MESSAGES: Messages = &[
         "保存されていません：構成フォルダーが見つかりませんでした。",
     ),
     (SETTINGS_FILE_OPEN, "フォルダーを開く"),
+    (SETTINGS_CONTROL_SECTION_TITLE, "コマンド ライン"),
+    (
+        SETTINGS_CONTROL_SECTION_DESCRIPTION,
+        "このコンピューターのスクリプトや AI エージェントが Colab Playground と連携できるようにします。",
+    ),
+    (SETTINGS_CONTROL_TITLE, "コマンド ラインからの操作を許可"),
+    (
+        SETTINGS_CONTROL_DESCRIPTION,
+        "オンにすると、このコンピューターであなたが実行するプログラムが colab-playground ctl コマンドで、アカウント、ランタイム、使用量をこのウィンドウの表示どおりに読み取れます。変更はできません。",
+    ),
+    (
+        CONTROL_OFF,
+        "コマンド ラインからの操作はオフになっています。{app} の {page} → {section} → {setting} でオンにしてください。",
+    ),
     (
         TOAST_OPEN_FOLDER_FAILED_TITLE,
         "フォルダーを開けませんでした",

@@ -6,6 +6,7 @@
 //! with a `CancelToken`, and applies the result on the foreground.
 
 mod accounts;
+mod control;
 mod defaults;
 mod environment;
 mod feedback;

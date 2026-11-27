@@ -1,7 +1,8 @@
 //! Which backend the UI talks to, and how it is built.
 //!
-//! `main` resolves the flags into a [`BackendSource`]; `AppState` turns that into an
-//! `Arc<dyn Backend>` once the settings (defaults, WSL distro, `colab` path) are loaded. Tests
+//! `main` resolves the flags into a [`Launch`], and only once this copy owns the state into a
+//! [`BackendSource`]; `AppState` turns that into an `Arc<dyn Backend>` once the settings
+//! (defaults, WSL distro, `colab` path) are loaded. Tests
 //! never come through here: the harness hands `AppState` a headless `MockBackend` directly.
 
 use std::{fmt, sync::Arc, time::Duration};
@@ -81,6 +82,13 @@ impl BackendKind {
             BackendKind::Mock
         } else {
             BackendKind::Real
+        }
+    }
+
+    pub fn flavor(self) -> Flavor {
+        match self {
+            BackendKind::Mock => Flavor::Mock,
+            BackendKind::Real => Flavor::Real,
         }
     }
 
@@ -193,9 +201,10 @@ impl MockFlags {
 /// How to call the program, printed with any argument error.
 pub fn usage() -> String {
     format!(
-        "usage: colab-playground [--real | --mock [--mock-scenario {}] [--mock-fail NAME[,NAME...]]]\n  --mock-fail names: {}",
+        "usage: colab-playground [--real | --mock [--mock-scenario {}] [--mock-fail NAME[,NAME...]]]\n  --mock-fail names: {}\n{}",
         names(SCENARIOS, "|"),
-        names(FAILURES, ", ")
+        names(FAILURES, ", "),
+        crate::control::ctl_usage()
     )
 }
 
@@ -232,22 +241,47 @@ pub fn check_args<S: AsRef<str>>(args: &[S]) -> Result<(), BackendError> {
     Ok(())
 }
 
-/// The backend the command line (and [`BACKEND_ENV`]) asks for, after checking every
+/// What the command line asks for, with every argument checked and nothing built yet: the
+/// app first finds out whether another copy already owns this state, and only the owner
+/// builds a backend.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Launch {
+    Mock(MockFlags),
+    Real,
+}
+
+impl Launch {
+    pub fn flavor(&self) -> Flavor {
+        match self {
+            Launch::Mock(_) => Flavor::Mock,
+            Launch::Real => Flavor::Real,
+        }
+    }
+
+    pub fn into_source(self) -> BackendSource {
+        match self {
+            Launch::Mock(flags) => BackendSource::interactive_mock(flags),
+            Launch::Real => BackendSource::Real,
+        }
+    }
+}
+
+/// The launch the command line (and [`BACKEND_ENV`]) asks for, after checking every
 /// argument. Simulation flags without the simulation are an error.
-pub fn source_from_args<S: AsRef<str>>(
+pub fn launch_from_args<S: AsRef<str>>(
     args: &[S],
     env: Option<&str>,
-) -> Result<BackendSource, BackendError> {
+) -> Result<Launch, BackendError> {
     check_args(args)?;
     match BackendKind::resolve(args, env)? {
-        BackendKind::Mock => Ok(BackendSource::interactive_mock(MockFlags::parse(args)?)),
+        BackendKind::Mock => Ok(Launch::Mock(MockFlags::parse(args)?)),
         BackendKind::Real => {
             for flag in VALUE_FLAGS {
                 if flag_value(args, flag).is_some() {
                     return Err(BackendError::MockFlagWithoutMock(flag));
                 }
             }
-            Ok(BackendSource::Real)
+            Ok(Launch::Real)
         }
     }
 }
@@ -369,7 +403,7 @@ mod tests {
 
     #[test]
     fn unknown_arguments_and_missing_values_are_errors() {
-        use super::{BackendSource, check_args, source_from_args};
+        use super::{Launch, check_args, launch_from_args};
         assert_eq!(
             check_args(&["--mok"]),
             Err(BackendError::UnknownArgument("--mok".into())),
@@ -420,24 +454,24 @@ mod tests {
 
         // Simulation flags without the simulation would start the real backend.
         assert!(matches!(
-            source_from_args(&["--mock-scenario", "single"], Some("real")),
+            launch_from_args(&["--mock-scenario", "single"], Some("real")),
             Err(BackendError::MockFlagWithoutMock("--mock-scenario"))
         ));
         assert!(matches!(
-            source_from_args(&["--mok"], None),
+            launch_from_args(&["--mok"], None),
             Err(BackendError::UnknownArgument(_))
         ));
         assert!(matches!(
-            source_from_args(&["--mock", "--mock-scenario", "nope"], None),
+            launch_from_args(&["--mock", "--mock-scenario", "nope"], None),
             Err(BackendError::UnknownScenario(_))
         ));
         assert!(matches!(
-            source_from_args(&["--real"], None),
-            Ok(BackendSource::Real)
+            launch_from_args(&["--real"], None),
+            Ok(Launch::Real)
         ));
         assert!(matches!(
-            source_from_args(&["--mock-scenario", "single"], Some("mock")),
-            Ok(BackendSource::Mock(_))
+            launch_from_args(&["--mock-scenario", "single"], Some("mock")),
+            Ok(Launch::Mock(_))
         ));
     }
 

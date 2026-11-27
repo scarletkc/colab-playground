@@ -499,6 +499,9 @@ impl AppState {
         if self.ops.delaying_restart() || self.ops.is_running(Op::UpdateRestart) {
             return;
         }
+        // The new version starts while this one still owns the state: told that this one is
+        // quitting, it waits for the lock instead of bringing this window forward and ending.
+        crate::control::mark_quitting(true, cx);
         self.run_backend(
             Op::UpdateRestart,
             cx,
@@ -511,6 +514,7 @@ impl AppState {
                 }
                 Err(error) => {
                     log::error!("updates: starting the new version failed: {error}");
+                    crate::control::mark_quitting(false, cx);
                     state.installed = None;
                     if let Some(phase) = state.update_phase_mut() {
                         *phase = UpdatePhase::RestartFailed(error);

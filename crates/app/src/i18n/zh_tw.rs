@@ -79,6 +79,20 @@ pub(super) const MESSAGES: Messages = &[
     (SETTINGS_FILE_TITLE, "設定檔"),
     (SETTINGS_FILE_UNSAVED, "未儲存：找不到設定資料夾。"),
     (SETTINGS_FILE_OPEN, "開啟資料夾"),
+    (SETTINGS_CONTROL_SECTION_TITLE, "命令列"),
+    (
+        SETTINGS_CONTROL_SECTION_DESCRIPTION,
+        "讓這台電腦上的指令碼和 AI 代理程式與 Colab Playground 協同運作。",
+    ),
+    (SETTINGS_CONTROL_TITLE, "允許從命令列控制"),
+    (
+        SETTINGS_CONTROL_DESCRIPTION,
+        "開啟後，你在這台電腦上執行的程式可以用 colab-playground ctl 指令讀取帳號、執行階段和用量，內容與此視窗顯示的相同。它們無法變更任何內容。",
+    ),
+    (
+        CONTROL_OFF,
+        "命令列控制已關閉。請在 {app} 中開啟：{page} → {section} → {setting}。",
+    ),
     (TOAST_OPEN_FOLDER_FAILED_TITLE, "無法開啟資料夾"),
     (TOAST_SAVE_FAILED_TITLE, "無法儲存設定"),
     (TOAST_SETTINGS_RESET_TITLE, "設定已重設"),

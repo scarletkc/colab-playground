@@ -74,6 +74,20 @@ pub(super) const MESSAGES: Messages = &[
     (SETTINGS_FILE_TITLE, "设置文件"),
     (SETTINGS_FILE_UNSAVED, "未保存：找不到配置文件夹。"),
     (SETTINGS_FILE_OPEN, "打开文件夹"),
+    (SETTINGS_CONTROL_SECTION_TITLE, "命令行"),
+    (
+        SETTINGS_CONTROL_SECTION_DESCRIPTION,
+        "让这台电脑上的脚本和 AI 智能体与 Colab Playground 协作。",
+    ),
+    (SETTINGS_CONTROL_TITLE, "允许通过命令行控制"),
+    (
+        SETTINGS_CONTROL_DESCRIPTION,
+        "开启后，你在这台电脑上运行的程序可以用 colab-playground ctl 命令读取账号、运行时和用量，内容与此窗口显示的一致。它们无法更改任何内容。",
+    ),
+    (
+        CONTROL_OFF,
+        "命令行控制已关闭。请在 {app} 中开启：{page} → {section} → {setting}。",
+    ),
     (TOAST_OPEN_FOLDER_FAILED_TITLE, "无法打开文件夹"),
     (TOAST_SAVE_FAILED_TITLE, "无法保存设置"),
     (TOAST_SETTINGS_RESET_TITLE, "设置已重置"),
