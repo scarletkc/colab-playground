@@ -162,9 +162,9 @@ pub struct Settings {
     /// it opens the app's view of the accounts to any program the user runs.
     #[serde(default, deserialize_with = "lenient")]
     pub allow_cli_control: bool,
-    /// `colab-playground ctl` may also start and stop runtimes, which bills. A separate switch,
-    /// so a copy that only allowed reading stays read-only; it counts only together with
-    /// `allow_cli_control`.
+    /// `colab-playground ctl` may also change things, such as starting a runtime, which bills.
+    /// A separate switch, so a copy that only allowed reading stays read-only; it counts only
+    /// together with `allow_cli_control`.
     #[serde(default, deserialize_with = "lenient")]
     pub allow_cli_changes: bool,
 }

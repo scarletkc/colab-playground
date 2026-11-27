@@ -2174,6 +2174,7 @@ impl RealBackend {
         Ok(Extension {
             runtime,
             watchdog: info,
+            set_at: now,
         })
     }
 

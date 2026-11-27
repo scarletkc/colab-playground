@@ -89,10 +89,10 @@ pub(super) const MESSAGES: Messages = &[
         SETTINGS_CONTROL_DESCRIPTION,
         "開啟後，你在這台電腦上執行的程式可以用 colab-playground ctl 指令讀取帳號、執行階段和用量，內容與此視窗顯示的相同。只開啟這一項時，它們無法變更任何內容。",
     ),
-    (SETTINGS_CONTROL_CHANGES_TITLE, "同時允許啟動和停止執行階段"),
+    (SETTINGS_CONTROL_CHANGES_TITLE, "同時允許變更"),
     (
         SETTINGS_CONTROL_CHANGES_DESCRIPTION,
-        "開啟後，這些程式可以在目前帳號上啟動執行階段（執行階段在停止前會一直消耗運算單元），也可以停止任何已儲存帳號上的執行階段。你的預設值和限制仍然適用，且只能在此視窗中變更。",
+        "開啟後，這些程式可以在目前帳號上啟動執行階段、延長其自動停止時間、轉送其連接埠，也可以停止任何已儲存帳號上的執行階段。執行階段在停止前會一直消耗運算單元。你的預設值和限制仍然適用，且只能在此視窗中變更。",
     ),
     (
         CONTROL_OFF,
@@ -100,11 +100,23 @@ pub(super) const MESSAGES: Messages = &[
     ),
     (
         CONTROL_CHANGES_OFF,
-        "從命令列啟動和停止執行階段已關閉。請在 {app} 中開啟：{page} → {section} → {setting}。",
+        "從命令列進行變更已關閉。請在 {app} 中開啟：{page} → {section} → {setting}。",
     ),
     (CTL_STARTING_TOAST, "正在依命令列的要求啟動 {name}"),
     (CTL_STOPPING_TOAST, "正在依命令列的要求停止 {name}"),
     (CTL_CANCELLING_TOAST, "正在依命令列的要求取消啟動 {name}"),
+    (
+        CTL_EXTENDING_TOAST,
+        "正在依命令列的要求延長 {name} 的自動停止時間",
+    ),
+    (
+        CTL_FORWARDING_TOAST,
+        "正在依命令列的要求轉送 {name} 的連接埠 {port}",
+    ),
+    (
+        CTL_CLOSING_FORWARD_TOAST,
+        "正在依命令列的要求關閉 localhost:{port} 上的轉送",
+    ),
     (TOAST_OPEN_FOLDER_FAILED_TITLE, "無法開啟資料夾"),
     (TOAST_SAVE_FAILED_TITLE, "無法儲存設定"),
     (TOAST_SETTINGS_RESET_TITLE, "設定已重設"),

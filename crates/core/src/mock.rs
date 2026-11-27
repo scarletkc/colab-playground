@@ -1218,6 +1218,7 @@ impl MockBackend {
         Ok(Extension {
             runtime,
             watchdog: info,
+            set_at: now,
         })
     }
 }
@@ -3313,6 +3314,7 @@ mod tests {
         let (rt, wd) = tracked_watchdog(&m, "t4-ext");
         assert_eq!(wd, set.watchdog);
         assert_eq!(rt.auto_stop_at, Some(first_stop + 2 * hour));
+        assert_eq!(Some(set.auto_stop_at()), rt.auto_stop_at);
 
         // Setting an auto-stop counts from now, whatever time was left.
         let info = m.set_auto_stop(&rt.id, hour, &nc()).unwrap();
@@ -3331,6 +3333,18 @@ mod tests {
         let set = m.extend_session(&rt.id, hour, &nc()).unwrap();
         assert_eq!(set.runtime, hour);
         assert_eq!(set.watchdog.deadline, Some(m.now() + hour));
+
+        // A stop only the app holds counts from when it was set, however late it is read.
+        m.cancel_auto_stop(&rt.id, &nc()).unwrap();
+        m.set_failures(MockFailures {
+            watchdog_restart_fails: true,
+            ..MockFailures::default()
+        });
+        let set = m.extend_session(&rt.id, hour, &nc()).unwrap();
+        assert!(!set.watchdog.armed);
+        clock.advance(hour / 4);
+        let (rt, _) = tracked_watchdog(&m, "t4-ext");
+        assert_eq!(Some(set.auto_stop_at()), rt.auto_stop_at);
     }
 
     #[test]

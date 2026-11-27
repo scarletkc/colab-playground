@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use colab_playground::{
     control::{
-        self, CancelArgs, Claim, Code, Command, OperationArgs, Owner, Response, StartArgs, StopArgs,
+        self, CancelArgs, Claim, CloseForwardArgs, Code, Command, ExtendArgs, ForwardArgs,
+        OperationArgs, Owner, Response, StartArgs, StopArgs,
     },
     i18n::{self, keys},
     route::Route,
@@ -422,13 +423,19 @@ fn a_restart_that_failed_shows_the_window_again(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_copy_that_only_allowed_reading_changes_nothing(cx: &mut TestAppContext) {
-    // As a settings file from before starting and stopping could be allowed.
+    // As a settings file from before changes could be allowed.
     let mut app = TestApp::with(cx, allowed(MockScenario::demo()));
     for command in [
         start(None, None, false),
         start(Some(Accelerator::T4), None, true),
         stop("a100-7f3a", None, false),
         stop("a100-7f3a", None, true),
+        extend("a100-7f3a", None, false),
+        extend("a100-7f3a", None, true),
+        forward("a100-7f3a", None, None, false),
+        forward("a100-7f3a", None, None, true),
+        close_forward(8000, false),
+        close_forward(8000, true),
         cancel("anything", true),
     ] {
         let response = ask(&mut app, command.clone());
@@ -447,6 +454,10 @@ fn a_copy_that_only_allowed_reading_changes_nothing(cx: &mut TestAppContext) {
     assert!(!app.read(|state, _| state.is_provisioning()));
     app.settle();
     assert_eq!(listed(&mut app).len(), 4, "nothing was stopped");
+    assert!(
+        app.read(|state, _| state.tunnels().next().is_none()),
+        "nothing was forwarded"
+    );
     assert!(ask(&mut app, Command::Sessions).ok, "reading still works");
     assert_eq!(
         refusal(ask(&mut app, operation("anything"))),
@@ -456,7 +467,7 @@ fn a_copy_that_only_allowed_reading_changes_nothing(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn starting_and_stopping_are_a_second_step_in_settings(cx: &mut TestAppContext) {
+fn changes_are_a_second_step_in_settings(cx: &mut TestAppContext) {
     let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
     app.click(Route::Settings.nav_selector());
     app.click(CONTROL_CHANGES_SELECTOR);
@@ -484,22 +495,20 @@ fn starting_and_stopping_are_a_second_step_in_settings(cx: &mut TestAppContext) 
         app.saved_settings()
             .map(|settings| (settings.allow_cli_control, settings.allow_cli_changes)),
         Some((false, false)),
-        "turning control off takes starting and stopping back"
+        "turning control off takes changes back"
     );
     app.click(CONTROL_SELECTOR);
     assert_eq!(
         refusal(ask(&mut app, start(None, None, false))),
         Code::ChangesOff,
-        "turned on again, it reads only until starting and stopping are allowed again too"
+        "turned on again, it reads only until changes are allowed again too"
     );
 }
 
-/// The file can hold this: one copy of the app allowed starting and stopping, and another that
-/// had loaded before turned control off, which writes that one field.
+/// The file can hold this: one copy of the app allowed changes, and another that had loaded
+/// before turned control off, which writes that one field.
 #[gpui::test]
-fn allowing_control_never_brings_back_an_older_yes_to_starting_and_stopping(
-    cx: &mut TestAppContext,
-) {
+fn allowing_control_never_brings_back_an_older_yes_to_changes(cx: &mut TestAppContext) {
     let left_over = r#"{ "allow_cli_control": false, "allow_cli_changes": true }"#;
     let mut app = TestApp::with(cx, changes_allowed(left_over, MockScenario::single()));
     assert!(!app.read(|state, _| state.allows_cli_changes()));
@@ -1056,5 +1065,406 @@ fn what_is_not_loaded_yet_is_not_ready_rather_than_absent(cx: &mut TestAppContex
         refusal(answer(cx, stop("a100-7f3a", None, true))),
         Code::NotReady,
         "not that no such runtime exists"
+    );
+    assert_eq!(
+        refusal(answer(cx, extend("a100-7f3a", None, true))),
+        Code::NotReady
+    );
+    assert_eq!(
+        refusal(answer(cx, forward("a100-7f3a", None, None, true))),
+        Code::NotReady
+    );
+}
+
+fn extend(runtime: &str, account: Option<&str>, yes: bool) -> Command {
+    Command::Extend(ExtendArgs {
+        runtime: runtime.into(),
+        account: account.map(str::to_owned),
+        yes,
+    })
+}
+
+fn forward(runtime: &str, remote: Option<u16>, local: Option<u16>, yes: bool) -> Command {
+    Command::Forward(ForwardArgs {
+        runtime: runtime.into(),
+        account: None,
+        remote_port: remote,
+        local_port: local,
+        health_path: None,
+        yes,
+    })
+}
+
+fn close_forward(local_port: u16, yes: bool) -> Command {
+    Command::CloseForward(CloseForwardArgs { local_port, yes })
+}
+
+/// A runtime as `sessions` lists it.
+fn listed_runtime(app: &mut TestApp<'_>, label: &str) -> Value {
+    listed(app)
+        .into_iter()
+        .find(|runtime| runtime["label"] == label)
+        .unwrap_or_else(|| panic!("{label} is listed"))
+}
+
+/// The endpoint of the demo's runtime opened in the browser, which has no name.
+fn browser_runtime(app: &mut TestApp<'_>) -> String {
+    listed(app)
+        .iter()
+        .find(|runtime| runtime["id"]["name"].is_null())
+        .and_then(|runtime| runtime["id"]["endpoint"].as_str())
+        .expect("the runtime opened in the browser")
+        .to_owned()
+}
+
+fn toast_with(app: &mut TestApp<'_>, key: &str, args: &[(&str, &str)]) -> gpui::SharedString {
+    app.cx.update(|_, cx| i18n::tr_args(cx, key, args))
+}
+
+#[gpui::test]
+fn an_extension_moves_the_auto_stop_as_the_card_does(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, changes_allowed(CHANGES_ALLOWED, MockScenario::demo()));
+    on_sessions(&mut app);
+    let at = listed_runtime(&mut app, "a100-7f3a")["auto_stop_at"]
+        .as_u64()
+        .expect("an auto-stop");
+    let preview = data(ask(&mut app, extend("a100-7f3a", None, false)));
+    let preview = &preview["preview"];
+    assert_eq!(preview["runtime"]["label"], "a100-7f3a");
+    assert_eq!(preview["runtime"]["auto_stop_at"], at);
+    assert_eq!(
+        preview["extend_by"], 7200,
+        "what Extend adds: the default runtime limit"
+    );
+    app.settle();
+    assert_eq!(
+        listed_runtime(&mut app, "a100-7f3a")["auto_stop_at"],
+        at,
+        "a preview moves nothing"
+    );
+
+    let (extending, id) = followed(ask(&mut app, extend("a100-7f3a", None, true)));
+    assert_eq!(extending["kind"], "extend");
+    assert_eq!(extending["state"], "running");
+    assert_eq!(extending["runtime"]["label"], "a100-7f3a");
+    assert_eq!(extending["runtime"]["id"]["name"], "a100-7f3a");
+    assert_eq!(extending["extend_by"], 7200);
+    assert_eq!(extending["outcome"], Value::Null);
+    assert_eq!(extending["account"]["email"], "ada@example.com");
+    let notice = toast_text(&mut app, keys::CTL_EXTENDING_TOAST, "a100-7f3a");
+    assert!(app.toasts().contains(&notice));
+    assert_eq!(
+        refusal(ask(&mut app, extend("a100-7f3a", None, true))),
+        Code::AutoStopChanging,
+        "the window's own extension runs, and a second one is refused, not queued"
+    );
+    assert_eq!(
+        refusal(ask(&mut app, cancel(&id, true))),
+        Code::NotCancellable
+    );
+
+    app.settle();
+    let (ended, _) = followed(ask(&mut app, operation(&id)));
+    assert_eq!(ended["state"], "succeeded", "{ended}");
+    let moved = ended["outcome"]["auto_stop_at"]
+        .as_u64()
+        .expect("the new auto-stop");
+    assert_eq!(moved, at + 7200, "{ended}");
+    assert_eq!(
+        ended["outcome"]["auto_stop_on_runtime_at"], moved,
+        "the runtime stops itself then, also with the app closed"
+    );
+    let listed = listed_runtime(&mut app, "a100-7f3a");
+    assert_eq!(listed["auto_stop_at"], moved, "as `sessions` lists it");
+    assert_eq!(listed["auto_stop_on_runtime_at"], moved);
+}
+
+#[gpui::test]
+fn an_extension_the_runtime_could_not_take_says_so(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, changes_allowed(CHANGES_ALLOWED, MockScenario::demo()));
+    let a100 = app.read(|state, _| {
+        state
+            .runtimes()
+            .ready()
+            .and_then(|view| {
+                view.runtimes
+                    .iter()
+                    .find(|runtime| runtime.id.name.as_deref() == Some("a100-7f3a"))
+            })
+            .map(|runtime| runtime.id.clone())
+            .expect("the A100 session")
+    });
+    // Cancelled, then set again in the window while the watchdog cannot start: the stop is
+    // the app's alone.
+    app.update(|state, cx| state.cancel_auto_stop(a100.clone(), cx));
+    app.set_failures(MockFailures {
+        watchdog_restart_fails: true,
+        ..MockFailures::default()
+    });
+    app.update(|state, cx| state.set_auto_stop(a100, cx));
+    let listed = listed_runtime(&mut app, "a100-7f3a");
+    assert!(listed["auto_stop_at"].is_u64(), "{listed}");
+    assert_eq!(listed["auto_stop_on_runtime_at"], Value::Null);
+
+    let (_, id) = followed(ask(&mut app, extend("a100-7f3a", None, true)));
+    app.settle();
+    let (ended, _) = followed(ask(&mut app, operation(&id)));
+    assert_eq!(ended["state"], "succeeded", "{ended}");
+    assert!(ended["outcome"]["auto_stop_at"].is_u64(), "{ended}");
+    assert_eq!(
+        ended["outcome"]["auto_stop_on_runtime_at"],
+        Value::Null,
+        "the stop holds only while the app runs, and the answer says so"
+    );
+}
+
+#[gpui::test]
+fn an_extension_is_refused_where_the_card_offers_none(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, changes_allowed(CHANGES_ALLOWED, MockScenario::demo()));
+    assert_eq!(
+        refusal(ask(&mut app, extend("cpu-0b5e", None, false))),
+        Code::AccountNotActive,
+        "the card offers to switch instead"
+    );
+    let endpoint = browser_runtime(&mut app);
+    assert_eq!(
+        refusal(ask(&mut app, extend(&endpoint, None, true))),
+        Code::NoAutoStop,
+        "opened in the browser: this app has no auto-stop on it"
+    );
+    assert_eq!(
+        refusal(ask(&mut app, extend("nothing-here", None, true))),
+        Code::NoSuchRuntime
+    );
+
+    let t4 = app.read(|state, _| {
+        state
+            .runtimes()
+            .ready()
+            .and_then(|view| {
+                view.runtimes
+                    .iter()
+                    .find(|runtime| runtime.id.name.as_deref() == Some("t4-91c2"))
+            })
+            .map(|runtime| runtime.id.clone())
+            .expect("the T4 session")
+    });
+    // Without settling, so the cancel is still under way.
+    let state = app.state.clone();
+    app.cx
+        .update(|_, cx| state.update(cx, |state, cx| state.cancel_auto_stop(t4, cx)));
+    assert_eq!(
+        refusal(ask(&mut app, extend("t4-91c2", None, true))),
+        Code::AutoStopChanging,
+        "the window is cancelling it"
+    );
+    app.settle();
+    assert_eq!(
+        refusal(ask(&mut app, extend("t4-91c2", None, true))),
+        Code::NoAutoStop,
+        "setting one again is the window's \"Set auto-stop\", not an extension"
+    );
+
+    ask(&mut app, stop("a100-7f3a", None, true));
+    assert_eq!(
+        refusal(ask(&mut app, extend("a100-7f3a", None, true))),
+        Code::AlreadyStopping
+    );
+    assert_eq!(
+        refusal(ask(&mut app, forward("a100-7f3a", None, None, true))),
+        Code::AlreadyStopping
+    );
+    app.settle();
+
+    let lin = app.read(|state, _| {
+        state
+            .accounts()
+            .ready()
+            .and_then(|view| {
+                view.accounts
+                    .iter()
+                    .find(|account| account.email.as_deref() == Some("lin@example.com"))
+                    .map(|account| account.id.clone())
+            })
+            .expect("the second account")
+    });
+    // The switch dialog lists the forwards that will close as they were when it opened.
+    app.update(|state, cx| state.request_switch(lin, cx));
+    assert_eq!(
+        refusal(ask(&mut app, forward("t4-91c2", None, None, false))),
+        Code::AccountChanging
+    );
+    app.update(|state, cx| state.close_dialog(cx));
+    app.update(|state, cx| state.request_quit(cx));
+    assert_eq!(
+        refusal(ask(&mut app, forward("t4-91c2", None, None, false))),
+        Code::Quitting
+    );
+    assert_eq!(
+        refusal(ask(&mut app, close_forward(8000, true))),
+        Code::Quitting
+    );
+}
+
+#[gpui::test]
+fn a_forward_shows_in_the_window_and_ends_once_it_is_up(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, changes_allowed(CHANGES_ALLOWED, MockScenario::demo()));
+    on_sessions(&mut app);
+    let preview = data(ask(&mut app, forward("a100-7f3a", None, None, false)));
+    let preview = &preview["preview"];
+    assert_eq!(preview["runtime"]["label"], "a100-7f3a");
+    assert_eq!(
+        preview["forward"],
+        serde_json::json!({
+            "session": "a100-7f3a",
+            "remote_port": 8000,
+            "local_port": 8000,
+            "health_path": null,
+            "url": "http://localhost:8000"
+        }),
+        "the ports the window's dialog starts with"
+    );
+    assert!(
+        app.read(|state, _| state.tunnels().next().is_none()),
+        "a preview opens nothing"
+    );
+
+    let (opening, id) = followed(ask(&mut app, forward("a100-7f3a", Some(7860), None, true)));
+    assert_eq!(opening["kind"], "forward");
+    assert_eq!(opening["state"], "running");
+    assert_eq!(opening["account"]["email"], "ada@example.com");
+    assert_eq!(
+        opening["forward"]["local_port"], 7860,
+        "the same port on this computer"
+    );
+    let notice = toast_with(
+        &mut app,
+        keys::CTL_FORWARDING_TOAST,
+        &[("name", "a100-7f3a"), ("port", "7860")],
+    );
+    assert!(app.toasts().contains(&notice));
+    assert_eq!(
+        refusal(ask(
+            &mut app,
+            forward("a100-7f3a", Some(7860), Some(17860), true)
+        )),
+        Code::AlreadyForwarding,
+        "refused, not queued"
+    );
+    assert_eq!(
+        refusal(ask(&mut app, cancel(&id, true))),
+        Code::NotCancellable
+    );
+
+    app.settle();
+    let (up, _) = followed(ask(&mut app, operation(&id)));
+    assert_eq!(up["state"], "succeeded", "{up}");
+    assert_eq!(up["forward"]["url"], "http://localhost:7860");
+    let tunnels = listed_runtime(&mut app, "a100-7f3a")["tunnels"].clone();
+    assert_eq!(tunnels[0]["state"]["state"], "up", "{tunnels}");
+    assert_eq!(tunnels[0]["spec"]["local_port"], 7860);
+    assert_eq!(tunnels[0]["spec"]["remote_port"], 7860);
+    app.draw_now();
+    assert!(app.shown("tunnel-close 7860"), "the card shows it");
+
+    assert_eq!(
+        refusal(ask(&mut app, forward("t4-91c2", None, Some(7860), false))),
+        Code::PortInUse,
+        "one forward per port of this computer"
+    );
+    assert_eq!(
+        refusal(ask(&mut app, forward("t4-91c2", Some(8080), None, false))),
+        Code::InvalidRequest,
+        "the runtime's port 8080 is Colab's"
+    );
+    let endpoint = browser_runtime(&mut app);
+    assert_eq!(
+        refusal(ask(&mut app, forward(&endpoint, None, None, false))),
+        Code::UnnamedRuntime
+    );
+    assert_eq!(
+        refusal(ask(&mut app, forward("cpu-0b5e", None, None, false))),
+        Code::AccountNotActive
+    );
+}
+
+#[gpui::test]
+fn a_forward_that_fails_is_a_failed_operation(cx: &mut TestAppContext) {
+    let options = Options {
+        failures: MockFailures {
+            ssh_busy_attempts: 1,
+            ..MockFailures::default()
+        },
+        ..changes_allowed(CHANGES_ALLOWED, MockScenario::demo())
+    };
+    let mut app = TestApp::with(cx, options);
+    let (_, id) = followed(ask(&mut app, forward("a100-7f3a", None, None, true)));
+    app.settle();
+    let (failed, _) = followed(ask(&mut app, operation(&id)));
+    assert_eq!(failed["state"], "failed", "{failed}");
+    assert_eq!(failed["error"]["kind"], "ssh_busy");
+    assert_eq!(
+        listed_runtime(&mut app, "a100-7f3a")["tunnels"],
+        serde_json::json!([]),
+        "as in the window, a forward that failed at once is not kept"
+    );
+    let (_, again) = followed(ask(&mut app, forward("a100-7f3a", None, None, true)));
+    app.settle();
+    assert_eq!(
+        followed(ask(&mut app, operation(&again))).0["state"],
+        "succeeded"
+    );
+}
+
+#[gpui::test]
+fn closing_a_forward_leaves_the_runtime_billing(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, changes_allowed(CHANGES_ALLOWED, MockScenario::demo()));
+    on_sessions(&mut app);
+    ask(&mut app, forward("a100-7f3a", None, None, true));
+    app.settle();
+    let preview = data(ask(&mut app, close_forward(8000, false)));
+    let preview = &preview["preview"];
+    assert_eq!(preview["stops_billing"], false);
+    assert_eq!(preview["forward"]["state"]["state"], "up");
+    assert_eq!(preview["forward"]["spec"]["session"], "a100-7f3a");
+    assert_eq!(preview["forward"]["url"], "http://localhost:8000");
+    assert_eq!(
+        refusal(ask(&mut app, close_forward(8001, true))),
+        Code::NoSuchForward
+    );
+
+    let (closing, id) = followed(ask(&mut app, close_forward(8000, true)));
+    assert_eq!(closing["kind"], "close_forward");
+    assert_eq!(closing["state"], "running");
+    assert_eq!(closing["forward"]["session"], "a100-7f3a");
+    assert_eq!(closing["account"]["email"], "ada@example.com");
+    let notice = toast_with(
+        &mut app,
+        keys::CTL_CLOSING_FORWARD_TOAST,
+        &[("port", "8000")],
+    );
+    assert!(app.toasts().contains(&notice));
+    assert_eq!(
+        refusal(ask(&mut app, close_forward(8000, true))),
+        Code::AlreadyClosing
+    );
+
+    app.settle();
+    assert_eq!(
+        followed(ask(&mut app, operation(&id))).0["state"],
+        "succeeded"
+    );
+    assert_eq!(
+        listed_runtime(&mut app, "a100-7f3a")["tunnels"],
+        serde_json::json!([])
+    );
+    let closed = app.text(keys::FORWARD_CLOSED);
+    assert!(
+        app.toasts().contains(&closed),
+        "the window says that the runtime keeps billing"
+    );
+    assert_eq!(
+        refusal(ask(&mut app, close_forward(8000, true))),
+        Code::NoSuchForward
     );
 }

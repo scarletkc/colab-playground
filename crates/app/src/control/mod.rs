@@ -59,6 +59,9 @@ pub enum Command {
     Usage,
     Start(StartArgs),
     Stop(StopArgs),
+    Extend(ExtendArgs),
+    Forward(ForwardArgs),
+    CloseForward(CloseForwardArgs),
     Operation(OperationArgs),
     Cancel(CancelArgs),
 }
@@ -81,6 +84,9 @@ impl Command {
             Command::Usage => "usage",
             Command::Start(_) => "start",
             Command::Stop(_) => "stop",
+            Command::Extend(_) => "extend",
+            Command::Forward(_) => "forward",
+            Command::CloseForward(_) => "close-forward",
             Command::Operation(_) => "operation",
             Command::Cancel(_) => "cancel",
         }
@@ -91,7 +97,12 @@ impl Command {
     pub fn changes(&self) -> bool {
         matches!(
             self,
-            Command::Start(_) | Command::Stop(_) | Command::Cancel(_)
+            Command::Start(_)
+                | Command::Stop(_)
+                | Command::Extend(_)
+                | Command::Forward(_)
+                | Command::CloseForward(_)
+                | Command::Cancel(_)
         )
     }
 }
@@ -120,6 +131,50 @@ pub struct StopArgs {
     /// An account's email or id, for a name that more than one account has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    #[serde(default)]
+    pub yes: bool,
+}
+
+/// Moves a runtime's auto-stop later by what the window's Extend adds; the caller chooses no
+/// amount, so no extension goes beyond what a click would.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtendArgs {
+    /// A session name or an endpoint, as `sessions` lists them.
+    pub runtime: String,
+    /// An account's email or id, for a name that more than one account has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    #[serde(default)]
+    pub yes: bool,
+}
+
+/// Forwards a port of a runtime on the active account to this computer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForwardArgs {
+    pub runtime: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    /// The port on the runtime. `None`: the one the window's dialog starts with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_port: Option<u16>,
+    /// The port on this computer. `None`: the same number as on the runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_port: Option<u16>,
+    /// A path the app checks through the forward, as the dialog's health check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_path: Option<String>,
+    #[serde(default)]
+    pub yes: bool,
+}
+
+/// Closes the forward that listens on a port of this computer. Its runtime keeps running and
+/// billing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloseForwardArgs {
+    pub local_port: u16,
     #[serde(default)]
     pub yes: bool,
 }
@@ -172,7 +227,7 @@ pub enum Code {
     WrongBackend,
     /// The user has not allowed control from the command line.
     ControlOff,
-    /// The user allows reading but not starting and stopping runtimes.
+    /// The user allows reading but not changing anything.
     ChangesOff,
     /// The owner is on its way out (closing, or restarting into an update).
     Quitting,
@@ -194,15 +249,33 @@ pub enum Code {
     /// More than one listed runtime has that name or endpoint.
     AmbiguousRuntime,
     AlreadyStopping,
+    /// Extending and forwarding need the runtime's account to be the active one.
+    AccountNotActive,
+    /// The runtime has no auto-stop to extend: it was opened elsewhere, or its auto-stop is off.
+    NoAutoStop,
+    /// The runtime's auto-stop is being extended, set or cancelled already.
+    AutoStopChanging,
+    /// The runtime has no session name to forward it by (it was opened in the browser).
+    UnnamedRuntime,
+    /// Another forward of the app listens on that port of this computer.
+    PortInUse,
+    /// That port of that runtime is being forwarded already.
+    AlreadyForwarding,
+    /// No forward listens on that port of this computer.
+    NoSuchForward,
+    /// More than one forward is listed on that port of this computer.
+    AmbiguousForward,
+    /// That forward is being closed already.
+    AlreadyClosing,
     /// This run of the app has no operation with that id (it never had, forgot it, or the id
     /// is from before the app restarted).
     UnknownOperation,
     OperationEnded,
-    /// A stop cannot be cancelled.
+    /// Only a start can be cancelled.
     NotCancellable,
 }
 
-/// Where an operation that `start` or `stop` began stands.
+/// Where an operation that a command that changes something began stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationState {
@@ -342,7 +415,8 @@ mod tests {
     use colab_playground_core::{backend::BackendKind as Flavor, sessions::Accelerator};
 
     use super::{
-        Code, Command, Request, Response, StartArgs, StopArgs, Token, endpoint_file, lock_file,
+        CloseForwardArgs, Code, Command, ForwardArgs, Request, Response, StartArgs, StopArgs,
+        Token, endpoint_file, lock_file,
     };
 
     #[test]
@@ -393,11 +467,40 @@ mod tests {
             }),
             "without yes it is a preview"
         );
+        let forward: Command = serde_json::from_str(
+            r#"{"command":"forward","args":{"runtime":"a100-7f3a","remote_port":8000}}"#,
+        )
+        .expect("parses");
+        assert_eq!(
+            forward,
+            Command::Forward(ForwardArgs {
+                runtime: "a100-7f3a".into(),
+                account: None,
+                remote_port: Some(8000),
+                local_port: None,
+                health_path: None,
+                yes: false,
+            })
+        );
+        let close: Command = serde_json::from_str(
+            r#"{"command":"close_forward","args":{"local_port":8000,"yes":true}}"#,
+        )
+        .expect("parses");
+        assert_eq!(
+            close,
+            Command::CloseForward(CloseForwardArgs {
+                local_port: 8000,
+                yes: true,
+            })
+        );
         for refused in [
             r#"{"command":"stop","args":{"runtime":"t4-91c2","force":true}}"#,
             r#"{"command":"stop"}"#,
             r#"{"command":"start","args":{"yes":"true"}}"#,
             r#"{"command":"status","args":{"account":"lin"}}"#,
+            r#"{"command":"extend","args":{"runtime":"a100-7f3a","by":86400}}"#,
+            r#"{"command":"forward","args":{"runtime":"a100-7f3a","remote_port":70000}}"#,
+            r#"{"command":"close_forward","args":{"local_port":"8000"}}"#,
         ] {
             assert!(
                 serde_json::from_str::<Command>(refused).is_err(),

@@ -90,10 +90,10 @@ pub(super) const MESSAGES: Messages = &[
         SETTINGS_CONTROL_DESCRIPTION,
         "켜면 이 컴퓨터에서 직접 실행하는 프로그램이 colab-playground ctl 명령으로 계정, 런타임, 사용량을 이 창에 표시된 그대로 읽을 수 있습니다. 이것만으로는 아무것도 변경할 수 없습니다.",
     ),
-    (SETTINGS_CONTROL_CHANGES_TITLE, "런타임 시작 및 중지도 허용"),
+    (SETTINGS_CONTROL_CHANGES_TITLE, "변경도 허용"),
     (
         SETTINGS_CONTROL_CHANGES_DESCRIPTION,
-        "켜면 해당 프로그램이 활성 계정에서 런타임을 시작하고(중지될 때까지 컴퓨팅 단위를 사용합니다), 저장된 모든 계정의 런타임을 중지할 수 있습니다. 기본값과 한도는 그대로 적용되며, 이를 변경할 수 있는 곳은 이 창뿐입니다.",
+        "켜면 해당 프로그램이 활성 계정에서 런타임을 시작하고 자동 중지를 연장하며 포트를 포워딩할 수 있고, 저장된 모든 계정의 런타임을 중지할 수 있습니다. 런타임은 중지될 때까지 컴퓨팅 단위를 사용합니다. 기본값과 한도는 그대로 적용되며, 이를 변경할 수 있는 곳은 이 창뿐입니다.",
     ),
     (
         CONTROL_OFF,
@@ -101,13 +101,25 @@ pub(super) const MESSAGES: Messages = &[
     ),
     (
         CONTROL_CHANGES_OFF,
-        "명령줄에서 런타임을 시작하고 중지하는 기능이 꺼져 있습니다. {app}의 {page} → {section} → {setting}에서 켜십시오.",
+        "명령줄에서 변경하는 기능이 꺼져 있습니다. {app}의 {page} → {section} → {setting}에서 켜십시오.",
     ),
     (CTL_STARTING_TOAST, "명령줄 요청에 따라 {name} 시작 중"),
     (CTL_STOPPING_TOAST, "명령줄 요청에 따라 {name} 중지 중"),
     (
         CTL_CANCELLING_TOAST,
         "명령줄 요청에 따라 {name} 시작 취소 중",
+    ),
+    (
+        CTL_EXTENDING_TOAST,
+        "명령줄 요청에 따라 {name} 자동 중지 연장 중",
+    ),
+    (
+        CTL_FORWARDING_TOAST,
+        "명령줄 요청에 따라 {name}의 포트 {port} 포워딩 중",
+    ),
+    (
+        CTL_CLOSING_FORWARD_TOAST,
+        "명령줄 요청에 따라 localhost:{port} 포워딩 닫는 중",
     ),
     (TOAST_OPEN_FOLDER_FAILED_TITLE, "폴더를 열지 못했습니다"),
     (TOAST_SAVE_FAILED_TITLE, "설정을 저장하지 못했습니다"),

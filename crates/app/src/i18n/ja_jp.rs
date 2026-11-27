@@ -102,13 +102,10 @@ pub(super) const MESSAGES: Messages = &[
         SETTINGS_CONTROL_DESCRIPTION,
         "オンにすると、このコンピューターであなたが実行するプログラムが colab-playground ctl コマンドで、アカウント、ランタイム、使用量をこのウィンドウの表示どおりに読み取れます。これだけでは何も変更できません。",
     ),
-    (
-        SETTINGS_CONTROL_CHANGES_TITLE,
-        "ランタイムの開始と停止も許可",
-    ),
+    (SETTINGS_CONTROL_CHANGES_TITLE, "変更も許可"),
     (
         SETTINGS_CONTROL_CHANGES_DESCRIPTION,
-        "オンにすると、それらのプログラムが使用中のアカウントでランタイムを開始し (停止するまでコンピューティング ユニットを消費します)、保存済みのどのアカウントのランタイムも停止できます。既定値と上限はそのまま適用され、変更できるのはこのウィンドウだけです。",
+        "オンにすると、それらのプログラムが使用中のアカウントでランタイムを開始し、その自動停止を延長し、ポートを転送できるほか、保存済みのどのアカウントのランタイムも停止できます。ランタイムは停止するまでコンピューティング ユニットを消費します。既定値と上限はそのまま適用され、変更できるのはこのウィンドウだけです。",
     ),
     (
         CONTROL_OFF,
@@ -116,7 +113,7 @@ pub(super) const MESSAGES: Messages = &[
     ),
     (
         CONTROL_CHANGES_OFF,
-        "コマンド ラインからのランタイムの開始と停止はオフになっています。{app} の {page} → {section} → {setting} でオンにしてください。",
+        "コマンド ラインからの変更はオフになっています。{app} の {page} → {section} → {setting} でオンにしてください。",
     ),
     (
         CTL_STARTING_TOAST,
@@ -129,6 +126,18 @@ pub(super) const MESSAGES: Messages = &[
     (
         CTL_CANCELLING_TOAST,
         "コマンド ラインからの指示で {name} の開始をキャンセルしています",
+    ),
+    (
+        CTL_EXTENDING_TOAST,
+        "コマンド ラインからの指示で {name} の自動停止を延長しています",
+    ),
+    (
+        CTL_FORWARDING_TOAST,
+        "コマンド ラインからの指示で {name} のポート {port} を転送しています",
+    ),
+    (
+        CTL_CLOSING_FORWARD_TOAST,
+        "コマンド ラインからの指示で localhost:{port} の転送を閉じています",
     ),
     (
         TOAST_OPEN_FOLDER_FAILED_TITLE,

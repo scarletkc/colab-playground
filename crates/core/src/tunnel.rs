@@ -58,10 +58,8 @@ impl TunnelSpec {
         if self.remote_port == 0 || self.local_port == 0 {
             return Err(Error::invalid("port", "ports must be 1-65535"));
         }
-        if let Some(p) = &self.health_path
-            && (!p.starts_with('/') || p.chars().any(|c| c.is_whitespace() || c.is_control()))
-        {
-            return Err(Error::invalid("health_path", "must start with '/'"));
+        if let Some(p) = &self.health_path {
+            validate_health_path(p)?;
         }
         Ok(())
     }
@@ -69,6 +67,15 @@ impl TunnelSpec {
     pub fn local_url(&self) -> String {
         format!("http://127.0.0.1:{}", self.local_port)
     }
+}
+
+/// The path goes into an HTTP request line as it is, which a space or a control character would
+/// end early.
+pub fn validate_health_path(path: &str) -> Result<()> {
+    if !path.starts_with('/') || path.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(Error::invalid("health_path", "must start with '/'"));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

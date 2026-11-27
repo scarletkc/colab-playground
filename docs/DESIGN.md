@@ -49,10 +49,10 @@ Goals
 - Plugins: everything beyond the Colab core is a plugin. `llama-cpp` is bundled.
 - A mock backend drives the whole UI without WSL, the CLI or a Google account.
 - Control from the command line: `colab-playground ctl` lets scripts and AI agents read what the
-  running app shows, and start and stop runtimes through it. It asks the copy of the app that
-  owns the state and never builds a backend of its own, so what it reads and does is what the
-  window shows. It is off until the user turns it on in Settings, and starting and stopping need
-  a second permission of their own ([what comes next](ROADMAP.md#headless-control)).
+  running app shows, and start, stop and extend runtimes and forward their ports through it. It
+  asks the copy of the app that owns the state and never builds a backend of its own, so what it
+  reads and does is what the window shows. It is off until the user turns it on in Settings, and
+  changes need a second permission of their own ([what comes next](ROADMAP.md#headless-control)).
 
 Non-goals (v1)
 
@@ -135,9 +135,10 @@ Properties the code must keep. A change that breaks one is wrong even if every t
   a log. Answers hold what the window shows, never a token, key or password.
 - **The command line changes things only through the window's own paths, and only when
   allowed.** Allowing it to read never allows it to change anything. A command that changes
-  something answers with what it would do and changes nothing unless `--yes` is given. No command
+  something answers with what it would do and changes nothing unless `--yes` is given. No option
   loosens a cost guard: a runtime it starts gets the Defaults and the limits, which only the
-  window changes. A change that cannot happen now (the app busy starting, closing, updating or
+  window changes, and an extension adds what the window's Extend adds, nothing a caller chooses
+  beyond that. A change that cannot happen now (the app busy starting, closing, updating or
   changing accounts) is refused, not queued. A request whose client stopped waiting before the
   app began on it is left undone. Once an operation has begun, a client that goes away cancels
   nothing: it ends on its own or when it is cancelled by name.
