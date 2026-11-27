@@ -9,7 +9,7 @@ pub(super) const MESSAGES: Messages = &[
     (NAV_SETTINGS, "설정"),
     (SHELL_ACCOUNT_SIGNED_OUT, "로그인 안 됨"),
     (SHELL_ACCOUNT_HINT, "[계정] 페이지에서 로그인하십시오"),
-    (SHELL_USAGE, "— CU · — CU/시간"),
+    (SHELL_USAGE, "— CU · — CU/h"),
     (SHELL_USAGE_HINT, "컴퓨팅 단위 잔액과 소비 속도"),
     (SHELL_BACKEND_MOCK, "데모 데이터"),
     (
@@ -111,7 +111,7 @@ pub(super) const MESSAGES: Messages = &[
     (ACTION_VIEW_SESSIONS, "세션 보기"),
     // Formats
     (FMT_CU, "{value} CU"),
-    (FMT_CU_RATE, "{value} CU/시간"),
+    (FMT_CU_RATE, "{value} CU/h"),
     (FMT_DAYS_HOURS, "{d}일 {h}시간"),
     (FMT_HOURS_MINUTES, "{h}시간 {m}분"),
     (FMT_MINUTES, "{m}분"),
@@ -1285,4 +1285,5 @@ pub(super) const MESSAGES: Messages = &[
         PROV_RATE_PUBLISHED,
         "다른 사용자가 공개한 값입니다. 앱이 측정하면 그 값으로 바뀝니다.",
     ),
+    (STATUS_EXTRA_TOOLTIP, "{sessions} · {rate}"),
 ];

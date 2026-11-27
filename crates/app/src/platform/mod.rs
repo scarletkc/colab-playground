@@ -15,9 +15,17 @@
 //! font family) gets no list and relies on the platform's fallback alone.
 
 use ely_gpui_component::theme::{ActiveTheme, Platform};
+#[cfg(target_os = "macos")]
+use gpui::Global;
 use gpui::{
     App, Decorations, FontFallbacks, Pixels, Point, WindowBackgroundAppearance, WindowDecorations,
 };
+
+use crate::format;
+use crate::i18n::{keys, tr, tr_args, tr_count};
+
+#[cfg(target_os = "macos")]
+mod status_extra;
 
 use crate::i18n::Language;
 
@@ -344,6 +352,48 @@ mod tests {
         let fallbacks = font_fallbacks(Language::ZhTw, &installed).expect("one is installed");
         assert_eq!(fallbacks.fallback_list(), [(*last).to_owned()]);
     }
+
+    #[test]
+    fn closing_the_window_keeps_the_app_only_on_macos() {
+        assert_eq!(
+            cfg!(target_os = "macos"),
+            super::macos_window_close_keeps_running()
+        );
+    }
+
+    fn copy(sessions: Option<usize>, hardware: &[&str], rate: Option<f64>) -> super::StatusCopy {
+        super::StatusCopy {
+            sessions,
+            hardware: hardware.iter().map(|name| (*name).to_owned()).collect(),
+            rate_cu_per_hour: rate,
+            stale: false,
+        }
+    }
+
+    #[test]
+    fn one_or_two_sessions_name_the_gpus_then_the_total_rate() {
+        let none = copy(Some(0), &[], Some(0.0)).lines("0.00 CU/h", String::new());
+        assert_eq!(none.text, "0 · 0.00 CU/h");
+
+        let one = copy(Some(1), &["A100"], Some(5.3)).lines("5.30 CU/h", String::new());
+        assert_eq!(one.text, "A100 · 5.30 CU/h");
+
+        let two = copy(Some(2), &["A100", "T4"], Some(11.0)).lines("11.00 CU/h", String::new());
+        assert_eq!(two.text, "A100 T4 · 11.00 CU/h");
+    }
+
+    #[test]
+    fn three_or_more_sessions_collapse_to_a_count() {
+        let lines =
+            copy(Some(3), &["A100", "T4", "L4"], Some(12.4)).lines("12.40 CU/h", String::new());
+        assert_eq!(lines.text, "3 · 12.40 CU/h");
+    }
+
+    #[test]
+    fn unknown_session_count_is_not_shown_as_zero() {
+        let lines = copy(None, &[], None).lines("— CU/h", String::new());
+        assert_eq!(lines.text, "— · — CU/h");
+    }
 }
 
 gpui::actions!(colab_playground, [Quit]);
@@ -364,6 +414,158 @@ pub fn app_menus(cx: &App) -> Vec<gpui::Menu> {
 /// Cmd+Q for [`Quit`] (installed on macOS only; built everywhere so tests check it).
 pub fn quit_bindings() -> Vec<gpui::KeyBinding> {
     vec![gpui::KeyBinding::new("cmd-q", Quit, None)]
+}
+
+/// Closing the last window keeps the process (Dock + menu bar), as other Mac apps do.
+/// Tests still quit on close: they have no Dock, and existing close checks assume a quit.
+pub fn keeps_running_without_windows(cx: &App) -> bool {
+    macos_window_close_keeps_running() && !cx.is_test()
+}
+
+fn macos_window_close_keeps_running() -> bool {
+    cfg!(target_os = "macos")
+}
+
+/// What the macOS menu bar extra shows. Built on every OS so tests check the wording.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StatusCopy {
+    /// Listed runtimes; `None` while the list is not ready (unknown is never shown as zero).
+    pub sessions: Option<usize>,
+    /// Short hardware labels in list order (`A100`, `T4`, `CPU`, …).
+    pub hardware: Vec<String>,
+    /// Sum of known account burn rates; `None` when no account has a reading yet.
+    pub rate_cu_per_hour: Option<f64>,
+    pub stale: bool,
+}
+
+/// The line (and tooltip) drawn in the menu bar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatusLines {
+    pub text: String,
+    pub tooltip: String,
+}
+
+/// At most this many sessions are named on the extra; more collapse to a count.
+pub const STATUS_NAMED_AT_MOST: usize = 2;
+
+impl StatusCopy {
+    pub fn lines(&self, total_rate: &str, tooltip: String) -> StatusLines {
+        let text = match self.sessions {
+            None => format!("— · {total_rate}"),
+            Some(0) => format!("0 · {total_rate}"),
+            Some(n) if n <= STATUS_NAMED_AT_MOST => {
+                format!("{} · {total_rate}", named_gpus(&self.hardware, n))
+            }
+            Some(n) => format!("{n} · {total_rate}"),
+        };
+        StatusLines { text, tooltip }
+    }
+}
+
+fn named_gpus(hardware: &[String], n: usize) -> String {
+    let mut names: Vec<&str> = hardware.iter().map(String::as_str).collect();
+    names.resize(n, "—");
+    names.join(" ")
+}
+
+fn rate_text(rate: Option<f64>, stale: bool, cx: &App) -> String {
+    match rate {
+        Some(rate) => {
+            let text = format::cu_rate(cx, rate);
+            if stale {
+                format::approx(cx, &text).to_string()
+            } else {
+                text.to_string()
+            }
+        }
+        None => tr_args(cx, keys::FMT_CU_RATE, &[("value", "—")]).to_string(),
+    }
+}
+
+/// Fills [`StatusCopy::lines`] in the shown language.
+pub fn status_lines(copy: &StatusCopy, cx: &App) -> StatusLines {
+    let total_rate = rate_text(copy.rate_cu_per_hour, copy.stale, cx);
+    let sessions_text = match copy.sessions {
+        None => tr(cx, keys::SUMMARY_UNKNOWN).to_string(),
+        Some(n) => tr_count(
+            cx,
+            n,
+            keys::SESSIONS_COUNT_ONE,
+            keys::SESSIONS_COUNT_MANY,
+            &[],
+        )
+        .to_string(),
+    };
+    let tooltip = tr_args(
+        cx,
+        keys::STATUS_EXTRA_TOOLTIP,
+        &[("sessions", &sessions_text), ("rate", &total_rate)],
+    )
+    .to_string();
+    copy.lines(&total_rate, tooltip)
+}
+
+#[cfg(target_os = "macos")]
+struct InstalledStatusExtra {
+    item: status_extra::Item,
+    last: Option<StatusLines>,
+}
+
+#[cfg(target_os = "macos")]
+impl Global for InstalledStatusExtra {}
+
+/// Puts the menu bar extra up (macOS, not in tests). `on_click` shows the window.
+pub fn install_status_extra(cx: &mut App, on_click: impl Fn(&mut App) + 'static) {
+    #[cfg(target_os = "macos")]
+    {
+        if cx.is_test() {
+            return;
+        }
+        let app = cx.to_async();
+        let on_click = std::rc::Rc::new(on_click);
+        let item = match status_extra::Item::new(Box::new(move || {
+            let on_click = on_click.clone();
+            let app = app.clone();
+            app.spawn(async move |cx| cx.update(|cx| on_click(cx)))
+                .detach();
+        })) {
+            Ok(item) => item,
+            Err(error) => {
+                log::error!("status extra: {error:#}");
+                return;
+            }
+        };
+        cx.set_global(InstalledStatusExtra { item, last: None });
+        cx.on_app_quit(|cx| {
+            cx.remove_global::<InstalledStatusExtra>();
+            async {}
+        })
+        .detach();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (cx, on_click);
+    }
+}
+
+/// Redraws the extra when sessions or usage change. No-op when none is installed.
+pub fn refresh_status_extra(lines: &StatusLines, cx: &mut App) {
+    #[cfg(target_os = "macos")]
+    {
+        if !cx.has_global::<InstalledStatusExtra>() {
+            return;
+        }
+        let extra = cx.global_mut::<InstalledStatusExtra>();
+        if extra.last.as_ref() == Some(lines) {
+            return;
+        }
+        extra.item.apply(lines);
+        extra.last = Some(lines.clone());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (lines, cx);
+    }
 }
 
 /// macOS has no Cmd+Q without an app menu (gpui builds the menu bar only from `set_menus`),

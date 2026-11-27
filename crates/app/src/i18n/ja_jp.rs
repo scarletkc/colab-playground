@@ -12,7 +12,7 @@ pub(super) const MESSAGES: Messages = &[
         SHELL_ACCOUNT_HINT,
         "「アカウント」ページでログインしてください",
     ),
-    (SHELL_USAGE, "— CU · — CU/時間"),
+    (SHELL_USAGE, "— CU · — CU/h"),
     (
         SHELL_USAGE_HINT,
         "コンピューティング ユニットの残高と消費ペース",
@@ -129,7 +129,7 @@ pub(super) const MESSAGES: Messages = &[
     (ACTION_VIEW_SESSIONS, "セッションを表示"),
     // Formats
     (FMT_CU, "{value} CU"),
-    (FMT_CU_RATE, "{value} CU/時間"),
+    (FMT_CU_RATE, "{value} CU/h"),
     (FMT_DAYS_HOURS, "{d} 日 {h} 時間"),
     (FMT_HOURS_MINUTES, "{h} 時間 {m} 分"),
     (FMT_MINUTES, "{m} 分"),
@@ -1384,4 +1384,5 @@ pub(super) const MESSAGES: Messages = &[
         PROV_RATE_PUBLISHED,
         "ほかのユーザーが公開した値です。アプリが測定すると置き換わります。",
     ),
+    (STATUS_EXTRA_TOOLTIP, "{sessions} · {rate}"),
 ];

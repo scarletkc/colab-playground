@@ -27,7 +27,9 @@ use colab_playground_core::{
     backend::Backend,
     backend::BackendKind as Flavor,
     backend::LoginFlow,
+    backend::Runtime,
     host::ProbeReport,
+    sessions::Accelerator,
     updater::{Installed, SelfUpdate},
 };
 use ely_gpui_component::{
@@ -338,8 +340,8 @@ impl AppState {
             async {}
         })
         .detach();
-        // Cmd+Q (bound with the app menu on macOS only) asks the same question as closing the
-        // window.
+        // Cmd+Q (bound with the app menu on macOS only). Closing the window quits only
+        // where the process does not stay without a window.
         platform::install_quit(cx);
         cx.on_action(|_: &platform::Quit, cx: &mut App| {
             AppState::global(cx).update(cx, |state, cx| state.request_quit(cx));
@@ -353,6 +355,33 @@ impl AppState {
 
     pub fn route(&self) -> Route {
         self.route
+    }
+
+    /// What the macOS menu bar extra shows for the listed runtimes and known usage.
+    pub fn status_extra(&self, cx: &App) -> platform::StatusLines {
+        platform::status_lines(&self.status_copy(), cx)
+    }
+
+    fn status_copy(&self) -> platform::StatusCopy {
+        let (sessions, hardware) = match self.runtimes() {
+            Load::Ready(view) => (
+                Some(view.runtimes.len()),
+                view.runtimes.iter().map(hardware_short).collect(),
+            ),
+            _ => (None, Vec::new()),
+        };
+        let summary = summarize(self.usage());
+        let now = self.usage_now();
+        let stale = self.usage().iter().any(|view| {
+            view.snapshot
+                .is_some_and(|snapshot| usage_is_stale(&snapshot, now))
+        });
+        platform::StatusCopy {
+            sessions,
+            hardware,
+            rate_cu_per_hour: (summary.known > 0).then_some(summary.rate_cu_per_hour),
+            stale,
+        }
     }
 
     /// The open dialog other than the account ones.
@@ -638,6 +667,15 @@ impl AppState {
     /// An error for "the CLI is not installed yet" (shown instead of calling the backend).
     pub(crate) fn not_installed() -> Error {
         Error::new(ErrorKind::NotInstalled)
+    }
+}
+
+fn hardware_short(runtime: &Runtime) -> String {
+    match runtime.accelerator {
+        Some(Accelerator::None) => "CPU".into(),
+        Some(accelerator) => accelerator.as_str().into(),
+        None if !runtime.hardware.is_empty() => runtime.hardware.clone(),
+        None => "—".into(),
     }
 }
 

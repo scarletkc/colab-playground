@@ -1091,6 +1091,7 @@ name = "colab-playground"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "block2 0.6.2",
  "colab-playground-core",
  "dirs 6.0.0",
  "ely-gpui-component",
@@ -1099,6 +1100,9 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "proc-macro2",
  "serde",
  "serde_json",

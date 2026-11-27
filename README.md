@@ -51,6 +51,8 @@ runtime to your computer and runs plugins on the runtime. Written in Rust with G
   [docs/COMMUNITY_PLUGINS.md](docs/COMMUNITY_PLUGINS.md).
 - **Languages and theme.** 简体中文, 繁體中文, 日本語, 한국어 and English; light, dark or follow the
   system.
+- **Menu bar extra on Mac.** Session count and burn rate stay visible after you close the
+  window; with one or two sessions the extra names each GPU, then the total rate. ⌘Q is what quits.
 
 Every limit and default is editable in Settings and can be overridden for a single session or
 deployment.

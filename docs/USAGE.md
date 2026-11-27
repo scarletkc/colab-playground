@@ -23,7 +23,9 @@ stay where they are (see [Where things are stored](#where-things-are-stored)).
   itself). It is not notarised by Apple, so macOS refuses the first launch: try to open it once,
   then open System Settings → Privacy & Security and, under Security, click **Open Anyway**
   (offered for about an hour after the attempt) and enter your login password. After that it opens
-  normally.
+  normally. The red close button hides the window; the app stays in the Dock and the menu bar
+  (session count, total burn rate, and GPU names when one or two sessions are running). **Quit Colab
+  Playground** (⌘Q) is what stops it, and asks first while runtimes still bill.
 - `SHA256SUMS` in the same release lists the SHA-256 of each file; compare it with the output of
   `sha256sum <file>` (Linux), `shasum -a 256 <file>` (macOS) or `Get-FileHash <file>` (PowerShell).
   `SHA256SUMS.sig` is the project's signature of that list, which the app checks before it

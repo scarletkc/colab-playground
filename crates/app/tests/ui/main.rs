@@ -21,6 +21,7 @@ mod plugins;
 mod quit;
 mod sessions;
 mod settings_page;
+mod status_extra;
 mod titlebar;
 mod updates;
 mod usage;

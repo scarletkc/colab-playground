@@ -9,7 +9,7 @@ pub(super) const MESSAGES: Messages = &[
     (NAV_SETTINGS, "设置"),
     (SHELL_ACCOUNT_SIGNED_OUT, "未登录"),
     (SHELL_ACCOUNT_HINT, "前往“账号”页面登录"),
-    (SHELL_USAGE, "— CU · — CU/小时"),
+    (SHELL_USAGE, "— CU · — CU/h"),
     (SHELL_USAGE_HINT, "计算单元余额与消耗速度"),
     (SHELL_BACKEND_MOCK, "演示数据"),
     (
@@ -105,7 +105,7 @@ pub(super) const MESSAGES: Messages = &[
     (ACTION_VIEW_SESSIONS, "查看会话"),
     // 格式
     (FMT_CU, "{value} CU"),
-    (FMT_CU_RATE, "{value} CU/小时"),
+    (FMT_CU_RATE, "{value} CU/h"),
     (FMT_DAYS_HOURS, "{d} 天 {h} 小时"),
     (FMT_HOURS_MINUTES, "{h} 小时 {m} 分钟"),
     (FMT_MINUTES, "{m} 分钟"),
@@ -1069,4 +1069,5 @@ pub(super) const MESSAGES: Messages = &[
         PROV_RATE_PUBLISHED,
         "其他用户公布的数值，本应用测得后会替换。",
     ),
+    (STATUS_EXTRA_TOOLTIP, "{sessions} · {rate}"),
 ];

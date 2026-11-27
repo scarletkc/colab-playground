@@ -136,11 +136,15 @@ impl RootView {
             ),
             fields: Default::default(),
         };
-        // Closing (system and drawn close alike) quits, asking first while runtimes still
-        // bill. The close itself never removes the window: quitting does. Ely keeps the check
-        // in a global, so it holds the state weakly.
+        // Closing (system and drawn close alike): on macOS the window goes away and the
+        // process stays (Dock + menu bar); elsewhere it is a quit, asking first while
+        // runtimes still bill. The close itself never removes the window when it is a
+        // quit: quitting does. Ely keeps the check in a global, so it holds the state weakly.
         let guard = state.downgrade();
         ely_gpui_component::shell::guard_close(window, cx, move |_, cx| {
+            if platform::keeps_running_without_windows(cx) {
+                return true;
+            }
             guard.update(cx, |state, cx| state.request_quit(cx)).ok();
             false
         });

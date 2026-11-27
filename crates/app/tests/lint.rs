@@ -192,10 +192,10 @@ fn in_a_macro_a_const_still_names_its_number() {
     assert_eq!(found(r#"format!("{}", { 24 });"#), ["probe.rs:1: 24"]);
 }
 
-/// Only these files may name a target OS.
+/// Only these files may name a target OS. A directory prefix covers every file under it.
 const OS_HOMES: [&str; 3] = [
-    // The app's per-OS module.
-    "crates/app/src/platform.rs",
+    // The app's per-OS module (and files under `platform/`).
+    "crates/app/src/platform",
     // The `Host` abstraction: where commands run.
     "crates/core/src/host.rs",
     // Where data lives: it makes files owner-only, which only unix can express.
@@ -464,15 +464,17 @@ fn only_the_platform_modules_name_a_target_os() {
     let hits: Vec<String> = os_names(&files)
         .into_iter()
         .filter(|hit| {
-            !OS_HOMES
-                .iter()
-                .any(|home| hit.starts_with(&format!("{home}:")))
+            !OS_HOMES.iter().any(|home| {
+                hit.starts_with(&format!("{home}:"))
+                    || hit.starts_with(&format!("{home}/"))
+                    || hit.starts_with(&format!("{home}.rs:"))
+            })
         })
         .collect();
     assert!(
         hits.is_empty(),
         "Code outside the modules that own what differs per OS names a target OS. Move what \
-         differs into `crates/app/src/platform.rs` (app) or behind `Host` in \
+         differs into `crates/app/src/platform` (app) or behind `Host` in \
          `crates/core/src/host.rs` (core), and call that from here.\n{}",
         hits.join("\n")
     );

@@ -1,6 +1,7 @@
-//! Quitting while runtimes still bill. The window's close check (Ely's `guard_close`, which
-//! covers the drawn and the system close) calls [`AppState::request_quit`]; when something is
-//! billing, or the app cannot tell, it opens the quit prompt instead of quitting.
+//! Quitting while runtimes still bill. Quit (⌘Q / the app menu, and the window close on
+//! Windows and Linux) calls [`AppState::request_quit`]; when something is billing, or the app
+//! cannot tell, it opens the quit prompt instead of quitting. On macOS the traffic lights
+//! close the window and leave the process running.
 //!
 //! "Leave running" is only described as watched by a watchdog for runtimes that have one;
 //! runtimes opened elsewhere, or whose watchdog on the runtime is not armed (it failed, was
@@ -122,7 +123,7 @@ impl AppState {
         cx.notify();
     }
 
-    /// A close or Quit: with nothing billing the app quits, otherwise the quit prompt opens.
+    /// Quit: with nothing billing the app quits, otherwise the quit prompt opens.
     /// The window itself never closes on request; quitting closes it (see `approve_quit`).
     pub fn request_quit(&mut self, cx: &mut Context<Self>) {
         if self.quit == QuitState::Approved {

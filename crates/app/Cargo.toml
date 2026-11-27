@@ -43,6 +43,36 @@ serde_json = "1"
 sys-locale = "0.3"
 url = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-core-foundation",
+    "NSAttributedString",
+    "NSButton",
+    "NSCell",
+    "NSColor",
+    "NSControl",
+    "NSFont",
+    "NSImage",
+    "NSResponder",
+    "NSStatusBar",
+    "NSStatusBarButton",
+    "NSStatusItem",
+    "NSStringDrawing",
+    "NSView",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "objc2-core-foundation",
+    "NSAttributedString",
+    "NSDictionary",
+    "NSObject",
+    "NSString",
+] }
+
 [dev-dependencies]
 ely-gpui-component = { git = "https://github.com/ELY-Open-Source/Ely-GPUI-Components", rev = "c01a140e95deef8437c85aafd3617acfd798d58e", features = ["test-support"] }
 gpui = { package = "gpui-pre", version = "=0.3.12", features = ["test-support"] }
