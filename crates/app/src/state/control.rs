@@ -228,14 +228,13 @@ impl AppState {
         self.settings.allow_cli_control && self.settings.allow_cli_changes
     }
 
-    /// Turning control off takes starting and stopping back too, so turning it on again later
-    /// allows reading only, until starting and stopping are allowed again as well.
+    /// Either way, starting and stopping end up off, so turning control on allows reading only
+    /// until they are allowed as well. Also when turning it on: the file may still hold their
+    /// switch as on, left by another copy of the app that turned only this one off.
     pub fn set_cli_control(&mut self, on: bool, cx: &mut Context<Self>) {
         log::info!("control: from the command line -> {on}");
         self.settings.allow_cli_control = on;
-        if !on {
-            self.settings.allow_cli_changes = false;
-        }
+        self.settings.allow_cli_changes = false;
         self.persist_settings(cx);
         cx.notify();
     }

@@ -494,6 +494,30 @@ fn starting_and_stopping_are_a_second_step_in_settings(cx: &mut TestAppContext) 
     );
 }
 
+/// The file can hold this: one copy of the app allowed starting and stopping, and another that
+/// had loaded before turned control off, which writes that one field.
+#[gpui::test]
+fn allowing_control_never_brings_back_an_older_yes_to_starting_and_stopping(
+    cx: &mut TestAppContext,
+) {
+    let left_over = r#"{ "allow_cli_control": false, "allow_cli_changes": true }"#;
+    let mut app = TestApp::with(cx, changes_allowed(left_over, MockScenario::single()));
+    assert!(!app.read(|state, _| state.allows_cli_changes()));
+    app.click(Route::Settings.nav_selector());
+    app.click(CONTROL_SELECTOR);
+    assert!(app.read(|state, _| state.allows_cli_control()));
+    assert!(!app.read(|state, _| state.allows_cli_changes()));
+    assert_eq!(
+        refusal(ask(&mut app, start(None, None, true))),
+        Code::ChangesOff
+    );
+    assert_eq!(
+        app.saved_settings()
+            .map(|settings| (settings.allow_cli_control, settings.allow_cli_changes)),
+        Some((true, false))
+    );
+}
+
 #[gpui::test]
 fn a_preview_says_what_would_happen_and_changes_nothing(cx: &mut TestAppContext) {
     let mut app = TestApp::with(cx, changes_allowed(CHANGES_ALLOWED, MockScenario::single()));

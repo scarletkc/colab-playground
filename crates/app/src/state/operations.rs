@@ -7,7 +7,8 @@
 //! the Sessions page's, so the window shows them, the quit prompt knows about them and the same
 //! limits hold. No argument loosens a cost guard; those stay with the person at the window. A
 //! change that would get in the way of what the window is doing (closing, updating, changing
-//! accounts, a start under way, the New session form being filled in) is refused, not queued.
+//! accounts, a start under way, the New session dialog holding what someone entered) is refused,
+//! not queued.
 //!
 //! Each change gets an operation id. The record keeps the outcome itself, because the window
 //! drops or replaces the dialog that showed it. An id starts with a part drawn at random once
