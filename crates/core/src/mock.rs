@@ -43,6 +43,13 @@ use crate::updater::{Installed, SelfUpdate, Unsupported, UpdateProgress};
 use crate::usage::{AccountUsage, RateReading, Usage, poll_due};
 use crate::vm::{RunState, RunStatus};
 
+// A release download runs only the real backend. The workflow marks a download and leaves out
+// this module with two separate switches; this keeps them from drifting apart.
+const _: () = assert!(
+    crate::updater::layout::RELEASE_BUILD.is_none(),
+    "a release download is built without demo data: pass --no-default-features"
+);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MockLoginFailure {
     CancelledBeforeUrl,

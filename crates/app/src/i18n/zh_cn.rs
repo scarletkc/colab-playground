@@ -949,7 +949,7 @@ pub(super) const MESSAGES: Messages = &[
     (UPDATE_AUTO, "自动检查更新"),
     (
         UPDATE_AUTO_HINT,
-        "每天向 GitHub 查询一次，只发送本应用的版本号。",
+        "每次启动时以及运行期间每天向 GitHub 查询一次，只发送本应用的版本号。",
     ),
     (UPDATE_NOTICE_TITLE, "Colab Playground {version} 已发布"),
     (

@@ -16,7 +16,7 @@ use super::{
     Code, Command, Endpoint, PROTOCOL_VERSION, Request, Response, endpoint_file, kind_name,
     owner::ANSWER_TIMEOUT, state_dir,
 };
-use crate::backend::{BackendError, BackendKind};
+use crate::backend::{BackendError, BackendKind, Build};
 
 /// Windows retries a refused loopback connection for about two seconds before it reports the
 /// refusal; a live owner's port completes the connection at once.
@@ -63,18 +63,25 @@ fn command_names(separator: &str) -> String {
 
 /// How to call `ctl`, printed with any argument error and for `--help`.
 pub fn usage() -> String {
+    // A build without demo data has no copy on it to ask.
+    let backends = if Build::CURRENT.mock {
+        "[--real | --mock]"
+    } else {
+        "[--real]"
+    };
     format!(
-        "usage: colab-playground ctl <{}> [--real | --mock]\n  Prints the running Colab Playground's answer as one line of JSON. It must allow control\n  from the command line (Settings).",
+        "usage: colab-playground ctl <{}> {backends}\n  Prints the running Colab Playground's answer as one line of JSON. It must allow control\n  from the command line (Settings).",
         command_names("|")
     )
 }
 
 /// Checks every argument first: `Ok(None)` asks for the usage. The backend is chosen as the
-/// app chooses it (flag, then `env`, then the build default), so a `ctl` of a debug build
-/// without `--real` can never reach an owner on the real backend.
+/// app chooses it for `build` (flag, then `env`, then the build default), so a `ctl` of a debug
+/// build without `--real` can never reach an owner on the real backend.
 pub fn parse_args<S: AsRef<str>>(
     args: &[S],
     env: Option<&str>,
+    build: Build,
 ) -> Result<Option<CtlArgs>, CtlError> {
     let mut command: Option<Command> = None;
     let mut help = false;
@@ -93,7 +100,7 @@ pub fn parse_args<S: AsRef<str>>(
             }
         }
     }
-    let kind = BackendKind::resolve(args, env).map_err(CtlError::Backend)?;
+    let kind = BackendKind::resolve(args, env, build).map_err(CtlError::Backend)?;
     if help {
         return Ok(None);
     }
@@ -125,7 +132,7 @@ pub fn run<S: AsRef<str>>(
     backend_env: Option<&str>,
     config_override: Option<OsString>,
 ) -> Outcome {
-    let parsed = match parse_args(args, backend_env) {
+    let parsed = match parse_args(args, backend_env, Build::CURRENT) {
         Ok(Some(parsed)) => parsed,
         Ok(None) => {
             return Outcome {
@@ -261,66 +268,92 @@ mod tests {
 
     use super::{CtlArgs, CtlError, parse_args, run};
     use crate::{
-        backend::{BackendError, BackendKind},
+        backend::{BackendError, Build},
         control::Command,
+    };
+
+    const DEBUG: Build = Build {
+        mock: true,
+        debug: true,
+    };
+    /// A release download: no demo data.
+    const DOWNLOAD: Build = Build {
+        mock: false,
+        debug: false,
     };
 
     #[test]
     fn every_argument_is_checked_before_anything_happens() {
         assert_eq!(
-            parse_args(&["status", "--mock"], None),
+            parse_args(&["status", "--mock"], None, DEBUG),
             Ok(Some(CtlArgs {
                 command: Command::Status,
                 flavor: Flavor::Mock,
             }))
         );
         assert_eq!(
-            parse_args(&["--real", "sessions"], Some("mock")),
+            parse_args(&["--real", "sessions"], Some("mock"), DEBUG),
             Ok(Some(CtlArgs {
                 command: Command::Sessions,
                 flavor: Flavor::Real,
             }))
         );
         assert_eq!(
-            parse_args(&["usage"], Some("real")).map(|args| args.map(|a| a.flavor)),
+            parse_args(&["usage"], Some("real"), DEBUG).map(|args| args.map(|a| a.flavor)),
             Ok(Some(Flavor::Real))
         );
         assert_eq!(
-            parse_args(&["accounts"], None).map(|args| args.map(|a| a.flavor)),
-            Ok(Some(BackendKind::build_default().flavor())),
+            parse_args(&["accounts"], None, DEBUG).map(|args| args.map(|a| a.flavor)),
+            Ok(Some(Flavor::Mock)),
             "without a flag or the variable, the build's own default"
         );
         assert_eq!(
-            parse_args(&["status", "--mok"], None),
+            parse_args(&["accounts"], None, DOWNLOAD).map(|args| args.map(|a| a.flavor)),
+            Ok(Some(Flavor::Real))
+        );
+        assert_eq!(
+            parse_args(&["status", "--mock"], None, DOWNLOAD),
+            Err(CtlError::Backend(BackendError::NoDemoData("--mock".into()))),
+            "a build without demo data has no copy on it to ask"
+        );
+        assert_eq!(
+            parse_args(&["status", "--mok"], None, DEBUG),
             Err(CtlError::UnknownArgument("--mok".into())),
             "a typo of --mock is not ignored"
         );
         assert_eq!(
-            parse_args(&["activate"], None),
+            parse_args(&["activate"], None, DEBUG),
             Err(CtlError::UnknownArgument("activate".into())),
             "bringing the window forward is the second launch's, not ctl's"
         );
         assert_eq!(
-            parse_args(&["--mock", "--mock-scenario", "single", "status"], None),
+            parse_args(
+                &["--mock", "--mock-scenario", "single", "status"],
+                None,
+                DEBUG
+            ),
             Err(CtlError::UnknownArgument("--mock-scenario".into())),
             "ctl starts no simulation"
         );
         assert_eq!(
-            parse_args(&["status", "usage"], None),
+            parse_args(&["status", "usage"], None, DEBUG),
             Err(CtlError::TwoCommands("status", "usage"))
         );
-        assert_eq!(parse_args(&["--mock"], None), Err(CtlError::MissingCommand));
         assert_eq!(
-            parse_args(&["status", "--mock", "--real"], None),
+            parse_args(&["--mock"], None, DEBUG),
+            Err(CtlError::MissingCommand)
+        );
+        assert_eq!(
+            parse_args(&["status", "--mock", "--real"], None, DEBUG),
             Err(CtlError::Backend(BackendError::ConflictingFlags))
         );
         assert_eq!(
-            parse_args(&["status"], Some("fake")),
+            parse_args(&["status"], Some("fake"), DEBUG),
             Err(CtlError::Backend(BackendError::InvalidEnv("fake".into())))
         );
-        assert_eq!(parse_args(&["--help"], None), Ok(None));
+        assert_eq!(parse_args(&["--help"], None, DEBUG), Ok(None));
         assert_eq!(
-            parse_args(&["--help", "--bogus"], None),
+            parse_args(&["--help", "--bogus"], None, DEBUG),
             Err(CtlError::UnknownArgument("--bogus".into()))
         );
     }
@@ -341,6 +374,8 @@ mod tests {
         assert!(help.stdout.starts_with("usage: colab-playground ctl"));
     }
 
+    // On demo data, which only a build with it can ask for: never the real backend's folder.
+    #[cfg(feature = "mock")]
     #[test]
     fn with_no_owner_ctl_says_so_and_fails() {
         let dir = tempfile::tempdir().expect("a temp dir");

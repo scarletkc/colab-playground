@@ -21,6 +21,12 @@ name = "colab-playground"
 path = "src/main.rs"
 test = false
 
+[features]
+default = ["mock"]
+# Demo data: the simulated backend behind `--mock`, which debug builds start on and the UI tests
+# run on. Release downloads are built without it (docs/RELEASING.md).
+mock = ["colab-playground-core/mock"]
+
 [build-dependencies]
 # Windows version resource and icon for the executable (the build script does nothing for other
 # targets).
@@ -32,7 +38,8 @@ tauri-winres = "0.3"
 ely-gpui-component = { git = "https://github.com/ELY-Open-Source/Ely-GPUI-Components", rev = "c01a140e95deef8437c85aafd3617acfd798d58e" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "wayland", "x11"] }
-colab-playground-core = { path = "../core" }
+# Without the core's default features, so that its mock comes only with this crate's.
+colab-playground-core = { path = "../core", default-features = false, features = ["http"] }
 anyhow = "1"
 dirs = "6"
 futures = "0.3"
@@ -57,6 +64,7 @@ syn = { version = "2", features = ["full", "visit"] }
 [[test]]
 name = "ui"
 path = "tests/ui/main.rs"
+required-features = ["mock"]
 
 [lints]
 workspace = true

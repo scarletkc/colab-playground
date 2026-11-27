@@ -29,17 +29,16 @@ stay where they are (see [Where things are stored](#where-things-are-stored)).
   `SHA256SUMS.sig` is the project's signature of that list, which the app checks before it
   installs an update ([what it covers](RELEASING.md#the-update-signature)).
 
-A download is a release build: it uses the real Colab CLI (see [Build and run](#build-and-run)), so
-the real-mode requirements below apply.
+A download is a release build without demo data: it always uses the real Colab CLI (see
+[Build and run](#build-and-run)), so the real-mode requirements below apply.
 
 ## Updates
 
 The app checks GitHub for a newer release, and installs it when you ask.
 
-- **Automatic check:** shortly after start-up, then at most once a day while the app runs. The time
-  of the last check that got an answer is kept in the settings file, so restarting does not check
-  again within the day. A check that fails is tried again after an hour, or at the next start.
-  Turn it off in Settings → About → "Check for updates automatically".
+- **Automatic check:** shortly after each start, then once a day while the app runs. A check that
+  fails is tried again every hour until one gets an answer. Turn it off in Settings → About →
+  "Check for updates automatically".
 - **By hand:** Settings → About → "Check for updates".
 - **When a newer version exists:** a notice appears once for that version, and the Settings entry
   stays marked until you have updated. "Download and restart", on the notice and in Settings →
@@ -107,6 +106,10 @@ cargo run -p colab-playground --release    # release build: real Colab CLI by de
   (exit code 2, with the usage line on standard error), so a mistyped flag never starts the other
   backend. Mock mode shows a **Demo data** badge, and Settings → About → Backend names the backend
   in use.
+- The mock backend is the `mock` cargo feature, on by default. Release downloads are built without
+  it (`--no-default-features`), so they run only the real backend: there `--mock`, the demo flags
+  and `COLAB_PLAYGROUND_BACKEND=mock` are errors (exit code 2), and Settings → About has no
+  Backend row. A debug build without it starts only with `--real`.
 - One copy runs per backend: starting the app again while it runs brings its window to the front
   instead. A demo copy and a real one can run side by side, and so can demo copies with different
   `COLAB_PLAYGROUND_CONFIG_DIR` folders.
@@ -137,8 +140,9 @@ cargo run -p colab-playground -- --mock-scenario signed-out --mock-fail cli-miss
   `update-unverified` (the download fails its check) and `update-install-fails` (installing an
   update; add `update-available`).
 - Both accept `--flag value` or `--flag=value` and apply only when the mock is selected (add
-  `--mock` to a release build). A simulated A100 has 40 GB first and 80 GB on the next attempt:
-  set a minimum GPU memory of 70 GB to watch the retry. Git plugin installs are not simulated.
+  `--mock` to a release build of your own). A simulated A100 has 40 GB first and 80 GB on the next
+  attempt: set a minimum GPU memory of 70 GB to watch the retry. Git plugin installs are not
+  simulated.
 
 Demo mode still reads and writes the normal settings file; set `COLAB_PLAYGROUND_CONFIG_DIR` to
 another folder to keep experiments apart.

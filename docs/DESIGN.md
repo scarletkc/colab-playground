@@ -90,6 +90,9 @@ They apply to every contributor and agent.
      in to it and clean up from there.
 2. Debug builds default to the **mock** backend. The real backend needs `--real` (or
    `COLAB_PLAYGROUND_BACKEND=real`). Release builds default to real; `--mock` forces mock.
+   Release downloads are built without the mock and run only the real backend. A build without
+   the mock refuses every request for demo data instead of falling back to real, and a debug
+   build without it starts only with `--real`.
    The app on the real backend acts on the user's own accounts, state files and runtimes, not on
    throw-away ones, so an agent starts it there only when asked to.
 3. No test may spawn `wsl.exe`, except the `#[ignore]`d Windows smoke tests of the WSL bridge

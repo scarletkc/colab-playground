@@ -15,6 +15,7 @@ pub mod host;
 pub mod hostfs;
 pub mod http;
 pub mod location;
+#[cfg(feature = "mock")]
 pub mod mock;
 pub mod paths;
 pub mod plugins;
