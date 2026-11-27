@@ -34,6 +34,22 @@ when changing either.
 - In 0.8.0 an unknown `--gpu` value is rejected; older releases silently fell
   back to A100. Validate locally either way.
 
+## Where a runtime runs
+
+- Colab picks the region. `colab new` (0.8.0) sends only the accelerator,
+  variant and shape, the Colab API's `runtimes.create` takes no location
+  either, and neither the CLI's assignment models nor the API's `Runtime`
+  report one.
+- The host of the runtime's proxy URL names it:
+  `8080-m-s-…-b.us-west1.prod.r.colab.dev`. The CLI keeps that URL in its
+  state file, and every assignment it lists carries the same host. Seen on two
+  CPU runtimes (2026-11-27, `us-west1` and `us-central1`); whether GPU and TPU
+  hosts look the same is not known.
+- On the first, the metadata server answered `instance/zone` with 404, no
+  environment variable named a region, and two IP geolocation services
+  (Cloudflare's `cdn-cgi/trace`, ipinfo.io) placed its address in The Dalles,
+  Oregon, where `us-west1` is.
+
 ## The CLI's state (`--config`)
 
 - `colab sessions` (and any command that resolves a session) **prunes local

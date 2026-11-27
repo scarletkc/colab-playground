@@ -559,6 +559,9 @@ pub struct RemoteAssignment {
     /// `DEFAULT` / `GPU` / `TPU`.
     pub variant: String,
     pub high_mem: bool,
+    /// Google Cloud region, when the runtime's proxy host names one.
+    #[serde(default)]
+    pub region: Option<String>,
 }
 
 impl RemoteAssignment {
@@ -582,6 +585,11 @@ impl RemoteAssignment {
                 .get("shape")
                 .and_then(|x| x.as_str())
                 .is_some_and(|s| s.eq_ignore_ascii_case("HIGH_RAM")),
+            // Never required: a host the helper could not read leaves only the region unknown.
+            region: v
+                .get("proxy_host")
+                .and_then(|h| h.as_str())
+                .and_then(crate::location::region_of_host),
         })
     }
 }

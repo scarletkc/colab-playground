@@ -322,7 +322,11 @@ def install_fake_modules():
                 self.accelerator = _Named(a["accelerator"])
                 self.variant = _Named(a.get("variant", "GPU"))
                 self.machine_shape = _Named(a.get("shape", "STANDARD"))
-                self.runtime_proxy_info = object()
+                # A host shaped like a real one; the token must never reach the app.
+                self.runtime_proxy_info = types.SimpleNamespace(
+                    url=a.get("proxy_url", "https://8080-%s-b.us-west1.prod.r.colab.dev" % endpoint),
+                    token="fake-proxy-token",
+                )
 
         class ColabRequestError(Exception):
             def __init__(self, status):

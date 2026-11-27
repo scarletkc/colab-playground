@@ -30,6 +30,7 @@ import os
 import re
 import sys
 import threading
+import urllib.parse
 
 COLAB_SERVICE = "google-colab-cli"
 COLAB_USER = "oauth_token"
@@ -421,6 +422,17 @@ def _name(value):
     return str(value)
 
 
+def _proxy_host(assignment):
+    """The host of the runtime's proxy URL, which names its region. Only the host leaves:
+    the proxy info also carries a token. Any surprise leaves the region unknown instead of
+    failing the listing."""
+    try:
+        host = urllib.parse.urlsplit(assignment.runtime_proxy_info.url).hostname
+    except Exception:  # noqa: BLE001
+        return None
+    return host if isinstance(host, str) else None
+
+
 def assignments_of(account_id, slot_raw):
     client = colab_client(credential_for(account_id, slot_raw))
     try:
@@ -435,12 +447,12 @@ def assignments_of(account_id, slot_raw):
     out = []
     try:
         for a in listed:
-            # Never include runtime_proxy_info: it carries a token.
             out.append({
                 "endpoint": str(a.endpoint),
                 "accelerator": _name(a.accelerator),
                 "variant": _name(a.variant),
                 "shape": _name(a.machine_shape),
+                "proxy_host": _proxy_host(a),
             })
     except Exception as exc:  # noqa: BLE001
         raise Fail("unsupported_cli_version", "unexpected assignment shape (%s)" % type(exc).__name__)

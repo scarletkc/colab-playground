@@ -80,6 +80,9 @@ pub struct Runtime {
     /// Raw hardware label.
     pub hardware: String,
     pub high_mem: bool,
+    /// Google Cloud region it runs in (`us-west1`), when its proxy host names one.
+    #[serde(default)]
+    pub region: Option<String>,
     /// Created and tracked by this app.
     pub managed: bool,
     /// Ledger entry (start time, policy, spend, watchdog) when managed.
