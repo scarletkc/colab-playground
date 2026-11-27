@@ -113,7 +113,6 @@ impl AppState {
         self.answer_prompt(PROJECT_PAGE, cx);
     }
 
-    /// Opens the issue forms from the prompt.
     pub fn give_feedback_from_prompt(&mut self, cx: &mut Context<Self>) {
         self.answer_prompt(&feedback_page(), cx);
     }
