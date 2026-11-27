@@ -181,6 +181,7 @@ mod reconciliation_tests {
                 accelerator_label: "T4".into(),
                 variant: "GPU".into(),
                 high_mem: false,
+                region: None,
             }]
         };
         let endpoint = |backend: &RealBackend| {
@@ -237,6 +238,7 @@ mod reconciliation_tests {
                     accelerator_label: "T4".into(),
                     variant: "GPU".into(),
                     high_mem: false,
+                    region: None,
                 })
                 .collect()
         };
@@ -1570,6 +1572,7 @@ impl Backend for RealBackend {
                         a.accelerator_label.clone()
                     },
                     high_mem: a.high_mem,
+                    region: a.region.clone(),
                     managed: tracked.is_some(),
                     estimated_rate_cu_per_hour: rate.filter(|_| tracked.is_some()),
                     estimated_spend_cu: tracked.as_ref().and_then(|t| t.spend.spend()),

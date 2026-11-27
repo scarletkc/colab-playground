@@ -343,14 +343,21 @@ fn per_account_state_files_switching_and_cross_account_stop() {
     }
     // Runtimes of every account, managed or not, can be listed and stopped.
     f.edit_server(|s| {
-        s["accounts"]["alice"]["assignments"]["browser-1"] =
-            json!({"accelerator": "L4", "variant": "GPU", "shape": "STANDARD"});
+        s["accounts"]["alice"]["assignments"]["browser-1"] = json!({
+            "accelerator": "L4", "variant": "GPU", "shape": "STANDARD",
+            "proxy_url": "https://8080-browser-1-b.europe-west4.prod.r.colab.dev"
+        });
     });
     let rt = f.b.runtimes(&nc()).unwrap();
     assert!(rt.errors.is_empty(), "{:?}", rt.errors);
     assert_eq!(rt.runtimes.len(), 3);
+    // Each runtime's region comes from its proxy host; the proxy token never leaves the helper.
+    let accounts = [alice.id.as_str().to_owned(), bob.id.as_str().to_owned()];
+    let reply = f.helper().call("assignments", &accounts, &nc()).unwrap();
+    assert!(!reply.to_string().contains("fake-proxy-token"), "{reply}");
     let bobs = rt.runtimes.iter().find(|r| r.id.account == bob.id).unwrap();
     assert!(!bobs.on_active_account && bobs.managed);
+    assert_eq!(bobs.region.as_deref(), Some("us-west1"));
     let err =
         f.b.extend_session(&bobs.id, Duration::from_secs(3600), &nc())
             .unwrap_err();
@@ -365,6 +372,7 @@ fn per_account_state_files_switching_and_cross_account_stop() {
         .find(|r| r.id.endpoint == "browser-1")
         .unwrap();
     assert!(!unmanaged.managed && unmanaged.id.name.is_none());
+    assert_eq!(unmanaged.region.as_deref(), Some("europe-west4"));
     f.b.stop_session(&unmanaged.id, StopOptions::default(), &nc())
         .unwrap();
     assert_eq!(f.assignments("alice").len(), 1);
