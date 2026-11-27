@@ -62,16 +62,17 @@ Non-goals (v1)
 
 They apply to every contributor and agent.
 
-1. **Never run a real `colab` command that touches the account or a runtime** during development
-   or tests: nothing that authenticates, lists, creates, stops, executes or changes credentials
-   (`sessions` prunes local state; most subcommands trigger an update check). The only real
-   invocations allowed are `colab help [CMD]` and `colab version`, which do neither. The CLI is
-   open source (github.com/googlecolab/google-colab-cli, installed version 0.8.0): read it
-   instead of experimenting. Do not use the `colab-operator` skill to try things.
+1. **A real `colab` command spends compute units and changes real state, so whoever runs one
+   cleans up after it.** Create runtimes with a throw-away state file (`--config`): `sessions`
+   prunes from the state file it is given every record the signed-in account does not hold, and
+   the app keeps one such file per account. Prefer a CPU runtime, stop every runtime you start,
+   and confirm with `colab sessions` that it is gone. No test runs a real `colab` (rules 3 and
+   4). The CLI is open source (github.com/googlecolab/google-colab-cli, installed version 0.8.0),
+   and its source answers most questions without a runtime.
 2. Debug builds default to the **mock** backend. The real backend needs `--real` (or
    `COLAB_PLAYGROUND_BACKEND=real`). Release builds default to real; `--mock` forces mock.
-   The app on the real backend runs real `colab` commands, so an agent starts it there only when
-   asked to.
+   The app on the real backend acts on the user's own accounts, state files and runtimes, not on
+   throw-away ones, so an agent starts it there only when asked to.
 3. No test may spawn `wsl.exe`, except the `#[ignore]`d Windows smoke tests of the WSL bridge
    (`wsl_smoke`), which only run `printf`/`cat` round trips and never name `colab`.
 4. The real backend is tested only against the **fake CLI** (`crates/core/tests/fake/`), on unix.
