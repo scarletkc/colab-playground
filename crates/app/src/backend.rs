@@ -75,12 +75,13 @@ impl fmt::Display for BackendError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BackendError::ConflictingFlags => write!(f, "pass at most one of --mock and --real"),
-            BackendError::InvalidEnv(value) => {
+            BackendError::InvalidEnv(value) if Build::CURRENT.mock => {
                 write!(
                     f,
                     "{BACKEND_ENV}={value:?} is not one of \"mock\" or \"real\""
                 )
             }
+            BackendError::InvalidEnv(value) => write!(f, "{BACKEND_ENV}={value:?} is not \"real\""),
             #[cfg(feature = "mock")]
             BackendError::UnknownScenario(value) => write!(
                 f,
