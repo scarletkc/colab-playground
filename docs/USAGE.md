@@ -29,8 +29,8 @@ stay where they are (see [Where things are stored](#where-things-are-stored)).
   `SHA256SUMS.sig` is the project's signature of that list, which the app checks before it
   installs an update ([what it covers](RELEASING.md#the-update-signature)).
 
-A download is a release build: it uses the real Colab CLI (see [Build and run](#build-and-run)), so
-the real-mode requirements below apply.
+A download is a release build without demo data: it always uses the real Colab CLI (see
+[Build and run](#build-and-run)), so the real-mode requirements below apply.
 
 ## Updates
 
@@ -106,6 +106,10 @@ cargo run -p colab-playground --release    # release build: real Colab CLI by de
   (exit code 2, with the usage line on standard error), so a mistyped flag never starts the other
   backend. Mock mode shows a **Demo data** badge, and Settings → About → Backend names the backend
   in use.
+- The mock backend is the `mock` cargo feature, on by default. Release downloads are built without
+  it (`--no-default-features`), so they run only the real backend: there `--mock`, the demo flags
+  and `COLAB_PLAYGROUND_BACKEND=mock` are errors (exit code 2), and Settings → About has no
+  Backend row. A debug build without it starts only with `--real`.
 
 ## Demo data
 
@@ -133,8 +137,9 @@ cargo run -p colab-playground -- --mock-scenario signed-out --mock-fail cli-miss
   `update-unverified` (the download fails its check) and `update-install-fails` (installing an
   update; add `update-available`).
 - Both accept `--flag value` or `--flag=value` and apply only when the mock is selected (add
-  `--mock` to a release build). A simulated A100 has 40 GB first and 80 GB on the next attempt:
-  set a minimum GPU memory of 70 GB to watch the retry. Git plugin installs are not simulated.
+  `--mock` to a release build of your own). A simulated A100 has 40 GB first and 80 GB on the next
+  attempt: set a minimum GPU memory of 70 GB to watch the retry. Git plugin installs are not
+  simulated.
 
 Demo mode still reads and writes the normal settings file; set `COLAB_PLAYGROUND_CONFIG_DIR` to
 another folder to keep experiments apart.
