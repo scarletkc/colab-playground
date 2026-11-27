@@ -300,6 +300,10 @@ impl AppState {
     /// [`Self::extend_session`] by `by`, for the command-line operation `operation` when there
     /// is one. The caller has checked that `target` is listed and that its auto-stop is not
     /// being changed already.
+    ///
+    /// A program can ask again and again, so its extension is refused while more than `by` is
+    /// still left. Core checks that against the time it reads inside the call, because the
+    /// listing here is read again only once an extension has succeeded and can be older than it.
     pub(super) fn extend_session_for(
         &mut self,
         target: RuntimeRef,
@@ -308,10 +312,17 @@ impl AppState {
         cx: &mut Context<Self>,
     ) {
         let work_target = target.clone();
+        let from_command_line = operation.is_some();
         self.run_backend(
             Op::Extend(key_of(&target)),
             cx,
-            move |backend, cancel| backend.extend_session(&work_target, by, cancel),
+            move |backend, cancel| {
+                if from_command_line {
+                    backend.extend_session_if_due(&work_target, by, cancel)
+                } else {
+                    backend.extend_session(&work_target, by, cancel)
+                }
+            },
             move |state, result, cx| {
                 if let Some(id) = &operation {
                     state.operation_extended(id, result.as_ref());

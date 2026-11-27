@@ -556,6 +556,10 @@ pub(super) const MESSAGES: Messages = &[
         ERR_SESSION_LIMIT,
         "This account already runs {limit} runtimes, the most allowed.",
     ),
+    (
+        ERR_EXTENSION_NOT_DUE,
+        "Not extended: the command line can extend an auto-stop only when no more time is left than one extension adds. To add time now, use Extend on the runtime.",
+    ),
     (ERR_BUSY, "Another account task is running."),
     (
         ERR_PROVISION_EXHAUSTED,

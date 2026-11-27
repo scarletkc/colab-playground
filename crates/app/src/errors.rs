@@ -85,6 +85,7 @@ pub fn kind_key(kind: ErrorKind) -> Option<&'static str> {
         K::WslUnavailable => keys::ERR_WSL_UNAVAILABLE,
         K::CommandTooLong => keys::ERR_COMMAND_TOO_LONG,
         K::SessionLimitReached => keys::ERR_SESSION_LIMIT,
+        K::ExtensionNotDue => keys::ERR_EXTENSION_NOT_DUE,
         K::Busy => keys::ERR_BUSY,
         K::ProvisionExhausted => keys::ERR_PROVISION_EXHAUSTED,
         K::OrphanSuspected => keys::ERR_ORPHAN_SUSPECTED,
@@ -181,6 +182,7 @@ mod tests {
             ErrorKind::UnsupportedCliVersion,
             ErrorKind::UpdateUnverified,
             ErrorKind::UpdateUnavailable,
+            ErrorKind::ExtensionNotDue,
             ErrorKind::Other,
         ];
         for kind in kinds {

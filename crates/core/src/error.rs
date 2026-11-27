@@ -75,6 +75,10 @@ pub enum ErrorKind {
     /// The app already runs `max_concurrent_sessions` sessions on this
     /// account. Param: `limit`.
     SessionLimitReached,
+    /// An extension that a program may ask for again and again was asked while more time was
+    /// still left before the auto-stop than it adds; nothing was changed
+    /// ([`crate::backend::Backend::extend_session_if_due`]).
+    ExtensionNotDue,
     /// Another account operation holds the credential slot; retry shortly.
     Busy,
     /// Hardware never matched the requested spec within `max_attempts`.
@@ -163,6 +167,9 @@ impl ErrorKind {
             K::PluginExists | K::Cancelled | K::UpdateUnverified | K::UpdateUnavailable => {
                 NextStep::None
             }
+            // Asking again helps only once less time is left, and the program that asked, not
+            // the person who reads the message, decides when that is.
+            K::ExtensionNotDue => NextStep::None,
             K::Unsupported | K::CommandTooLong | K::Parse | K::Io | K::Other => {
                 NextStep::ReportProblem
             }
@@ -421,9 +428,11 @@ mod tests {
             ErrorKind::SshBusy,
             ErrorKind::LoginInvalidCode,
             ErrorKind::AllocationTimeout,
+            ErrorKind::ExtensionNotDue,
         ] {
             assert_eq!(ErrorKind::from_str_lossy(kind.as_str()), kind);
         }
+        assert_eq!(ErrorKind::ExtensionNotDue.as_str(), "extension_not_due");
         assert_eq!(ErrorKind::from_str_lossy("nope"), ErrorKind::Other);
         assert_eq!(
             ErrorKind::ActiveAccountNotAdopted.as_str(),

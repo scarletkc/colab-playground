@@ -136,7 +136,9 @@ pub struct StopArgs {
 }
 
 /// Moves a runtime's auto-stop later by what the window's Extend adds; the caller chooses no
-/// amount, so no extension goes beyond what a click would.
+/// amount, so no extension goes beyond what a click would. It is refused while more than that
+/// is left, so extensions do not pile up: a caller that stops asking leaves the runtime to stop
+/// within two runtime limits.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtendArgs {
@@ -255,6 +257,8 @@ pub enum Code {
     NoAutoStop,
     /// The runtime's auto-stop is being extended, set or cancelled already.
     AutoStopChanging,
+    /// More time is left before the runtime's auto-stop than an extension adds.
+    ExtensionNotDue,
     /// The runtime has no session name to forward it by (it was opened in the browser).
     UnnamedRuntime,
     /// Another forward of the app listens on that port of this computer.

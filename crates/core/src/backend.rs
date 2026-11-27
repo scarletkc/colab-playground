@@ -133,6 +133,25 @@ impl Extension {
     }
 }
 
+/// Whether [`Backend::extend_session_if_due`] extends by `by` with `time_left` before the
+/// auto-stop: when no more than one extension's worth is left. Callers that check ahead of the
+/// call use this too, so they refuse exactly what the call would.
+pub fn extension_due(time_left: Duration, by: Duration) -> bool {
+    time_left <= by
+}
+
+/// The time to the new auto-stop for [`Backend::extend_session_if_due`], or why there is none.
+pub(crate) fn extend_if_due(time_left: Duration, by: Duration) -> Result<Duration> {
+    if extension_due(time_left, by) {
+        return Ok(time_left + by);
+    }
+    Err(Error::new(ErrorKind::ExtensionNotDue).detail(format!(
+        "{} s left before the auto-stop, more than the {} s an extension adds",
+        time_left.as_secs_f64().ceil(),
+        by.as_secs()
+    )))
+}
+
 /// Options for stopping a runtime (more pre-stop steps will be added here).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StopOptions {
@@ -336,6 +355,20 @@ pub trait Backend: Send + Sync {
     /// does, with the same result when the watchdog cannot be started and
     /// the same errors.
     fn extend_session(
+        &self,
+        target: &RuntimeRef,
+        by: Duration,
+        cancel: &CancelToken,
+    ) -> Result<Extension>;
+    /// [`Backend::extend_session`] for a caller that can ask again and again, such as a
+    /// program: refused with [`ErrorKind::ExtensionNotDue`] while more than `by` is still left
+    /// before the auto-stop ([`extension_due`]), before anything is changed. A caller that
+    /// keeps asking keeps the runtime running, and once it stops asking the runtime stops
+    /// within twice `by`: the runtime limit may be the only cost guard the user has on.
+    ///
+    /// The time left is the one `extend_session` reads inside the call, so an extension the
+    /// caller's listing does not show yet counts.
+    fn extend_session_if_due(
         &self,
         target: &RuntimeRef,
         by: Duration,

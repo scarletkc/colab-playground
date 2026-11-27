@@ -1160,7 +1160,7 @@ impl MockBackend {
     fn move_auto_stop(
         &self,
         target: &RuntimeRef,
-        runtime_from_time_left: impl FnOnce(Duration) -> Duration,
+        runtime_from_time_left: impl FnOnce(Duration) -> Result<Duration>,
         cancel: &CancelToken,
     ) -> Result<Extension> {
         self.require_active(&target.account)?;
@@ -1186,7 +1186,8 @@ impl MockBackend {
         let time_left = stop_at
             .and_then(|at| at.duration_since(self.now_()).ok())
             .unwrap_or_default();
-        let runtime = runtime_from_time_left(time_left);
+        // Before the watchdog or the ledger is touched: a refusal leaves both as they were.
+        let runtime = runtime_from_time_left(time_left)?;
         let info = if alive {
             WatchdogInfo {
                 deadline: Some(self.now_() + runtime),
@@ -1618,7 +1619,16 @@ impl Backend for MockBackend {
         by: Duration,
         cancel: &CancelToken,
     ) -> Result<Extension> {
-        self.move_auto_stop(target, |left| left + by, cancel)
+        self.move_auto_stop(target, |left| Ok(left + by), cancel)
+    }
+
+    fn extend_session_if_due(
+        &self,
+        target: &RuntimeRef,
+        by: Duration,
+        cancel: &CancelToken,
+    ) -> Result<Extension> {
+        self.move_auto_stop(target, |left| extend_if_due(left, by), cancel)
     }
 
     fn set_auto_stop(
@@ -1627,7 +1637,7 @@ impl Backend for MockBackend {
         runtime: Duration,
         cancel: &CancelToken,
     ) -> Result<WatchdogInfo> {
-        self.move_auto_stop(target, |_| runtime, cancel)
+        self.move_auto_stop(target, |_| Ok(runtime), cancel)
             .map(|set| set.watchdog)
     }
 
@@ -3345,6 +3355,70 @@ mod tests {
         clock.advance(hour / 4);
         let (rt, _) = tracked_watchdog(&m, "t4-ext");
         assert_eq!(Some(set.auto_stop_at()), rt.auto_stop_at);
+    }
+
+    #[test]
+    fn an_extension_when_due_waits_until_no_more_than_one_is_left() {
+        // Without a step on the clock, the call reads exactly the time left set up here.
+        let (mut cfg, clock) = MockConfig::headless(MockScenario::single());
+        cfg.step_delay = Duration::ZERO;
+        let m = MockBackend::new(cfg);
+        let (tx, _rx) = mpsc::channel();
+        let spec = ProvisionSpec {
+            accelerator: Accelerator::T4,
+            ..m.defaults().provision_spec("t4-due")
+        };
+        m.provision(spec, tx, &nc()).unwrap();
+        let (rt, _) = tracked_watchdog(&m, "t4-due");
+        let account = rt.id.account.clone();
+        let limit = m.defaults().max_runtime.unwrap();
+        let second = Duration::from_secs(1);
+        let entry = |m: &MockBackend| m.w().ledger.live(&account, "t4-due").cloned().unwrap();
+        let alive = |m: &MockBackend| m.w().runtime(&account, "t4-due").unwrap().watchdog_alive;
+        let refused = |m: &MockBackend, by: Duration| {
+            let error = m.extend_session_if_due(&rt.id, by, &nc()).unwrap_err();
+            assert!(error.is(ErrorKind::ExtensionNotDue), "{error}");
+        };
+
+        // A fresh runtime has one runtime limit left, which is one extension's worth.
+        let set = m.extend_session_if_due(&rt.id, limit, &nc()).unwrap();
+        assert_eq!(set.runtime, 2 * limit);
+        let stop = set.auto_stop_at();
+        let before = entry(&m);
+        refused(&m, limit);
+        assert_eq!(entry(&m), before, "the ledger is left as it was");
+        assert!(alive(&m));
+        assert_eq!(tracked_watchdog(&m, "t4-due").0.auto_stop_at, Some(stop));
+
+        // Both sides of the boundary, as time passes.
+        clock.advance(stop.duration_since(m.now()).unwrap() - limit - second);
+        refused(&m, limit);
+        assert_eq!(entry(&m), before);
+        clock.advance(second);
+        let set = m.extend_session_if_due(&rt.id, limit, &nc()).unwrap();
+        assert_eq!(
+            set.auto_stop_at(),
+            stop + limit,
+            "exactly one extension's worth was left"
+        );
+
+        // The window's own extension still adds, however much is left.
+        let stop = set.auto_stop_at();
+        let set = m.extend_session(&rt.id, limit, &nc()).unwrap();
+        assert_eq!(set.auto_stop_at(), stop + limit);
+
+        // A watchdog that is not running is not started again by a refused call.
+        m.cancel_auto_stop(&rt.id, &nc()).unwrap();
+        m.set_failures(MockFailures {
+            watchdog_restart_fails: true,
+            ..MockFailures::default()
+        });
+        assert!(!m.set_auto_stop(&rt.id, 3 * limit, &nc()).unwrap().armed);
+        m.set_failures(MockFailures::default());
+        let before = entry(&m);
+        refused(&m, limit);
+        assert!(!alive(&m), "the watchdog was not started again");
+        assert_eq!(entry(&m), before);
     }
 
     #[test]
