@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc::{self, RecvTimeoutError},
     },
     thread,
@@ -20,7 +20,6 @@ use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
 };
 use gpui::{App, Entity, Global};
-use serde::Deserialize;
 
 use super::{
     Code, Command, Endpoint, MAX_REQUEST_BYTES, PROTOCOL_VERSION, Response, Token, ctl,
@@ -38,8 +37,8 @@ const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// Bytes asked of the connection at a time; a request fits in one.
 const READ_CHUNK: usize = 1024;
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
-/// How long the listener waits for the foreground, which answers from memory and makes no
-/// backend call.
+/// How long the listener waits for the foreground, which answers from memory and waits on no
+/// backend call: a command that starts one answers once it is under way.
 pub(super) const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// What a launch found.
@@ -76,6 +75,47 @@ pub struct Service {
 struct Job {
     command: Command,
     reply: mpsc::Sender<Response>,
+    claim: Arc<AtomicU8>,
+    /// The connection the answer goes to, which tells whether its client still waits.
+    client: Option<Arc<TcpStream>>,
+}
+
+/// Where a job stands between the listener, which waits only so long, and the foreground. It
+/// leaves `PENDING` once, to one side: a request the listener answered `timeout` is never done
+/// afterwards, when it could start a billed runtime nobody was told about.
+const PENDING: u8 = 0;
+const TAKEN: u8 = 1;
+const ABANDONED: u8 = 2;
+
+impl Job {
+    /// Takes the job for the foreground to do. False when nobody waits for its answer any more:
+    /// the listener answered `timeout`, or the client hung up (it waits only so long itself,
+    /// from before its request was read, and it may have been stopped).
+    fn take(&self) -> bool {
+        if self.client.as_deref().is_some_and(hung_up) {
+            return false;
+        }
+        self.claim
+            .compare_exchange(PENDING, TAKEN, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+}
+
+/// Whether the other end closed the connection. A client keeps it open until it has its answer
+/// and sends nothing after its request, so a read that would end at once means it left.
+fn hung_up(stream: &TcpStream) -> bool {
+    if stream.set_nonblocking(true).is_err() {
+        return false;
+    }
+    let gone = match stream.peek(&mut [0u8; 1]) {
+        Ok(read) => read == 0,
+        Err(error) => error.kind() != io::ErrorKind::WouldBlock,
+    };
+    // The listener writes the answer to this connection, and waits for the write.
+    if let Err(error) = stream.set_nonblocking(false) {
+        log::warn!("control: could not set a connection back to blocking: {error}");
+    }
+    gone
 }
 
 /// Set when the app is on its way out, so a second launch waits for the lock instead of
@@ -137,9 +177,20 @@ impl Owner {
         let (jobs, inbox) = unbounded();
         let quitting = self.quitting.clone();
         let flavor = self.flavor;
-        let endpoint = listen(&self.dir, flavor, move |command| {
-            forward(&jobs, &quitting, flavor, command)
-        })?;
+        let endpoint = listen_with(
+            &self.dir,
+            flavor,
+            move |command, client: &Arc<TcpStream>| {
+                forward(
+                    &jobs,
+                    &quitting,
+                    flavor,
+                    command,
+                    Some(client.clone()),
+                    ANSWER_TIMEOUT,
+                )
+            },
+        )?;
         self.endpoint = Some(endpoint.clone());
         Ok(Service {
             jobs: inbox,
@@ -165,24 +216,54 @@ fn remove_endpoint(path: &Path) {
     }
 }
 
-/// Hands one request to the foreground and waits for its answer.
+/// Hands one request to the foreground and waits up to `wait` for it to begin on it. Answers
+/// `timeout` only for a request the foreground then never does.
 fn forward(
     jobs: &UnboundedSender<Job>,
     quitting: &AtomicBool,
     flavor: Flavor,
     command: Command,
+    client: Option<Arc<TcpStream>>,
+    wait: Duration,
 ) -> Response {
-    let gone = || Response::failure(Some(flavor), Code::Quitting, None);
     if quitting.load(Ordering::SeqCst) {
-        return gone();
+        return Response::failure(Some(flavor), Code::Quitting, None);
     }
     let (reply, answer) = mpsc::channel();
-    if jobs.unbounded_send(Job { command, reply }).is_err() {
-        return gone();
+    let claim = Arc::new(AtomicU8::new(PENDING));
+    let job = Job {
+        command,
+        reply,
+        claim: claim.clone(),
+        client,
+    };
+    if jobs.unbounded_send(job).is_err() {
+        return Response::failure(Some(flavor), Code::Quitting, None);
     }
-    match answer.recv_timeout(ANSWER_TIMEOUT) {
+    await_answer(&answer, &claim, flavor, wait)
+}
+
+/// Waits up to `wait` for the foreground to begin on a job, and then for its answer.
+fn await_answer(
+    answer: &mpsc::Receiver<Response>,
+    claim: &AtomicU8,
+    flavor: Flavor,
+    wait: Duration,
+) -> Response {
+    // The job was dropped undone: the app is on its way out, or the client hung up.
+    let gone = || Response::failure(Some(flavor), Code::Quitting, None);
+    match answer.recv_timeout(wait) {
         Ok(response) => response,
-        Err(RecvTimeoutError::Timeout) => Response::failure(Some(flavor), Code::Timeout, None),
+        Err(RecvTimeoutError::Timeout) => {
+            let abandoned = claim
+                .compare_exchange(PENDING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok();
+            if abandoned {
+                return Response::failure(Some(flavor), Code::Timeout, None);
+            }
+            // The foreground has begun on it: its answer says what was done.
+            answer.recv().unwrap_or_else(|_| gone())
+        }
         Err(RecvTimeoutError::Disconnected) => gone(),
     }
 }
@@ -193,6 +274,16 @@ fn forward(
 pub fn listen<H>(dir: &Path, flavor: Flavor, mut handler: H) -> io::Result<PathBuf>
 where
     H: FnMut(Command) -> Response + Send + 'static,
+{
+    listen_with(dir, flavor, move |command, _: &Arc<TcpStream>| {
+        handler(command)
+    })
+}
+
+/// [`listen`], with a handler that also gets the connection its answer goes to.
+fn listen_with<H>(dir: &Path, flavor: Flavor, mut handler: H) -> io::Result<PathBuf>
+where
+    H: FnMut(Command, &Arc<TcpStream>) -> Response + Send + 'static,
 {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();
@@ -212,6 +303,7 @@ where
             for stream in listener.incoming() {
                 match stream {
                     Ok(stream) => {
+                        let stream = Arc::new(stream);
                         if let Err(error) = answer_connection(&stream, &token, flavor, &mut handler)
                         {
                             log::debug!("control: a connection ended early: {error}");
@@ -226,20 +318,22 @@ where
 }
 
 fn answer_connection<H>(
-    stream: &TcpStream,
+    stream: &Arc<TcpStream>,
     token: &Token,
     flavor: Flavor,
     handler: &mut H,
 ) -> io::Result<()>
 where
-    H: FnMut(Command) -> Response,
+    H: FnMut(Command, &Arc<TcpStream>) -> Response,
 {
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let line = read_request(stream, Instant::now() + READ_TIMEOUT)?;
-    let response = respond(&line, token, flavor, handler);
+    let response = respond(&line, token, flavor, &mut |command| {
+        handler(command, stream)
+    });
     let mut text = serde_json::to_string(&response)?;
     text.push('\n');
-    let mut writer = stream;
+    let mut writer: &TcpStream = stream;
     writer.write_all(text.as_bytes())?;
     writer.flush()
 }
@@ -270,53 +364,67 @@ fn read_request(stream: &TcpStream, deadline: Instant) -> io::Result<String> {
     Ok(String::from_utf8_lossy(&line).into_owned())
 }
 
-/// Every field optional, so the token is checked before anything else about the request.
-#[derive(Deserialize)]
-struct RawRequest {
-    #[serde(default)]
-    token: Option<String>,
-    #[serde(default)]
-    v: Option<u32>,
-    #[serde(default)]
-    backend: Option<serde_json::Value>,
-    #[serde(default)]
-    command: Option<serde_json::Value>,
-}
+/// The fields of a request; any other is refused rather than ignored, so a newer client's
+/// request is never read as a different one.
+const REQUEST_FIELDS: [&str; 5] = ["v", "token", "backend", "command", "args"];
 
 /// The response to one request line. A request without the token learns nothing, not even
-/// which backend answers.
+/// which backend answers: the line is read as a bare object so the token is checked before
+/// anything else about it.
 pub(super) fn respond<H>(line: &str, token: &Token, flavor: Flavor, handler: &mut H) -> Response
 where
     H: FnMut(Command) -> Response + ?Sized,
 {
-    let raw = serde_json::from_str::<RawRequest>(line.trim())
+    let raw = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(line.trim())
         .ok()
-        .filter(|raw| raw.token.as_deref().is_some_and(|sent| token.matches(sent)));
-    let Some(raw) = raw else {
+        .filter(|raw| {
+            raw.get("token")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|sent| token.matches(sent))
+        });
+    let Some(mut raw) = raw else {
         log::warn!("control: refused a request without the token");
         return Response::failure(None, Code::Unauthorized, None);
     };
     let refuse = |code, message: String| Response::failure(Some(flavor), code, Some(message));
-    if raw.v != Some(PROTOCOL_VERSION) {
+    if raw.get("v").and_then(serde_json::Value::as_u64) != Some(u64::from(PROTOCOL_VERSION)) {
         return refuse(
             Code::UnsupportedVersion,
             format!("this copy speaks protocol version {PROTOCOL_VERSION}"),
         );
     }
     let backend = raw
-        .backend
-        .and_then(|value| serde_json::from_value::<Flavor>(value).ok());
+        .get("backend")
+        .and_then(|value| serde_json::from_value::<Flavor>(value.clone()).ok());
     if backend != Some(flavor) {
         return refuse(
             Code::WrongBackend,
             format!("this copy runs on the {} backend", super::kind_name(flavor)),
         );
     }
-    let Some(command) = raw
-        .command
-        .and_then(|value| serde_json::from_value::<Command>(value).ok())
-    else {
-        return refuse(Code::InvalidRequest, "unknown command".to_owned());
+    if let Some(field) = raw
+        .keys()
+        .find(|key| !REQUEST_FIELDS.contains(&key.as_str()))
+    {
+        return refuse(
+            Code::InvalidRequest,
+            format!("this copy does not know the field {field:?}"),
+        );
+    }
+    let mut asked = serde_json::Map::new();
+    for field in ["command", "args"] {
+        if let Some(value) = raw.remove(field).filter(|value| !value.is_null()) {
+            asked.insert(field.to_owned(), value);
+        }
+    }
+    let command = match serde_json::from_value::<Command>(asked.into()) {
+        Ok(command) => command,
+        Err(error) => {
+            return refuse(
+                Code::InvalidRequest,
+                format!("this copy does not understand the request: {error}"),
+            );
+        }
     };
     log::info!("control: asked {}", command.name());
     handler(command)
@@ -342,11 +450,18 @@ pub fn serve(service: Service, state: Entity<AppState>, cx: &mut App) {
     let state = state.downgrade();
     cx.spawn(async move |cx| {
         while let Some(job) = jobs.next().await {
+            if !job.take() {
+                log::warn!(
+                    "control: left {} undone; nobody waits for its answer any more",
+                    job.command.name()
+                );
+                continue;
+            }
             let response = cx.update(|cx| match state.upgrade() {
                 Some(state) => answer(job.command, &state, cx),
                 None => Response::failure(None, Code::Quitting, None),
             });
-            // The listener gave up waiting: nobody is left to tell.
+            // The listener is gone only when the app is on its way out.
             let _ = job.reply.send(response);
         }
     })
@@ -360,7 +475,7 @@ pub fn mark_quitting(quitting: bool, cx: &App) {
     }
 }
 
-/// The answer to `command` from what the app shows now.
+/// The answer to `command` from what the app shows now, after doing what it asks.
 pub fn answer(command: Command, state: &Entity<AppState>, cx: &mut App) -> Response {
     let flavor = state.read(cx).flavor();
     let quitting = cx
@@ -378,7 +493,7 @@ pub fn answer(command: Command, state: &Entity<AppState>, cx: &mut App) -> Respo
         cx.activate(true);
         return Response::success(flavor, serde_json::json!({}));
     }
-    state.read(cx).control_answer(command, cx)
+    state.update(cx, |state, cx| state.control_answer(command, cx))
 }
 
 #[cfg(test)]
@@ -386,7 +501,7 @@ mod tests {
     use std::{
         io::{self, BufRead, BufReader, Write},
         net::{Ipv4Addr, TcpListener, TcpStream},
-        sync::mpsc,
+        sync::{Arc, atomic::AtomicU8, mpsc},
         thread,
         time::{Duration, Instant},
     };
@@ -394,7 +509,10 @@ mod tests {
     use colab_playground_core::backend::BackendKind as Flavor;
     use futures::StreamExt;
 
-    use super::{Claim, Owner, claim_within, listen, read_request, respond};
+    use super::{
+        Claim, Job, Owner, PENDING, await_answer, claim_within, forward, hung_up, listen,
+        read_request, respond,
+    };
     use crate::control::{
         Code, Command, Endpoint, PROTOCOL_VERSION, Response, Token, ctl, endpoint_file,
     };
@@ -449,7 +567,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp dir");
         let (asked, handled) = mpsc::channel();
         listen(dir.path(), Flavor::Mock, move |command| {
-            asked.send(command).expect("the test listens");
+            asked.send(command.clone()).expect("the test listens");
             echo(command)
         })
         .expect("listens");
@@ -520,20 +638,30 @@ mod tests {
             &mut handler,
         );
         assert_eq!(other_kind.code(), Some(Code::WrongBackend));
-        let unknown = answer(
-            &format!(
-                r#"{{"v":{PROTOCOL_VERSION},"token":"secret","backend":"mock","command":"stop"}}"#
-            ),
-            &mut handler,
-        );
-        assert_eq!(unknown.code(), Some(Code::InvalidRequest));
-        let fine = answer(
-            &format!(
-                r#"{{"v":{PROTOCOL_VERSION},"token":"secret","backend":"mock","command":"usage"}}"#
-            ),
-            &mut handler,
-        );
+        let asked = |rest: &str| {
+            format!(r#"{{"v":{PROTOCOL_VERSION},"token":"secret","backend":"mock",{rest}}}"#)
+        };
+        for refused in [
+            r#""command":"bogus""#,
+            r#""command":"stop""#,
+            r#""command":"usage","args":{"account":"lin"}"#,
+            r#""command":"stop","args":{"runtime":"t4-91c2","force":true}"#,
+            r#""command":"stop","args":{"runtime":"t4-91c2"},"yes":true"#,
+            r#""args":{"runtime":"t4-91c2"}"#,
+        ] {
+            assert_eq!(
+                answer(&asked(refused), &mut handler).code(),
+                Some(Code::InvalidRequest),
+                "{refused} is refused, not read as another request"
+            );
+        }
+        let fine = answer(&asked(r#""command":"usage""#), &mut handler);
         assert_eq!(data(&fine)["command"], "usage");
+        let stop = answer(
+            &asked(r#""command":"stop","args":{"runtime":"t4-91c2"}"#),
+            &mut handler,
+        );
+        assert_eq!(data(&stop)["command"], "stop");
     }
 
     #[test]
@@ -584,7 +712,8 @@ mod tests {
         let (asked, activated) = mpsc::channel();
         thread::spawn(move || {
             while let Some(job) = futures::executor::block_on(service.jobs.next()) {
-                asked.send(job.command).expect("the test listens");
+                assert!(job.take());
+                asked.send(job.command.clone()).expect("the test listens");
                 let _ = job
                     .reply
                     .send(Response::success(Flavor::Mock, serde_json::json!({})));
@@ -601,6 +730,71 @@ mod tests {
             claim_within(dir.path(), Flavor::Real, SHORT),
             Claim::Owner(_)
         ));
+    }
+
+    #[test]
+    fn a_request_answered_as_timed_out_is_never_done_afterwards() {
+        let flavor = Flavor::Mock;
+        let quitting = std::sync::atomic::AtomicBool::new(false);
+        let start = || Command::Start(crate::control::StartArgs::default());
+        let wait = Duration::from_millis(20);
+
+        // The foreground is busy for longer than the listener waits.
+        let (jobs, mut inbox) = futures::channel::mpsc::unbounded::<Job>();
+        let answer = forward(&jobs, &quitting, flavor, start(), None, wait);
+        assert_eq!(answer.code(), Some(Code::Timeout));
+        let late = futures::executor::block_on(inbox.next()).expect("still queued");
+        assert!(!late.take(), "the foreground leaves it undone");
+
+        // The foreground began on it before the wait ran out: its answer is the one given.
+        let (reply, answer) = mpsc::channel();
+        let job = Job {
+            command: start(),
+            reply,
+            claim: Arc::new(AtomicU8::new(PENDING)),
+            client: None,
+        };
+        assert!(job.take());
+        let claim = job.claim.clone();
+        let foreground = thread::spawn(move || {
+            thread::sleep(SHORT);
+            let done = Response::success(flavor, serde_json::json!({ "operation": "x-1" }));
+            job.reply.send(done).expect("the listener still waits");
+        });
+        let answer = await_answer(&answer, &claim, flavor, wait);
+        foreground.join().expect("the foreground ran");
+        assert!(answer.ok, "{answer:?}");
+    }
+
+    #[test]
+    fn a_request_whose_client_hung_up_is_left_undone() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("binds");
+        let client = TcpStream::connect(listener.local_addr().expect("an address")).expect("up");
+        let (server, _) = listener.accept().expect("accepts");
+        let server = Arc::new(server);
+        let job = || Job {
+            command: Command::Start(crate::control::StartArgs::default()),
+            reply: mpsc::channel().0,
+            claim: Arc::new(AtomicU8::new(PENDING)),
+            client: Some(server.clone()),
+        };
+        assert!(job().take(), "its client still waits");
+        // Looking did not change how the answer is written and read.
+        (&*server).write_all(b"answer\n").expect("written");
+        let mut answer = String::new();
+        BufReader::new(&client)
+            .read_line(&mut answer)
+            .expect("read");
+        assert_eq!(answer, "answer\n");
+
+        drop(client);
+        // The close reaches this end a moment later.
+        let deadline = Instant::now() + SHORT;
+        while !hung_up(&server) {
+            assert!(Instant::now() < deadline, "the close never arrived");
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!job().take(), "nobody waits for the answer");
     }
 
     #[test]

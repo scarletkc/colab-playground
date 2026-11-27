@@ -205,21 +205,56 @@ impl AppState {
             cx.notify();
             return;
         }
+        self.run_provision(None, cx);
+    }
+
+    /// Starts a runtime from `spec` the way the dialog's Start does, for the command-line
+    /// operation `operation`. The dialog stays as it is (hidden, unless it was open): the
+    /// Sessions page shows the progress with Cancel, as for a start whose dialog was hidden.
+    /// The caller has checked that no provision runs and that the form is not being filled in.
+    pub(super) fn start_provision_for(
+        &mut self,
+        spec: ProvisionSpec,
+        operation: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.new_session = Some(NewSession {
+            suggested_name: spec.name.clone(),
+            spec,
+            phase: ProvisionPhase::Editing,
+            progress: ProvisionProgress::default(),
+            scroll: ScrollHandle::new(),
+        });
+        self.run_provision(Some(operation), cx);
+    }
+
+    /// Provisions the dialog's spec; `operation` is the command-line operation that follows it.
+    fn run_provision(&mut self, operation: Option<String>, cx: &mut Context<Self>) {
+        let Some(session) = &mut self.new_session else {
+            return;
+        };
         session.phase = ProvisionPhase::Running;
         session.progress = ProvisionProgress::default();
         let spec = session.spec.clone();
+        let followed = operation.clone();
         self.run_backend_streaming(
             Op::Provision,
             cx,
             move |backend, events, cancel| backend.provision(spec, events, cancel),
-            |state, event, cx| {
+            move |state, event, cx| {
                 let at = state.backend_now();
+                if let Some(id) = &followed {
+                    state.operation_progress(id, &event);
+                }
                 if let Some(session) = &mut state.new_session {
                     session.progress.push(event, at);
                     cx.notify();
                 }
             },
-            |state, result, cx| {
+            move |state, result, cx| {
+                if let Some(id) = &operation {
+                    state.operation_ended(id, result.as_ref().map(Some));
+                }
                 if let Ok(outcome) = &result {
                     let name = outcome.name.clone();
                     state.toast_done(

@@ -94,11 +94,35 @@ pub(super) const MESSAGES: Messages = &[
     ),
     (
         SETTINGS_CONTROL_DESCRIPTION,
-        "Programs you run on this computer can then read your accounts, runtimes and usage with the command colab-playground ctl, as this window shows them. They cannot change anything.",
+        "Programs you run on this computer can then read your accounts, runtimes and usage with the command colab-playground ctl, as this window shows them. With only this on, they cannot change anything.",
+    ),
+    (
+        SETTINGS_CONTROL_CHANGES_TITLE,
+        "Also allow starting and stopping runtimes",
+    ),
+    (
+        SETTINGS_CONTROL_CHANGES_DESCRIPTION,
+        "Those programs can then start runtimes on the active account, which use compute units until they stop, and stop runtimes on any saved account. Your defaults and limits still apply, and only this window can change them.",
     ),
     (
         CONTROL_OFF,
         "Control from the command line is turned off. Turn it on in {app}: {page} → {section} → {setting}.",
+    ),
+    (
+        CONTROL_CHANGES_OFF,
+        "Starting and stopping runtimes from the command line is turned off. Turn it on in {app}: {page} → {section} → {setting}.",
+    ),
+    (
+        CTL_STARTING_TOAST,
+        "Starting {name}, as asked from the command line",
+    ),
+    (
+        CTL_STOPPING_TOAST,
+        "Stopping {name}, as asked from the command line",
+    ),
+    (
+        CTL_CANCELLING_TOAST,
+        "Cancelling the start of {name}, as asked from the command line",
     ),
     (TOAST_OPEN_FOLDER_FAILED_TITLE, "Couldn't open the folder"),
     (TOAST_SAVE_FAILED_TITLE, "Couldn't save settings"),
@@ -690,6 +714,7 @@ pub(super) const MESSAGES: Messages = &[
     (ENDED_TITLE, "Ended recently"),
     (ENDED_LINE, "{name} · {email}"),
     (ENDED_USER, "You stopped it."),
+    (ENDED_COMMAND_LINE, "Stopped from the command line."),
     (ENDED_GUARD, "Stopped by the cost guard: {why}"),
     (
         ENDED_VANISHED,

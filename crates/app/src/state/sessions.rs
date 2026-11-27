@@ -55,6 +55,8 @@ pub struct Ended {
 #[derive(Clone, Debug, PartialEq)]
 pub enum EndReason {
     User,
+    /// Stopped by a program the user allowed to, with `colab-playground ctl stop`.
+    CommandLine,
     Guard(Concern),
     /// It disappeared: its watchdog, Colab, or a stop elsewhere.
     Vanished,
@@ -218,6 +220,17 @@ impl AppState {
 
     /// Stops `target` now (the caller has confirmed).
     pub(crate) fn stop_runtime(&mut self, target: RuntimeRef, cx: &mut Context<Self>) {
+        self.stop_runtime_for(target, None, cx);
+    }
+
+    /// [`Self::stop_runtime`], for the command-line operation `operation` when there is one.
+    /// The caller has checked that `target` is not being stopped already.
+    pub(super) fn stop_runtime_for(
+        &mut self,
+        target: RuntimeRef,
+        operation: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let label = self
             .runtime(&target)
             .map(runtime_label)
@@ -234,6 +247,9 @@ impl AppState {
                 Ok(backend.now())
             },
             move |state, result, cx| {
+                if let Some(id) = &operation {
+                    state.operation_ended(id, result.as_ref().map(|_| None));
+                }
                 let prompt_open =
                     matches!(&state.overlay, Some(Overlay::Stop(p)) if p.target == target);
                 match result {
@@ -242,16 +258,17 @@ impl AppState {
                             state.overlay = None;
                         }
                         state.forget_runtime(&target);
-                        state.record_ended(
-                            target.clone(),
-                            label.clone(),
-                            email,
-                            EndReason::User,
-                            Some(now),
-                        );
+                        let reason = match operation {
+                            Some(_) => EndReason::CommandLine,
+                            None => EndReason::User,
+                        };
+                        state.record_ended(target.clone(), label.clone(), email, reason, Some(now));
                         state.toast_done(tr_args(cx, keys::STOP_DONE, &[("name", &label)]), cx);
                         state.after_runtime_change(cx);
-                        state.ask_for_feedback_after_stop(cx);
+                        // The ask comes after the user's own stop, not a program's.
+                        if operation.is_none() {
+                            state.ask_for_feedback_after_stop(cx);
+                        }
                     }
                     Err(error) => {
                         log::warn!("sessions: stopping {label} failed: {error}");

@@ -33,18 +33,17 @@ A stopped runtime is wiped, and the guards stop runtimes on their own. A session
 
 ### Headless control
 
-`colab-playground ctl` reads what the running app shows: its status, the accounts, the sessions
-and the usage ([USAGE.md](USAGE.md#control-from-the-command-line)). The next steps keep the same
-footing: `ctl` asks the copy of the app that owns the state, and nothing works until the user
-allows control from the command line.
+`colab-playground ctl` reads what the running app shows (its status, the accounts, the sessions
+and the usage) and starts and stops runtimes through it
+([USAGE.md](USAGE.md#control-from-the-command-line)). The next steps keep the same footing: `ctl`
+asks the copy of the app that owns the state, nothing works until the user allows control from
+the command line, and nothing changes until they also allow changes.
 
-- **Commands that change things:** start and stop runtimes, extend or change an auto-stop,
-  forward a port, run a plugin, switch account. A long one answers at once with an operation id
-  to follow it by, and a client that goes away cancels nothing: cancelling stops the runtime, so
-  it is asked for by name. Each first shows what it would do and changes nothing unless `--yes`
-  is given. A secret reaches a command on standard input, never as an argument. Asking for a
-  fresh listing belongs here too: a usage refresh runs a cost-guard round, which can stop a
-  runtime.
+- **More commands that change things:** extend or change an auto-stop, forward a port, run a
+  plugin, switch account, on the footing of `start` and `stop`: a preview unless `--yes` is given,
+  and an operation id for a long one. A secret reaches a command on standard input, never as an
+  argument. Asking for a fresh listing belongs here too: a usage refresh runs a cost-guard round,
+  which can stop a runtime.
 - **What stays in the window:** signing in, removing an account, changing the defaults (the
   limits an agent works within), installing or removing a plugin, and updating the app.
 - **Starting without a window:** the app as an owner in the background, for a computer nobody

@@ -10,6 +10,7 @@ mod control;
 mod defaults;
 mod environment;
 mod feedback;
+mod operations;
 mod ops;
 mod plugins;
 mod provision;
@@ -50,6 +51,7 @@ pub use environment::{
 pub use feedback::{
     ASK_AGAIN_AFTER, MOST_ASKS, PROJECT_PAGE, READY_BEFORE_ASKING, SPONSOR_PAGE, feedback_page,
 };
+pub use operations::ENDED_OPERATIONS_KEPT;
 pub use ops::{Op, key_of};
 pub use plugins::{HF_TOKEN, InstallPrompt, RemovePrompt, is_git_source};
 pub use provision::{LimitReached, NewSession, ProvisionPhase, ProvisionProgress};
@@ -181,6 +183,8 @@ pub struct AppState {
     update_attempted_at: Option<u64>,
     /// When an update check last got an answer in this run. Not saved, so every start checks.
     update_answered_at: Option<u64>,
+    /// What `colab-playground ctl` started or stopped, and how it went.
+    operations: operations::Operations,
 }
 
 /// A dialog other than the account ones (those are [`AccountDialog`]).
@@ -315,6 +319,7 @@ impl AppState {
                 installed: None,
                 update_attempted_at: None,
                 update_answered_at: None,
+                operations: operations::Operations::default(),
             };
             state.font_fallbacks = platform::font_fallbacks(language, &state.cjk_fonts);
             state.apply_mode(true, cx);
