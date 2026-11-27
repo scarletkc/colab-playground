@@ -1,12 +1,12 @@
 //! Updates: whether a newer release is published, and installing it in place when the user
 //! asks.
 //!
-//! Automatic checks run from the usage poller (so never before the first frame or the setup
-//! checks), at most once a day on the backend clock; the time of the last check is saved, so a
-//! restart within the day does not check again. A failed automatic check is only shown in
-//! Settings → About; a manual one also says so in a toast. A found release is announced once
-//! per version (a banner the user can dismiss for that version) and stays marked in the sidebar
-//! and in About until this build is at least that version.
+//! The automatic check runs once per start, from the usage poller (so never before the first
+//! frame or the setup checks). A check that gets no answer is tried again hourly on the backend
+//! clock until one does. A failed automatic check is only shown in Settings → About; a manual
+//! one also says so in a toast. A found release is announced once per version (a banner the
+//! user can dismiss for that version) and stays marked in the sidebar and in About until this
+//! build is at least that version.
 //!
 //! Installing is one action, "Download and restart", confirmed once with what a restart
 //! affects. The backend checks the download before anything changes. Once the new version is in
@@ -32,9 +32,8 @@ use crate::{
     settings::OnByDefault,
 };
 
-/// How often the automatic check asks GitHub.
-pub const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 3600);
-// Avoids hammering GitHub every POLL_CHECK when offline, without marking the daily check done.
+// Offline at start-up still gets a check once the network is back, without asking GitHub at
+// every POLL_CHECK meanwhile.
 const UPDATE_RETRY_INTERVAL: Duration = Duration::from_secs(3600);
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -204,8 +203,8 @@ impl AppState {
         );
     }
 
-    /// One poller wake: checks when automatic checks are on, a day has passed since the last
-    /// check that got an answer and an hour since the last try (on the backend clock).
+    /// One poller wake: checks when automatic checks are on, no check has got an answer in
+    /// this run and an hour has passed since the last try (on the backend clock).
     pub(crate) fn maybe_check_updates(&mut self, cx: &mut Context<Self>) {
         if self.checks_updates() && !self.ops.is_running(Op::UpdateCheck) {
             self.run_update_check(false, cx);
@@ -217,17 +216,16 @@ impl AppState {
             return;
         }
         if !manual {
+            if self.update_answered {
+                return;
+            }
             match &self.backend {
                 Ok(backend) => {
                     let now = secs(backend.now());
-                    let due_saved = self
-                        .settings
-                        .update_checked_at
-                        .is_none_or(|last| now >= last + UPDATE_INTERVAL.as_secs());
-                    let due_retry = self
+                    if self
                         .update_attempted_at
-                        .is_none_or(|last| now >= last + UPDATE_RETRY_INTERVAL.as_secs());
-                    if !(due_saved && due_retry) {
+                        .is_some_and(|last| now < last + UPDATE_RETRY_INTERVAL.as_secs())
+                    {
                         return;
                     }
                 }
@@ -255,7 +253,7 @@ impl AppState {
                 state.update_attempted_at = Some(now);
                 match outcome {
                     Ok(UpdateStatus::UpToDate) => {
-                        state.settings.update_checked_at = Some(now);
+                        state.update_answered = true;
                         state.update = UpdateCheck::UpToDate;
                         if state
                             .settings
@@ -264,11 +262,11 @@ impl AppState {
                             .is_some_and(|v| !is_newer(v))
                         {
                             state.settings.update_latest = None;
+                            state.persist_settings(cx);
                         }
-                        state.persist_settings(cx);
                     }
                     Ok(UpdateStatus::Available(release)) => {
-                        state.settings.update_checked_at = Some(now);
+                        state.update_answered = true;
                         state.settings.update_latest = Some(release.version.clone());
                         state.update = UpdateCheck::Available(release);
                         // Where the app is may have changed since start-up.

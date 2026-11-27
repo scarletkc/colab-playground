@@ -1112,7 +1112,7 @@ pub(super) const MESSAGES: Messages = &[
     (UPDATE_AUTO, "자동으로 업데이트 확인"),
     (
         UPDATE_AUTO_HINT,
-        "하루에 한 번 GitHub에 확인하며, 앱 버전 외에는 아무것도 보내지 않습니다.",
+        "앱을 시작할 때마다 한 번 GitHub에 확인하며, 앱 버전 외에는 아무것도 보내지 않습니다.",
     ),
     (
         UPDATE_NOTICE_TITLE,

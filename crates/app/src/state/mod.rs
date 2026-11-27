@@ -57,7 +57,7 @@ pub use runs::{
 };
 pub use sessions::{EndReason, Ended, StopPrompt, runtime_label};
 pub use tunnels::{FORWARD_START_PORT, ForwardForm, local_url};
-pub use updates::{UPDATE_INTERVAL, UpdateCheck, UpdatePhase, UpdatePrompt, is_newer};
+pub use updates::{UpdateCheck, UpdatePhase, UpdatePrompt, is_newer};
 pub use usage::{
     POLL_CHECK, UsageSummary, is_stale as usage_is_stale, stale_note as usage_stale_note, summarize,
 };
@@ -174,9 +174,10 @@ pub struct AppState {
     self_update: Option<SelfUpdate>,
     /// An update put in place, waiting to restart into it.
     installed: Option<Installed>,
-    /// When an update check was last tried, answered or not. Kept out of the settings file, so
-    /// a failed check is retried at the next start instead of waiting out the day.
+    /// When an update check was last tried in this run, answered or not.
     update_attempted_at: Option<u64>,
+    /// Whether a check got an answer in this run; the automatic check then asks no more.
+    update_answered: bool,
 }
 
 /// A dialog other than the account ones (those are [`AccountDialog`]).
@@ -310,6 +311,7 @@ impl AppState {
                 self_update: None,
                 installed: None,
                 update_attempted_at: None,
+                update_answered: false,
             };
             state.font_fallbacks = platform::font_fallbacks(language, &state.cjk_fonts);
             state.apply_mode(true, cx);

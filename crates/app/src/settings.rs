@@ -109,17 +109,9 @@ pub struct Settings {
         skip_serializing_if = "Option::is_none"
     )]
     pub colab_python: Option<String>,
-    /// Check GitHub for a newer release automatically (once a day).
+    /// Check GitHub for a newer release automatically (once per start).
     #[serde(default, deserialize_with = "lenient")]
     pub check_updates: OnByDefault,
-    /// When an update check last got an answer (seconds since the Unix epoch, backend clock).
-    /// A check that failed is not recorded, so the next start tries again.
-    #[serde(
-        default,
-        deserialize_with = "lenient",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub update_checked_at: Option<u64>,
     /// The newest release a check found, while it is newer than this build.
     #[serde(
         default,

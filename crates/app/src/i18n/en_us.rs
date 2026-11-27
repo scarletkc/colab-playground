@@ -1100,7 +1100,7 @@ pub(super) const MESSAGES: Messages = &[
     (UPDATE_AUTO, "Check for updates automatically"),
     (
         UPDATE_AUTO_HINT,
-        "Asks GitHub once a day and sends nothing but the app's version.",
+        "Asks GitHub once each time the app starts and sends nothing but the app's version.",
     ),
     (
         UPDATE_NOTICE_TITLE,
