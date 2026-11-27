@@ -197,6 +197,10 @@ ssh-keygen -q -t ed25519 -N "" -C colab-playground -f "$HOME/.ssh/id_ed25519" </
 // not signal WSL children, which would orphan `colab ssh` and lock the runtime's
 // single SSH slot (HTTP 429); the FD-3 monitor turns parent pipe EOF into SIGTERM
 // (FD 3 avoids POSIX `&` redirecting FD 0 to `/dev/null` when `-m` is off).
+// Bash reports a job killed by a signal on stderr (the bash 3.2 of macOS even for SIGTERM),
+// whenever it next looks, and that report would replace the end of ssh's own message in the
+// error. So both `wait`s drop their stderr, and the monitor's kill shares one with its `wait`.
+// SIGKILL, because a monitor started with SIGTERM ignored would leave that `wait` hanging.
 const RUN_SSH: &str = r#"exec 3<&0 </dev/null
 "${CPG_SSH:-ssh}" "$@" 3<&- &
 __cpg_ssh=$!
@@ -215,9 +219,9 @@ __cpg_ssh=$!
 ) </dev/null >/dev/null 2>&1 &
 __cpg_mon=$!
 exec 3<&-
-wait "$__cpg_ssh"
+wait "$__cpg_ssh" 2>/dev/null
 __cpg_rc=$?
-kill -TERM "$__cpg_mon" 2>/dev/null
+{ kill -KILL "$__cpg_mon"; wait "$__cpg_mon"; } 2>/dev/null
 exit "$__cpg_rc""#;
 
 /// Maps ssh / ProxyCommand output to a failure kind (`None` = transient).
