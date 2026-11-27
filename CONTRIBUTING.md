@@ -15,17 +15,22 @@ Issues are welcome, for bugs and ideas alike.
 
 ## Pull requests
 
-From outside the project, only fixes are accepted, each for a problem described in an issue.
+From outside the project, only fixes are accepted.
 
-- **No feature pull requests.** A pull request that adds a feature or changes how one works is
-  closed without review. Suggest the feature in an issue instead, or build it as a plugin in a
-  repository of your own ([PLUGINS.md](docs/PLUGINS.md)) and get it listed in
-  [COMMUNITY_PLUGINS.md](docs/COMMUNITY_PLUGINS.md).
 - **A fix starts from an issue.** Open one first, or pick an existing one, and link it in the pull
-  request with `Fixes #<number>`. A pull request with no issue is closed. This covers corrections
-  to the docs too.
-- **The one exception:** a pull request that adds your plugin to the community list needs no
-  issue; it follows [Getting a plugin listed](docs/COMMUNITY_PLUGINS.md#getting-a-plugin-listed).
+  request with `Fixes #<number>`. A pull request with no issue is closed. The fix may include a
+  test for the problem it fixes.
+- **Slowness counts when a user notices it**, such as high CPU use while the app is idle. The
+  issue says how you measured it, and the pull request shows the numbers before and after.
+- **A mistake in the docs counts too.** A typo or a broken link needs no issue. A wrong statement
+  does, so that it can be checked first.
+- **Everything else is closed without review:** features and changes to how one works,
+  refactoring, speed-ups for a slowness nobody reported, and new or rewritten docs. Suggest a
+  feature in an issue instead, or build it as a plugin in a repository of your own
+  ([PLUGINS.md](docs/PLUGINS.md)) and get it listed in
+  [COMMUNITY_PLUGINS.md](docs/COMMUNITY_PLUGINS.md).
+- **A plugin listing needs no issue:** it follows
+  [Getting a plugin listed](docs/COMMUNITY_PLUGINS.md#getting-a-plugin-listed).
 
 A fix follows the same rules as every change here:
 
