@@ -20,10 +20,11 @@ From outside the project, only fixes are accepted.
 - **A fix starts from an issue.** Open one first, or pick an existing one, and link it in the pull
   request with `Fixes #<number>`. A pull request with no issue is closed. The fix may include a
   test for the problem it fixes.
-- **Slowness counts when a user notices it**, such as high CPU use while the app is idle. The
-  issue says how you measured it, and the pull request shows the numbers before and after.
-- **A mistake in the docs counts too.** A typo or a broken link needs no issue. A wrong statement
-  does, so that it can be checked first.
+- **Slowness is a problem to fix when a user notices it**, such as high CPU use while the app is
+  idle. The issue says how you measured it, and the pull request shows the numbers before and
+  after.
+- **So is a mistake in the docs.** A typo or a broken link needs no issue. A wrong statement does,
+  so that it can be checked first.
 - **Everything else is closed without review:** features and changes to how one works,
   refactoring, speed-ups for a slowness nobody reported, and new or rewritten docs. Suggest a
   feature in an issue instead, or build it as a plugin in a repository of your own
@@ -40,7 +41,7 @@ A fix follows the same rules as every change here:
 - **Design:** the product principle, the scope, the hard safety rules and the invariants in
   [DESIGN.md](docs/DESIGN.md).
 - **Docs and comments:** written as
-  [Docs and comments](docs/DEVELOPMENT.md#docs-and-comments) says.
+  [DEVELOPMENT.md](docs/DEVELOPMENT.md#docs-and-comments) says.
 - **Checks:** CI runs the whole test suite on the pull request, so locally run only the checks of
   what you changed ([A check is made once](docs/TESTING.md#a-check-is-made-once)).
 - **Screenshots:** if the fix changes the interface, attach screenshots of the running app to the
