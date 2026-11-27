@@ -1,0 +1,37 @@
+name: Report a problem
+description: Something in the app does not work as you expect.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The steps that led to the problem, starting from where you were in the app.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: The exact message the app showed helps, and so does a screenshot.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Settings → About shows it. "Give feedback" there fills it in.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: With the processor architecture.
+      placeholder: windows, x86_64
+    validations:
+      required: true

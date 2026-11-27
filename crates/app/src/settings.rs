@@ -154,7 +154,7 @@ pub struct Settings {
         skip_serializing_if = "Option::is_none"
     )]
     pub feedback_asked_at: Option<u64>,
-    /// The user opened the project page or the issue form from the prompt, so it never asks
+    /// The user opened the project page or the issue forms from the prompt, so it never asks
     /// again.
     #[serde(default, deserialize_with = "lenient")]
     pub feedback_answered: bool,
