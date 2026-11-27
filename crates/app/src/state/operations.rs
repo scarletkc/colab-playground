@@ -170,8 +170,8 @@ enum Kind {
 /// Where an extension put the auto-stop.
 #[derive(Serialize)]
 struct ExtendOutcome {
-    #[serde(serialize_with = "serde_secs::option::serialize")]
-    auto_stop_at: Option<SystemTime>,
+    #[serde(serialize_with = "serde_secs::serialize")]
+    auto_stop_at: SystemTime,
     /// When the runtime stops itself, also with the app closed. `None`: nothing on the runtime
     /// stops it, so the stop holds only while the app runs.
     #[serde(serialize_with = "serde_secs::option::serialize")]
@@ -1139,7 +1139,6 @@ impl AppState {
 
     /// The extension that operation `id` follows ended with `result`.
     pub(super) fn operation_extended(&mut self, id: &str, result: Result<&Extension, &Error>) {
-        let now = self.backend_now();
         if let (
             Ok(set),
             Some(Operation {
@@ -1149,12 +1148,7 @@ impl AppState {
         ) = (result, self.operations.find_mut(id))
         {
             *outcome = Some(ExtendOutcome {
-                // The runtime's own deadline, the earlier of the two stops, when it has one; else
-                // the app's limit, which the backend set from its clock a moment before this.
-                auto_stop_at: set
-                    .watchdog
-                    .deadline
-                    .or_else(|| now.map(|now| now + set.runtime)),
+                auto_stop_at: set.auto_stop_at(),
                 auto_stop_on_runtime_at: set.watchdog.enforced_deadline(),
             });
         }

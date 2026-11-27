@@ -115,9 +115,22 @@ pub struct RuntimesView {
 /// What [`Backend::extend_session`] set.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Extension {
-    /// Time to the new auto-stop, from when it was set.
+    /// Time to the new auto-stop, from `set_at`.
     pub runtime: Duration,
     pub watchdog: WatchdogInfo,
+    /// When the app's own limit was set, on the backend's clock.
+    pub set_at: SystemTime,
+}
+
+impl Extension {
+    /// The new auto-stop as a listing reports it: the earlier of the app's own limit and the
+    /// stop the runtime enforces.
+    pub fn auto_stop_at(&self) -> SystemTime {
+        let app = self.set_at + self.runtime;
+        self.watchdog
+            .enforced_deadline()
+            .map_or(app, |runtime| runtime.min(app))
+    }
 }
 
 /// Options for stopping a runtime (more pre-stop steps will be added here).
