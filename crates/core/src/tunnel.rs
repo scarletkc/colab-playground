@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -26,7 +26,7 @@ use crate::accounts::AccountId;
 use crate::cli::{AUTH_PROMPT_MARKER, RESERVED_VM_PORT};
 use crate::clock::{CancelToken, Clock};
 use crate::error::{Error, ErrorKind, Result};
-use crate::host::{Host, ScriptRequest, shell_quote, tail};
+use crate::host::{Host, HostChild, ScriptRequest, shell_quote, tail};
 use crate::hostfs::HostFs;
 use crate::http::{local_http_status, local_port_in_use, local_port_open};
 use crate::paths::HostPath;
@@ -436,15 +436,13 @@ fn run(ctx: TunnelCtx, spec: TunnelSpec, stop: CancelToken, shared: Arc<Shared>)
         let mut gave_up: Option<Error> = None;
         loop {
             if stop.is_cancelled() {
-                child.close_stdin();
-                child.kill();
+                end_job(&mut child);
                 return shared.set(TunnelState::Stopped);
             }
             match child.recv_line(Duration::from_millis(250)) {
                 Ok(line) => {
                     if line.text.contains(AUTH_PROMPT_MARKER) {
-                        child.close_stdin();
-                        child.kill();
+                        end_job(&mut child);
                         return fail(&shared, Error::new(ErrorKind::AuthRequired));
                     }
                     stderr.push(line.text);
@@ -472,8 +470,7 @@ fn run(ctx: TunnelCtx, spec: TunnelSpec, stop: CancelToken, shared: Arc<Shared>)
                     shared.health(ok);
                 }
             } else if started.elapsed() > UP_TIMEOUT {
-                child.close_stdin();
-                child.kill();
+                end_job(&mut child);
                 gave_up =
                     Some(Error::new(ErrorKind::Timeout).detail("the forward did not come up"));
                 break;
@@ -497,6 +494,15 @@ fn run(ctx: TunnelCtx, spec: TunnelSpec, stop: CancelToken, shared: Arc<Shared>)
     }
 }
 
+/// Kills the job, then closes its stdin. In the other order, EOF on stdin has RUN_SSH's monitor
+/// send `ssh` SIGTERM, and an `ssh` that has not connected yet dies of it without hanging up its
+/// ProxyCommand. The job can then end before `kill` looks, so the group is never signalled and
+/// the ProxyCommand goes on to look the session up.
+fn end_job(child: &mut HostChild) {
+    child.kill();
+    child.close_stdin();
+}
+
 struct Entry {
     shared: Arc<Shared>,
     stop: CancelToken,
@@ -509,8 +515,9 @@ impl Entry {
         &i.spec.account == account && i.spec.session == session
     }
 
-    /// Returns once the thread has ended: on a cancel, `run` kills its job's process group, the
-    /// ProxyCommand included, before it returns.
+    /// Returns once the thread has ended, with no ProxyCommand of the tunnel left running: on a
+    /// cancel `run` kills the job's process group, which holds it, and an `ssh` that ended on its
+    /// own has hung it up.
     fn close(mut self) {
         self.stop.cancel();
         if let Some(t) = self.thread.take() {
@@ -523,9 +530,17 @@ impl Entry {
 #[derive(Default)]
 struct Tunnels {
     open: BTreeMap<TunnelId, Entry>,
-    /// Sessions being stopped, with how many stops are at each (a guard stop and the user's can
-    /// overlap).
-    stopping: BTreeMap<(AccountId, String), usize>,
+    stopping: BTreeMap<(AccountId, String), Stopping>,
+}
+
+/// A session being stopped. A guard stop and the user's can overlap.
+#[derive(Default)]
+struct Stopping {
+    /// Stops at it; its tunnels are refused until the last one ends.
+    stops: usize,
+    /// Its tunnels a stop has taken out and not closed yet. Every stop waits for them, not only
+    /// the one that took them.
+    closing: usize,
 }
 
 /// Owns tunnel threads. Dropping it closes every tunnel.
@@ -533,6 +548,8 @@ struct Tunnels {
 pub struct TunnelManager {
     next: AtomicU64,
     tunnels: Mutex<Tunnels>,
+    /// Notified when a stop has closed the tunnels it took out.
+    closed: Condvar,
 }
 
 /// Keeps a session's tunnels from opening while a stop is at it; see
@@ -550,9 +567,9 @@ impl Drop for StopGuard<'_> {
             .tunnels
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if let Some(stops) = tunnels.stopping.get_mut(&self.key) {
-            *stops = stops.saturating_sub(1);
-            if *stops == 0 {
+        if let Some(stopping) = tunnels.stopping.get_mut(&self.key) {
+            stopping.stops = stopping.stops.saturating_sub(1);
+            if stopping.stops == 0 {
                 tunnels.stopping.remove(&self.key);
             }
         }
@@ -643,21 +660,36 @@ impl TunnelManager {
         let key = (account.clone(), session.to_owned());
         let closing: Vec<Entry> = {
             let mut tunnels = self.tunnels.lock().unwrap_or_else(|e| e.into_inner());
-            *tunnels.stopping.entry(key.clone()).or_default() += 1;
             let ids: Vec<TunnelId> = tunnels
                 .open
                 .iter()
                 .filter(|(_, e)| e.is_of(account, session))
                 .map(|(id, _)| *id)
                 .collect();
-            ids.iter()
+            let taken: Vec<Entry> = ids
+                .iter()
                 .filter_map(|id| tunnels.open.remove(id))
-                .collect()
+                .collect();
+            let stopping = tunnels.stopping.entry(key.clone()).or_default();
+            stopping.stops += 1;
+            stopping.closing += taken.len();
+            taken
         };
+        let taken = closing.len();
         // Joined outside the lock: a listing must not wait for a tunnel's `ssh` to be killed.
         for entry in closing {
             entry.close();
         }
+        let mut tunnels = self.tunnels.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(stopping) = tunnels.stopping.get_mut(&key) {
+            stopping.closing = stopping.closing.saturating_sub(taken);
+        }
+        self.closed.notify_all();
+        // An overlapping stop may still be closing tunnels it took out before this one began.
+        while tunnels.stopping.get(&key).is_some_and(|s| s.closing > 0) {
+            tunnels = self.closed.wait(tunnels).unwrap_or_else(|e| e.into_inner());
+        }
+        drop(tunnels);
         StopGuard { manager: self, key }
     }
 
@@ -810,8 +842,14 @@ mod tests {
         }
     }
 
-    /// Adds a tunnel whose thread only waits to be cancelled; the flag tells when it ended.
-    fn add_idle_tunnel(m: &TunnelManager, id: u64, spec: TunnelSpec) -> Arc<AtomicBool> {
+    /// Adds a tunnel whose thread only waits to be cancelled and ends `linger` after it; the
+    /// flag tells when it ended.
+    fn add_idle_tunnel(
+        m: &TunnelManager,
+        id: u64,
+        spec: TunnelSpec,
+        linger: Duration,
+    ) -> Arc<AtomicBool> {
         let ended = Arc::new(AtomicBool::new(false));
         let stop = CancelToken::new();
         let (stop2, ended2) = (stop.clone(), ended.clone());
@@ -819,6 +857,7 @@ mod tests {
             while !stop2.is_cancelled() {
                 std::thread::sleep(Duration::from_millis(10));
             }
+            std::thread::sleep(linger);
             ended2.store(true, Ordering::SeqCst);
         });
         let id = TunnelId(id);
@@ -851,8 +890,8 @@ mod tests {
             local_port: 18001,
             ..spec()
         };
-        let ended = add_idle_tunnel(&m, 1, s.clone());
-        let other_ended = add_idle_tunnel(&m, 2, other);
+        let ended = add_idle_tunnel(&m, 1, s.clone(), Duration::ZERO);
+        let other_ended = add_idle_tunnel(&m, 2, other, Duration::ZERO);
 
         let first = m.close_for_stop(&s.account, &s.session);
         assert!(
@@ -876,6 +915,28 @@ mod tests {
             "the session opened while a second stop was at it"
         );
         drop(second);
+        assert!(m.tunnels.lock().unwrap().stopping.is_empty());
+    }
+
+    #[test]
+    fn an_overlapping_stop_waits_for_the_tunnels_the_first_one_is_closing() {
+        let m = TunnelManager::new();
+        let s = spec();
+        let ended = add_idle_tunnel(&m, 1, s.clone(), Duration::from_millis(300));
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| drop(m.close_for_stop(&s.account, &s.session)));
+            // The first stop has taken the tunnel out once it is no longer listed.
+            while !m.list().is_empty() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let second = m.close_for_stop(&s.account, &s.session);
+            assert!(
+                ended.load(Ordering::SeqCst),
+                "the second stop went on while the first was still closing the tunnel"
+            );
+            drop(second);
+            first.join().unwrap();
+        });
         assert!(m.tunnels.lock().unwrap().stopping.is_empty());
     }
 
