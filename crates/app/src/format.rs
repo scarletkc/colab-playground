@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 use colab_playground_core::{
     backend::InstallMethod,
     guard::{Concern, Limit},
+    location::{Country, country_of_region},
     sessions::Accelerator,
 };
 use ely_gpui_component::i18n::I18n;
@@ -134,6 +135,53 @@ pub fn hardware(cx: &App, gpu: Option<&str>, vram_mib: Option<u32>) -> Option<Sh
         (None, Some(mib)) => Some(vram(cx, mib)),
         (None, None) => None,
     }
+}
+
+/// Where a runtime runs, such as `United States · us-west1`: the place a user knows, and the
+/// region that tells two places in one country apart. A region the app has no place for
+/// stands alone.
+pub fn location(cx: &App, region: &str) -> SharedString {
+    match country_of_region(region) {
+        Some(c) => format!("{} · {region}", country(cx, c)).into(),
+        None => region.to_owned().into(),
+    }
+}
+
+fn country(cx: &App, country: Country) -> SharedString {
+    tr(
+        cx,
+        match country {
+            Country::Australia => keys::COUNTRY_AUSTRALIA,
+            Country::Belgium => keys::COUNTRY_BELGIUM,
+            Country::Brazil => keys::COUNTRY_BRAZIL,
+            Country::Canada => keys::COUNTRY_CANADA,
+            Country::Chile => keys::COUNTRY_CHILE,
+            Country::Finland => keys::COUNTRY_FINLAND,
+            Country::France => keys::COUNTRY_FRANCE,
+            Country::Germany => keys::COUNTRY_GERMANY,
+            Country::HongKong => keys::COUNTRY_HONG_KONG,
+            Country::India => keys::COUNTRY_INDIA,
+            Country::Indonesia => keys::COUNTRY_INDONESIA,
+            Country::Israel => keys::COUNTRY_ISRAEL,
+            Country::Italy => keys::COUNTRY_ITALY,
+            Country::Japan => keys::COUNTRY_JAPAN,
+            Country::Mexico => keys::COUNTRY_MEXICO,
+            Country::Netherlands => keys::COUNTRY_NETHERLANDS,
+            Country::Poland => keys::COUNTRY_POLAND,
+            Country::Qatar => keys::COUNTRY_QATAR,
+            Country::SaudiArabia => keys::COUNTRY_SAUDI_ARABIA,
+            Country::Singapore => keys::COUNTRY_SINGAPORE,
+            Country::SouthAfrica => keys::COUNTRY_SOUTH_AFRICA,
+            Country::SouthKorea => keys::COUNTRY_SOUTH_KOREA,
+            Country::Spain => keys::COUNTRY_SPAIN,
+            Country::Sweden => keys::COUNTRY_SWEDEN,
+            Country::Switzerland => keys::COUNTRY_SWITZERLAND,
+            Country::Taiwan => keys::COUNTRY_TAIWAN,
+            Country::Thailand => keys::COUNTRY_THAILAND,
+            Country::UnitedKingdom => keys::COUNTRY_UNITED_KINGDOM,
+            Country::UnitedStates => keys::COUNTRY_UNITED_STATES,
+        },
+    )
 }
 
 pub fn concern(cx: &App, concern: &Concern) -> SharedString {

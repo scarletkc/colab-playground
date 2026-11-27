@@ -337,6 +337,7 @@ struct MRuntime {
     accelerator: Accelerator,
     high_mem: bool,
     vram_mib: Option<u32>,
+    region: String,
     /// Its VM watchdog is running (a cancelled one exits).
     watchdog_alive: bool,
 }
@@ -535,6 +536,13 @@ impl World {
         format!("m-mock-{:04x}", self.next_id * 7919 % 65536)
     }
 
+    /// Where the runtime of the latest endpoint runs: the demo cycles through a few regions.
+    fn region(&self) -> String {
+        const REGIONS: [&str; 4] = ["us-west1", "europe-west4", "asia-east1", "us-central1"];
+        let i = self.next_id.saturating_sub(1) as usize % REGIONS.len();
+        REGIONS[i].to_owned()
+    }
+
     fn email(&self, id: &AccountId) -> Option<String> {
         self.accounts
             .iter()
@@ -722,6 +730,7 @@ impl MockBackend {
                 accelerator: r.accelerator,
                 high_mem: false,
                 vram_mib: mock_vram(r.accelerator),
+                region: world.region(),
                 watchdog_alive: watchdog.is_some(),
             });
             if let (true, Some(name)) = (r.managed, &r.name) {
@@ -784,6 +793,7 @@ impl MockBackend {
         let mut w = self.w();
         w.settle(now);
         let endpoint = w.endpoint();
+        let region = w.region();
         w.runtimes.push(MRuntime {
             account: account.clone(),
             endpoint: endpoint.clone(),
@@ -791,6 +801,7 @@ impl MockBackend {
             accelerator,
             high_mem: false,
             vram_mib: mock_vram(accelerator),
+            region,
             watchdog_alive: false,
         });
         endpoint
@@ -956,6 +967,7 @@ impl ProvisionOps for MockOps<'_> {
             mock_vram(accelerator)
         };
         let endpoint = w.endpoint();
+        let region = w.region();
         w.runtimes.push(MRuntime {
             account: self.account.clone(),
             endpoint,
@@ -963,6 +975,7 @@ impl ProvisionOps for MockOps<'_> {
             accelerator,
             high_mem,
             vram_mib: vram,
+            region,
             watchdog_alive: false,
         });
         Ok(())
@@ -1506,6 +1519,7 @@ impl Backend for MockBackend {
                 accelerator: Some(r.accelerator),
                 hardware: r.hardware(),
                 high_mem: r.high_mem,
+                region: Some(r.region.clone()),
                 managed: tracked.is_some(),
                 estimated_rate_cu_per_hour: rate.filter(|_| tracked.is_some()),
                 estimated_spend_cu: tracked.as_ref().and_then(|t| t.spend.spend()),

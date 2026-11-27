@@ -79,6 +79,10 @@ pub(super) fn render(
     let hardware = tracked
         .and_then(|t| format::hardware(cx, t.gpu.as_deref(), t.vram_mib))
         .unwrap_or_else(|| runtime.hardware.clone().into());
+    let location = runtime
+        .region
+        .as_deref()
+        .map_or_else(unknown, |r| format::location(cx, r));
     let uptime = match (tracked, now) {
         (Some(t), Some(now)) => format::duration(
             cx,
@@ -133,6 +137,7 @@ pub(super) fn render(
         .flex_wrap()
         .gap_4()
         .child(stat(tr(cx, keys::RUNTIME_HARDWARE), hardware, cx))
+        .child(stat(tr(cx, keys::RUNTIME_LOCATION), location, cx))
         .child(stat(tr(cx, keys::RUNTIME_UPTIME), uptime, cx))
         .child(stat(tr(cx, keys::RUNTIME_RATE), rate, cx))
         .child(stat(tr(cx, keys::RUNTIME_SPEND), spend, cx))

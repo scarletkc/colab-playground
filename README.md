@@ -38,8 +38,8 @@ runtime to your computer and runs plugins on the runtime. Written in Rust with G
   without switching. Before a switch the app lists what it affects.
 - **Sessions on the hardware you want.** Pick CPU, a GPU or a TPU, high RAM and a minimum GPU
   memory. Colab hands out an A100 with 40 GB or 80 GB at random; with a minimum set, the app gives
-  back a smaller GPU and tries again. Runtimes opened in the browser are listed too, and can be
-  stopped.
+  back a smaller GPU and tries again. Each runtime shows the country and Google Cloud region it
+  runs in. Runtimes opened in the browser are listed too, and can be stopped.
 - **Cost guards.** Auto-stop and idle stop run on the runtime itself, so they apply even when the
   app is closed. A spending cap and a balance floor are checked while the app runs. Balance, burn
   rate and time left are shown live.
@@ -56,7 +56,7 @@ Every limit and default is editable in Settings and can be overridden for a sing
 deployment.
 
 <p align="center">
-  <img src="docs/images/sessions.png" alt="The Sessions page: an A100 and a T4 runtime with burn rate, spend so far and an auto-stop countdown, each with Stop and end billing, Extend by 2 h and Forward a port" width="49%" />
+  <img src="docs/images/sessions.png" alt="The Sessions page: an A100 and a T4 runtime with their location, burn rate, spend so far and an auto-stop countdown, each with Stop and end billing, Extend by 2 h and Forward a port" width="49%" />
   <img src="docs/images/deploy.png" alt="The Deploy a GGUF model page: a Hugging Face repository search, the files available and the quantisation estimated for a 40 GB and an 80 GB GPU" width="49%" />
 </p>
 
