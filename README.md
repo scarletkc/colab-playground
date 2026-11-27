@@ -49,6 +49,9 @@ runtime to your computer and runs plugins on the runtime. Written in Rust with G
   (OpenAI-compatible API plus web chat) and picks the best quantisation that fits the GPU it gets.
   Write your own with [docs/PLUGINS.md](docs/PLUGINS.md) and get it listed for others in
   [docs/COMMUNITY_PLUGINS.md](docs/COMMUNITY_PLUGINS.md).
+- **Command line for scripts and AI agents.** Once you allow it in Settings,
+  `colab-playground ctl` reads the accounts, runtimes and usage from the running app as JSON
+  ([how](docs/USAGE.md#control-from-the-command-line)).
 - **Languages and theme.** 简体中文, 繁體中文, 日本語, 한국어 and English; light, dark or follow the
   system.
 

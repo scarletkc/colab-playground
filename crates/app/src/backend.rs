@@ -1,7 +1,8 @@
 //! Which backend the UI talks to, and how it is built.
 //!
-//! `main` resolves the flags into a [`BackendSource`]; `AppState` turns that into an
-//! `Arc<dyn Backend>` once the settings (defaults, WSL distro, `colab` path) are loaded. Tests
+//! `main` resolves the flags into a [`Launch`], and only once this copy owns the state into a
+//! [`BackendSource`]; `AppState` turns that into an `Arc<dyn Backend>` once the settings
+//! (defaults, WSL distro, `colab` path) are loaded. Tests
 //! never come through here: the harness hands `AppState` a headless `MockBackend` directly.
 
 #[cfg(feature = "mock")]
@@ -123,6 +124,13 @@ impl BackendKind {
             (false, _) => Ok(BackendKind::Real),
             (true, true) => Ok(BackendKind::Mock),
             (true, false) => Err(BackendError::NoDefault),
+        }
+    }
+
+    pub fn flavor(self) -> Flavor {
+        match self {
+            BackendKind::Mock => Flavor::Mock,
+            BackendKind::Real => Flavor::Real,
         }
     }
 
@@ -253,16 +261,20 @@ impl MockFlags {
 #[cfg(feature = "mock")]
 pub fn usage() -> String {
     format!(
-        "usage: colab-playground [--real | --mock [--mock-scenario {}] [--mock-fail NAME[,NAME...]]]\n  --mock-fail names: {}",
+        "usage: colab-playground [--real | --mock [--mock-scenario {}] [--mock-fail NAME[,NAME...]]]\n  --mock-fail names: {}\n{}",
         names(SCENARIOS, "|"),
-        names(FAILURES, ", ")
+        names(FAILURES, ", "),
+        crate::control::ctl_usage()
     )
 }
 
 /// How to call the program, printed with any argument error.
 #[cfg(not(feature = "mock"))]
 pub fn usage() -> String {
-    "usage: colab-playground [--real]".to_owned()
+    format!(
+        "usage: colab-playground [--real]\n{}",
+        crate::control::ctl_usage()
+    )
 }
 
 const VALUE_FLAGS: [&str; 2] = ["--mock-scenario", "--mock-fail"];
@@ -319,15 +331,43 @@ pub fn kind_from_args<S: AsRef<str>>(
     }
 }
 
-/// [`kind_from_args`] for this executable, with the simulation built when it is chosen.
-pub fn source_from_args<S: AsRef<str>>(
+/// What the command line asks for, with every argument checked and nothing built yet: the
+/// app first finds out whether another copy already owns this state, and only the owner
+/// builds a backend.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Launch {
+    #[cfg(feature = "mock")]
+    Mock(MockFlags),
+    Real,
+}
+
+impl Launch {
+    pub fn flavor(&self) -> Flavor {
+        match self {
+            #[cfg(feature = "mock")]
+            Launch::Mock(_) => Flavor::Mock,
+            Launch::Real => Flavor::Real,
+        }
+    }
+
+    pub fn into_source(self) -> BackendSource {
+        match self {
+            #[cfg(feature = "mock")]
+            Launch::Mock(flags) => BackendSource::interactive_mock(flags),
+            Launch::Real => BackendSource::Real,
+        }
+    }
+}
+
+/// [`kind_from_args`] for this executable, with the simulation's flags read when it is chosen.
+pub fn launch_from_args<S: AsRef<str>>(
     args: &[S],
     env: Option<&str>,
-) -> Result<BackendSource, BackendError> {
+) -> Result<Launch, BackendError> {
     match kind_from_args(args, env, Build::CURRENT)? {
-        BackendKind::Real => Ok(BackendSource::Real),
+        BackendKind::Real => Ok(Launch::Real),
         #[cfg(feature = "mock")]
-        BackendKind::Mock => Ok(BackendSource::interactive_mock(MockFlags::parse(args)?)),
+        BackendKind::Mock => Ok(Launch::Mock(MockFlags::parse(args)?)),
         #[cfg(not(feature = "mock"))]
         BackendKind::Mock => unreachable!("kind_from_args refuses demo data in a build without it"),
     }
@@ -586,7 +626,7 @@ mod tests {
     fn mock_scenarios_and_failures_parse() {
         use colab_playground_core::mock::MockScenario;
 
-        use super::{BackendSource, MockFlags, source_from_args, usage};
+        use super::{Launch, MockFlags, launch_from_args, usage};
 
         let none: [&str; 0] = [];
         assert_eq!(
@@ -633,16 +673,16 @@ mod tests {
         assert!(usage().contains("watchdog-restart-fails"));
 
         assert!(matches!(
-            source_from_args(&["--mock", "--mock-scenario", "nope"], None),
+            launch_from_args(&["--mock", "--mock-scenario", "nope"], None),
             Err(BackendError::UnknownScenario(_))
         ));
         assert!(matches!(
-            source_from_args(&["--mock-scenario", "single"], Some("mock")),
-            Ok(BackendSource::Mock(_))
+            launch_from_args(&["--mock-scenario", "single"], Some("mock")),
+            Ok(Launch::Mock(_))
         ));
         assert!(matches!(
-            source_from_args(&["--real"], None),
-            Ok(BackendSource::Real)
+            launch_from_args(&["--real"], None),
+            Ok(Launch::Real)
         ));
     }
 
