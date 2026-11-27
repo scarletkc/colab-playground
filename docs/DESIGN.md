@@ -48,6 +48,10 @@ Goals
   targeting + retry, list, stop), port forwarding, cost guards.
 - Plugins: everything beyond the Colab core is a plugin. `llama-cpp` is bundled.
 - A mock backend drives the whole UI without WSL, the CLI or a Google account.
+- Control from the command line: `colab-playground ctl` lets scripts and AI agents read what the
+  running app shows. It asks the copy of the app that owns the state and never builds a backend
+  of its own, so it sees what the window shows. It is off until the user turns it on in
+  Settings. So far it only reads ([what comes next](ROADMAP.md#headless-control)).
 
 Non-goals (v1)
 
@@ -108,7 +112,8 @@ Properties the code must keep. A change that breaks one is wrong even if every t
   non-secret output. The CLI's active token is never cleared without a backup that can be
   restored.
 - **The app never writes a secret to its files or logs**, and masks the ones it knows in what it
-  shows.
+  shows. The one exception is the control endpoint's token (below), which a client can only get
+  from a file.
 - **Plugins never execute anything on the user's machine.** A plugin is a manifest plus a script
   that runs on the runtime.
 - **User-controlled values reach scripts as environment variables or arguments**, never
@@ -117,6 +122,16 @@ Properties the code must keep. A change that breaks one is wrong even if every t
 - **Auto-stop is set on the runtime itself whenever it can be**, because a timer in the app dies
   with the app. When a stop only holds while the app is open, the app says so.
 - **Unknown usage is never treated as zero.** A failed fetch marks the data stale.
+- **One process owns a state**: the real backend's data folder, or the mock's config folder.
+  Core keeps the credential slot lock, the ledger, the session cap and the tunnels in memory, so
+  a second process on the same data would corrupt them. A second launch for the same state
+  brings the owner's window forward and exits, and `ctl` only asks the owner. An owner that
+  ended, however it ended, does not block the next start. Where the folder cannot be locked at
+  all, the app still starts, but without a control endpoint.
+- **The control endpoint is reachable only from this computer and only by this user, and never
+  returns a secret.** It listens on loopback only. A request without the owner's token, which is
+  kept in a file only the user can read, gets nothing. The token is never on a command line or in
+  a log. Answers hold what the window shows, never a token, key or password.
 - **The number of sessions the app creates is capped**, so a retry loop cannot fan out into many
   billed VMs.
 - **The app replaces itself only when the user asks, and only with a download whose signature

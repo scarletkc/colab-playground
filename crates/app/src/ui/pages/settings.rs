@@ -1,5 +1,5 @@
 //! Settings: language and appearance (live and persisted), the policy defaults for new
-//! runtimes, where the CLI lives, and build information.
+//! runtimes, where the CLI lives, control from the command line, and build information.
 
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant, CopyButton},
@@ -65,7 +65,29 @@ pub fn render(state: &AppState, handle: &Entity<AppState>, inputs: &Inputs, cx: 
         .child(general(state, handle, cx))
         .child(super::defaults::defaults_section(state, handle, cx))
         .children((!host_first).then(host))
+        .child(control(state, handle, cx))
         .child(about(state, handle, cx))
+}
+
+pub const CONTROL_SELECTOR: &str = "settings-cli-control";
+
+/// Whether `colab-playground ctl` may read what the app shows.
+fn control(state: &AppState, handle: &Entity<AppState>, cx: &App) -> impl IntoElement {
+    let toggle = handle.clone();
+    SettingsSection::new(tr(cx, keys::SETTINGS_CONTROL_SECTION_TITLE))
+        .description(tr(cx, keys::SETTINGS_CONTROL_SECTION_DESCRIPTION))
+        .row(
+            SettingsRow::new(tr(cx, keys::SETTINGS_CONTROL_TITLE))
+                .description(tr(cx, keys::SETTINGS_CONTROL_DESCRIPTION))
+                .control(tagged(
+                    CONTROL_SELECTOR,
+                    Switch::new(CONTROL_SELECTOR, state.allows_cli_control())
+                        .name(tr(cx, keys::SETTINGS_CONTROL_TITLE))
+                        .on_change(move |on, _, cx| {
+                            toggle.update(cx, |state, cx| state.set_cli_control(on, cx))
+                        }),
+                )),
+        )
 }
 
 fn general(state: &AppState, handle: &Entity<AppState>, cx: &App) -> impl IntoElement {

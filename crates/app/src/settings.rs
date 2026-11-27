@@ -158,6 +158,10 @@ pub struct Settings {
     /// again.
     #[serde(default, deserialize_with = "lenient")]
     pub feedback_answered: bool,
+    /// `colab-playground ctl` may read what the app shows. Off until the user turns it on:
+    /// it opens the app's view of the accounts to any program the user runs.
+    #[serde(default, deserialize_with = "lenient")]
+    pub allow_cli_control: bool,
 }
 
 /// A switch that is on unless the user turned it off.

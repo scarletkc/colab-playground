@@ -151,6 +151,11 @@ impl Ops {
         !self.running.is_empty()
     }
 
+    /// Whether a call of an `Op` that `matches` runs (for the keyed ones, on any key).
+    pub(crate) fn any_of(&self, matches: impl Fn(Op) -> bool) -> bool {
+        self.running.keys().any(|op| matches(*op))
+    }
+
     pub(crate) fn pausing_poll(&self) -> bool {
         self.running.keys().any(|op| op.pauses_polling())
     }

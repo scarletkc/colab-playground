@@ -110,6 +110,9 @@ cargo run -p colab-playground --release    # release build: real Colab CLI by de
   it (`--no-default-features`), so they run only the real backend: there `--mock`, the demo flags
   and `COLAB_PLAYGROUND_BACKEND=mock` are errors (exit code 2), and Settings → About has no
   Backend row. A debug build without it starts only with `--real`.
+- One copy runs per backend: starting the app again while it runs brings its window to the front
+  instead. A demo copy and a real one can run side by side, and so can demo copies with different
+  `COLAB_PLAYGROUND_CONFIG_DIR` folders.
 
 ## Demo data
 
@@ -165,6 +168,11 @@ next start.
   fails, the path of `colab` (its Python interpreter is optional and otherwise found from it).
 - **Logs** go to standard error; `RUST_LOG` replaces the default filter
   `warn,colab_playground=info`. Release builds on Windows open no console window.
+- **The running copy:** `control-real.lock` and `control-mock.lock` mark it, and
+  `control-real.json` or `control-mock.json`, which only you can read, tells
+  [`ctl`](#control-from-the-command-line) how to reach it; the app removes that file when it
+  closes. They are in the real-mode data folder for the real backend and in the settings folder
+  for demo data.
 
 - **SSH key:** port forwarding leaves `~/.ssh/config` alone and creates `~/.ssh/id_ed25519` only
   when there is neither an ed25519 nor an ECDSA key.
@@ -173,3 +181,89 @@ next start.
 
 Extending, forwarding and deploying need the runtime's account to be active; stopping works on
 any saved account.
+
+## Control from the command line
+
+`colab-playground ctl` lets a script or an AI agent read what the running app shows. It asks the
+running app and does nothing on its own: it never starts the app, signs in or runs `colab`.
+
+1. Turn it on in Settings → Command line → "Allow control from the command line". It is off until
+   you do, and while it is off every command answers `control_off`.
+2. Call the program you start the app with (the downloaded `.exe` on Windows;
+   `cargo run -p colab-playground -- ctl status` from source):
+
+   ```sh
+   colab-playground ctl status      # what the app shows at a glance, and what it is busy with
+   colab-playground ctl accounts    # the saved accounts and the active one
+   colab-playground ctl sessions    # the runtimes on every saved account
+   colab-playground ctl usage       # compute units per account and in total
+   ```
+
+- **Which app it asks:** the one on the backend the app itself would pick: `--mock` or `--real`,
+  else `COLAB_PLAYGROUND_BACKEND`, else the build's default (real for a release build, demo data
+  for a debug build). For demo data it asks the copy that uses the same
+  `COLAB_PLAYGROUND_CONFIG_DIR`. A command never reaches a copy on the other backend.
+- **Output:** one line of JSON on standard output, also when it is piped or written to a file:
+  `{"ok": true, "backend": "mock", "data": {…}}`, or
+  `{"ok": false, "backend": "mock", "error": {"code": "…", "message": "…"}}`. `backend` names the
+  copy that answered, or the one `ctl` looked for when none did; only a wrong command line has
+  none. The field names and codes stay as they are; a `message` is for people and may change
+  (`control_off`'s is in the app's language, the others are in English).
+- **Exit code:** 0 when the app answered, 1 when it refused or nothing answered, 2 for a wrong
+  command line (the usage goes to standard error). `ctl --help` prints the usage.
+- **On Windows**, the downloaded program is a windowed one, so a shell you type into does not wait
+  for it: the prompt comes back before the answer is printed, and the exit code is lost. A script
+  or an agent that reads the output through a pipe or a file is not affected; at the prompt, add
+  `| Out-String` in PowerShell to wait for the answer.
+
+| Code | Meaning |
+| --- | --- |
+| `invalid_arguments` | The command line was wrong. |
+| `not_running` | No copy of the app runs on that backend (for demo data: with that config folder). |
+| `control_off` | Control from the command line is turned off; the message says where to turn it on. |
+| `quitting` | The app is closing, or restarting into an update. Ask again in a moment. |
+| `timeout` | The app did not answer in time. |
+| `connection_failed`, `bad_response` | Something other than the app answered, or the connection broke. |
+| `unauthorized`, `invalid_request`, `unsupported_version`, `wrong_backend` | The request did not come from this version of `ctl`, for example after an update replaced the program while an older copy still runs. Restart the app. |
+
+What the answers hold:
+
+- **Every `data`:** `now`, the app's clock when it answered. Times are seconds since the Unix
+  epoch on that clock, durations are seconds, and compute units are numbers (`cu`).
+- **Unknown is never empty or zero.** `accounts`, `sessions` and `usage`, and the parts of
+  `status`, carry a `state`: `not_loaded` (not asked for yet, as before the CLI is set up and an
+  account saved), `loading`, `ready`, or `failed` with an `error`. Lists and totals are there only when `ready`.
+  A total over accounts whose usage is not known says how many it leaves out, and is `null`
+  while it knows none. `refreshing` is true while a newer reading is on its way.
+- **Errors** inside an answer are `{"kind", "params", "detail", "next_step"}`; `kind` is a stable
+  code such as `http`, `auth_required` or `keyring_unavailable`.
+- **`status`:** `version`; `backend_error` (the backend could not start); `environment`
+  (`cli_installed`, `cli_version`); `accounts` (`saved`, `active` with `id` and `email`,
+  `unadopted`: the CLI is signed in to an account the app has not saved); `runtimes` (`running`,
+  `unlisted_accounts`); `usage` (as `total` in `usage`); `activity`, a list of
+  `installing_cli`, `adding_account`, `switching_account`, `starting_runtime`, `deploying`,
+  `stopping_runtimes` and `updating`.
+- **`accounts`:** `accounts` (each with `id`, `email`, `created_at`, `updated_at` and `usage`, the
+  last reading saved with it), `active` (an `id`), `active_email`, `has_token` (the CLI is signed
+  in), `unadopted`.
+- **`sessions`:** `listed_at`; `runtimes`; `unlisted_accounts` (accounts whose runtimes could not
+  be listed, with `account`, `email` and `error`: their runtimes are unknown, not absent);
+  `guard_error` (the last cost-guard round failed); `ended` (runtimes that ended while the app
+  watched, newest first, with `reason` `user`, `guard` with its `concern`, or `vanished`). Each
+  runtime has `id` (`account`, `endpoint`, `name`: `null` for one opened in the browser), `label`,
+  `account_email`, `on_active_account`, `managed` (started by this app), `accelerator`,
+  `hardware`, `gpu`, `vram_mib`, `high_mem`, `region`, `started_at`,
+  `estimated_rate_cu_per_hour`, `estimated_spend_cu` (estimates, `≈` in the window),
+  `auto_stop_at` (the earliest stop the app or the runtime will make),
+  `auto_stop_on_runtime_at` (when the runtime stops itself, also with the app closed; `null`
+  when nothing on the runtime does, so the stop holds only while the app runs; it can be a
+  little later than `auto_stop_at`), `policy` (`max_runtime`, `max_spend_cu`,
+  `min_balance_cu`, `idle_timeout`), `stopping`, `warnings` (limits close to being reached),
+  `stop_failure` (the cost guard could not stop it: it is still billing) and `tunnels` (each with
+  its `spec`, `state` and `healthy`).
+- **`usage`:** `error` (the last refresh failed); `total` (`balance_cu`, `rate_cu_per_hour`,
+  `runtimes`, `known_accounts`, `unknown_accounts`, `stale`); `accounts`, each with `account`,
+  `email`, `active`, `snapshot` (`balance_cu`, `rate_cu_per_hour`, `assignments`, `fetched_at`;
+  `null` while not known), `stale` (the window marks it stale: a refresh failed or it is
+  old), `eta_secs` (time left at the current rate), `unmanaged_runtimes` (`null`
+  when not known), `error` and `history` (recent balances).

@@ -1096,6 +1096,7 @@ dependencies = [
  "ely-gpui-component",
  "env_logger",
  "futures",
+ "getrandom 0.3.4",
  "gpui-pre",
  "gpui-pre-platform",
  "log",

@@ -5,6 +5,7 @@ use gpui::{
 };
 
 use crate::{
+    control,
     i18n::{keys, tr},
     platform,
     state::{AppState, StateOptions},
@@ -14,8 +15,9 @@ use crate::{
     },
 };
 
-/// Runs the app until its last window closes.
-pub fn run(options: StateOptions) {
+/// Runs the app until its last window closes. `control` answers `colab-playground ctl` and a
+/// second launch once the window is up.
+pub fn run(options: StateOptions, control: Option<control::Service>) {
     gpui_platform::application()
         .with_assets(Assets)
         .run(move |cx: &mut App| {
@@ -25,10 +27,13 @@ pub fn run(options: StateOptions) {
                 return;
             }
             let state = AppState::init(options, cx);
-            if let Err(error) = open_main_window(state, cx) {
+            if let Err(error) = open_main_window(state.clone(), cx) {
                 log::error!("app: {error:#}");
                 cx.quit();
                 return;
+            }
+            if let Some(service) = control {
+                control::serve(service, state, cx);
             }
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
