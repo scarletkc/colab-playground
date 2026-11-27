@@ -73,6 +73,10 @@ jobs:
         if: needs.changes.outputs.code != 'false'
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
         if: needs.changes.outputs.code != 'false'
+      # Release downloads are built without demo data (package.yml). No other step compiles that
+      # configuration, so a break in it would first show when a release is built.
+      - run: cargo clippy -p colab-playground --no-default-features --locked -- -D warnings
+        if: needs.changes.outputs.code != 'false'
       - run: cargo test --workspace --locked
         if: needs.changes.outputs.code != 'false'
 

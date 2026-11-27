@@ -13,12 +13,13 @@ use ely_gpui_component::{
 };
 use gpui::{
     App, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, div,
+    StatefulInteractiveElement, Styled, div, prelude::FluentBuilder,
 };
 
 use colab_playground_core::updater::SelfUpdate;
 
 use crate::{
+    backend::Build,
     i18n::{keys, tr, tr_args},
     route::Route,
     settings::LanguagePref,
@@ -130,11 +131,14 @@ fn about(state: &AppState, handle: &Entity<AppState>, cx: &App) -> impl IntoElem
         .row(feedback_row(cx))
         .row(updates_row(state, handle, cx))
         .row(auto_check_row(state, handle, cx))
-        .row(
-            SettingsRow::new(tr(cx, keys::SETTINGS_BACKEND_TITLE))
-                .description(tr(cx, keys::SETTINGS_BACKEND_DESCRIPTION))
-                .control(backend),
-        )
+        // Only a build with demo data has a backend to choose (release downloads have none).
+        .when(Build::CURRENT.mock, |section| {
+            section.row(
+                SettingsRow::new(tr(cx, keys::SETTINGS_BACKEND_TITLE))
+                    .description(tr(cx, keys::SETTINGS_BACKEND_DESCRIPTION))
+                    .control(backend),
+            )
+        })
         .row(SettingsRow::new(tr(cx, keys::SETTINGS_FILE_TITLE)).control(file))
 }
 
