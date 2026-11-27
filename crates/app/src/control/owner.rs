@@ -77,7 +77,7 @@ struct Job {
     reply: mpsc::Sender<Response>,
     claim: Arc<AtomicU8>,
     /// The connection the answer goes to, which tells whether its client still waits.
-    client: Option<TcpStream>,
+    client: Option<Arc<TcpStream>>,
 }
 
 /// Where a job stands between the listener, which waits only so long, and the foreground. It
@@ -92,7 +92,7 @@ impl Job {
     /// the listener answered `timeout`, or the client hung up (it waits only so long itself,
     /// from before its request was read, and it may have been stopped).
     fn take(&self) -> bool {
-        if self.client.as_ref().is_some_and(hung_up) {
+        if self.client.as_deref().is_some_and(hung_up) {
             return false;
         }
         self.claim
@@ -177,10 +177,20 @@ impl Owner {
         let (jobs, inbox) = unbounded();
         let quitting = self.quitting.clone();
         let flavor = self.flavor;
-        let endpoint = listen_with(&self.dir, flavor, move |command, client: &TcpStream| {
-            let client = client.try_clone().ok();
-            forward(&jobs, &quitting, flavor, command, client, ANSWER_TIMEOUT)
-        })?;
+        let endpoint = listen_with(
+            &self.dir,
+            flavor,
+            move |command, client: &Arc<TcpStream>| {
+                forward(
+                    &jobs,
+                    &quitting,
+                    flavor,
+                    command,
+                    Some(client.clone()),
+                    ANSWER_TIMEOUT,
+                )
+            },
+        )?;
         self.endpoint = Some(endpoint.clone());
         Ok(Service {
             jobs: inbox,
@@ -213,7 +223,7 @@ fn forward(
     quitting: &AtomicBool,
     flavor: Flavor,
     command: Command,
-    client: Option<TcpStream>,
+    client: Option<Arc<TcpStream>>,
     wait: Duration,
 ) -> Response {
     if quitting.load(Ordering::SeqCst) {
@@ -265,13 +275,15 @@ pub fn listen<H>(dir: &Path, flavor: Flavor, mut handler: H) -> io::Result<PathB
 where
     H: FnMut(Command) -> Response + Send + 'static,
 {
-    listen_with(dir, flavor, move |command, _: &TcpStream| handler(command))
+    listen_with(dir, flavor, move |command, _: &Arc<TcpStream>| {
+        handler(command)
+    })
 }
 
 /// [`listen`], with a handler that also gets the connection its answer goes to.
 fn listen_with<H>(dir: &Path, flavor: Flavor, mut handler: H) -> io::Result<PathBuf>
 where
-    H: FnMut(Command, &TcpStream) -> Response + Send + 'static,
+    H: FnMut(Command, &Arc<TcpStream>) -> Response + Send + 'static,
 {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();
@@ -291,6 +303,7 @@ where
             for stream in listener.incoming() {
                 match stream {
                     Ok(stream) => {
+                        let stream = Arc::new(stream);
                         if let Err(error) = answer_connection(&stream, &token, flavor, &mut handler)
                         {
                             log::debug!("control: a connection ended early: {error}");
@@ -305,13 +318,13 @@ where
 }
 
 fn answer_connection<H>(
-    stream: &TcpStream,
+    stream: &Arc<TcpStream>,
     token: &Token,
     flavor: Flavor,
     handler: &mut H,
 ) -> io::Result<()>
 where
-    H: FnMut(Command, &TcpStream) -> Response,
+    H: FnMut(Command, &Arc<TcpStream>) -> Response,
 {
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let line = read_request(stream, Instant::now() + READ_TIMEOUT)?;
@@ -320,7 +333,7 @@ where
     });
     let mut text = serde_json::to_string(&response)?;
     text.push('\n');
-    let mut writer = stream;
+    let mut writer: &TcpStream = stream;
     writer.write_all(text.as_bytes())?;
     writer.flush()
 }
@@ -758,15 +771,16 @@ mod tests {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("binds");
         let client = TcpStream::connect(listener.local_addr().expect("an address")).expect("up");
         let (server, _) = listener.accept().expect("accepts");
+        let server = Arc::new(server);
         let job = || Job {
             command: Command::Start(crate::control::StartArgs::default()),
             reply: mpsc::channel().0,
             claim: Arc::new(AtomicU8::new(PENDING)),
-            client: server.try_clone().ok(),
+            client: Some(server.clone()),
         };
         assert!(job().take(), "its client still waits");
         // Looking did not change how the answer is written and read.
-        (&server).write_all(b"answer\n").expect("written");
+        (&*server).write_all(b"answer\n").expect("written");
         let mut answer = String::new();
         BufReader::new(&client)
             .read_line(&mut answer)
