@@ -248,8 +248,10 @@ What the answers hold:
   `account_email`, `on_active_account`, `managed` (started by this app), `accelerator`,
   `hardware`, `gpu`, `vram_mib`, `high_mem`, `region`, `started_at`,
   `estimated_rate_cu_per_hour`, `estimated_spend_cu` (estimates, `≈` in the window),
-  `auto_stop_at`, `auto_stop_on_runtime` (the runtime stops itself then, even with the app
-  closed; otherwise only while the app runs), `policy` (`max_runtime`, `max_spend_cu`,
+  `auto_stop_at` (the earliest stop the app or the runtime will make),
+  `auto_stop_on_runtime_at` (when the runtime stops itself, also with the app closed; `null`
+  when nothing on the runtime does, so the stop holds only while the app runs; it can be a
+  little later than `auto_stop_at`), `policy` (`max_runtime`, `max_spend_cu`,
   `min_balance_cu`, `idle_timeout`), `stopping`, `warnings` (limits close to being reached),
   `stop_failure` (the cost guard could not stop it: it is still billing) and `tunnels` (each with
   its `spec`, `state` and `healthy`).

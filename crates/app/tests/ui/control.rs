@@ -132,7 +132,7 @@ fn the_answers_carry_what_the_window_shows(cx: &mut TestAppContext) {
         "estimated_rate_cu_per_hour",
         "estimated_spend_cu",
         "auto_stop_at",
-        "auto_stop_on_runtime",
+        "auto_stop_on_runtime_at",
         "tunnels",
         "warnings",
         "stopping",
@@ -143,7 +143,8 @@ fn the_answers_carry_what_the_window_shows(cx: &mut TestAppContext) {
         .iter()
         .find(|runtime| runtime["managed"] == false)
         .expect("the runtime opened in the browser");
-    assert!(unmanaged["id"]["name"].is_null());
+    // Present and null, not left out: indexing alone reads a missing member as null too.
+    assert_eq!(unmanaged["id"].get("name"), Some(&Value::Null));
     assert_eq!(sessions["unlisted_accounts"], serde_json::json!([]));
 
     let usage = data(ask(&mut app, Command::Usage));
@@ -207,10 +208,14 @@ fn a_failed_listing_says_so_with_the_error(cx: &mut TestAppContext) {
     let usage = data(ask(&mut app, Command::Usage));
     assert_eq!(usage["state"], "ready", "the accounts are known");
     assert_eq!(usage["total"]["known_accounts"], 0);
-    assert!(usage["total"]["balance_cu"].is_null(), "{usage}");
+    assert_eq!(
+        usage["total"].get("balance_cu"),
+        Some(&Value::Null),
+        "{usage}"
+    );
     for account in usage["accounts"].as_array().expect("a list") {
-        assert!(account["snapshot"].is_null(), "{account}");
-        assert!(account["stale"].is_null(), "{account}");
+        assert_eq!(account.get("snapshot"), Some(&Value::Null), "{account}");
+        assert_eq!(account.get("stale"), Some(&Value::Null), "{account}");
     }
 }
 

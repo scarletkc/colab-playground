@@ -109,7 +109,8 @@ Properties the code must keep. A change that breaks one is wrong even if every t
   non-secret output. The CLI's active token is never cleared without a backup that can be
   restored.
 - **The app never writes a secret to its files or logs**, and masks the ones it knows in what it
-  shows.
+  shows. The one exception is the control endpoint's token (below), which a client can only get
+  from a file.
 - **Plugins never execute anything on the user's machine.** A plugin is a manifest plus a script
   that runs on the runtime.
 - **User-controlled values reach scripts as environment variables or arguments**, never

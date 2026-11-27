@@ -140,8 +140,11 @@ struct RuntimeAnswer<'a> {
     estimated_spend_cu: Option<f64>,
     #[serde(serialize_with = "serde_secs::option::serialize")]
     auto_stop_at: Option<SystemTime>,
-    /// The runtime enforces the auto-stop itself; otherwise it holds only while the app is open.
-    auto_stop_on_runtime: bool,
+    /// When the runtime stops itself, also with the app closed. Its own time, not a flag on
+    /// `auto_stop_at`: the watchdog counts from its start, a little after the session's.
+    /// `None`: nothing on the runtime stops it, so the stop holds only while the app is open.
+    #[serde(serialize_with = "serde_secs::option::serialize")]
+    auto_stop_on_runtime_at: Option<SystemTime>,
     policy: Option<&'a GuardPolicy>,
     stopping: bool,
     warnings: &'a [Concern],
@@ -374,10 +377,9 @@ impl AppState {
             estimated_rate_cu_per_hour: runtime.estimated_rate_cu_per_hour,
             estimated_spend_cu: runtime.estimated_spend_cu,
             auto_stop_at: runtime.auto_stop_at,
-            auto_stop_on_runtime: tracked
+            auto_stop_on_runtime_at: tracked
                 .and_then(|t| t.watchdog.as_ref())
-                .and_then(|w| w.enforced_deadline())
-                .is_some(),
+                .and_then(|w| w.enforced_deadline()),
             policy: tracked.map(|t| &t.policy),
             stopping: self.is_stopping(&runtime.id),
             warnings: self.guard_warnings(&runtime.id),
