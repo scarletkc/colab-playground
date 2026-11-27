@@ -182,12 +182,18 @@ any saved account.
 
 ## Control from the command line
 
-`colab-playground ctl` lets a script or an AI agent read what the running app shows. It asks the
-running app and does nothing on its own: it never starts the app, signs in or runs `colab`.
+`colab-playground ctl` lets a script or an AI agent read what the running app shows, and start and
+stop runtimes through it, so the window shows what they do as it happens. It asks the running app
+and does nothing on its own: it never starts the app, signs in or runs `colab`.
 
 1. Turn it on in Settings → Command line → "Allow control from the command line". It is off until
-   you do, and while it is off every command answers `control_off`.
-2. Call the program you start the app with (the downloaded `.exe` on Windows;
+   you do, and while it is off every command answers `control_off`. On its own it lets programs
+   read, not change anything.
+2. To let them start and stop runtimes too, also turn on "Also allow starting and stopping
+   runtimes" below it. A runtime started this way uses compute units like any other. Until you do,
+   `start`, `stop` and `cancel` answer `changes_off`; turning the first switch off turns this one
+   off as well.
+3. Call the program you start the app with (the downloaded `.exe` on Windows;
    `cargo run -p colab-playground -- ctl status` from source):
 
    ```sh
@@ -195,6 +201,10 @@ running app and does nothing on its own: it never starts the app, signs in or ru
    colab-playground ctl accounts    # the saved accounts and the active one
    colab-playground ctl sessions    # the runtimes on every saved account
    colab-playground ctl usage       # compute units per account and in total
+   colab-playground ctl start --hardware T4         # what a start would do; --yes starts it
+   colab-playground ctl stop a100-7f3a              # what a stop would do; --yes stops it
+   colab-playground ctl operation <id> --wait 600   # follow a start or a stop until it ends
+   colab-playground ctl cancel <id> --yes           # cancel a start; its runtime is given back
    ```
 
 - **Which app it asks:** the one on the backend the app itself would pick: `--mock` or `--real`,
@@ -206,9 +216,10 @@ running app and does nothing on its own: it never starts the app, signs in or ru
   `{"ok": false, "backend": "mock", "error": {"code": "…", "message": "…"}}`. `backend` names the
   copy that answered, or the one `ctl` looked for when none did; only a wrong command line has
   none. The field names and codes stay as they are; a `message` is for people and may change
-  (`control_off`'s is in the app's language, the others are in English).
-- **Exit code:** 0 when the app answered, 1 when it refused or nothing answered, 2 for a wrong
-  command line (the usage goes to standard error). `ctl --help` prints the usage.
+  (`control_off`'s and `changes_off`'s are in the app's language, the others are in English).
+- **Exit code:** 0 when the app answered (also when the operation it reports failed, or a wait ran
+  out), 1 when it refused or nothing answered, 2 for a wrong command line (the usage goes to
+  standard error). `ctl --help` prints the usage.
 - **On Windows**, the downloaded program is a windowed one, so a shell you type into does not wait
   for it: the prompt comes back before the answer is printed, and the exit code is lost. A script
   or an agent that reads the output through a pipe or a file is not affected; at the prompt, add
@@ -219,8 +230,19 @@ running app and does nothing on its own: it never starts the app, signs in or ru
 | `invalid_arguments` | The command line was wrong. |
 | `not_running` | No copy of the app runs on that backend (for demo data: with that config folder). |
 | `control_off` | Control from the command line is turned off; the message says where to turn it on. |
-| `quitting` | The app is closing, or restarting into an update. Ask again in a moment. |
+| `changes_off` | Starting and stopping runtimes from the command line is turned off; the message says where to turn it on. |
+| `quitting` | The app is closing, or restarting into an update (also while it asks whether to quit, or downloads an update). Ask again in a moment. |
 | `timeout` | The app did not answer in time. |
+| `not_ready` | What the command needs is still loading (the accounts, the runtime list), or could not be loaded; the message says which. |
+| `no_active_account` | No account is active: none is signed in, the CLI is not set up, or it is signed in to an account the app has not saved. |
+| `account_changing` | An account is being added, switched or removed in the window; for `start`, also while the switch or sign-in dialog is open there. |
+| `already_starting` | A runtime is being started already, from the window or the command line. |
+| `form_open` | The New session form is open in the window; it is left alone until it is started or closed there. |
+| `session_limit_reached` | The active account has as many runtimes as this app starts per account (Settings → Defaults); the message names them. |
+| `no_such_runtime`, `ambiguous_runtime` | `stop` named no listed runtime, or more than one. |
+| `already_stopping` | That runtime is being stopped already. |
+| `unknown_operation` | This run of the app has no operation with that id. |
+| `operation_ended`, `not_cancellable` | `cancel` was asked for an operation that has ended, or for a stop. |
 | `connection_failed`, `bad_response` | Something other than the app answered, or the connection broke. |
 | `unauthorized`, `invalid_request`, `unsupported_version`, `wrong_backend` | The request did not come from this version of `ctl`, for example after an update replaced the program while an older copy still runs. Restart the app. |
 
@@ -247,7 +269,8 @@ What the answers hold:
 - **`sessions`:** `listed_at`; `runtimes`; `unlisted_accounts` (accounts whose runtimes could not
   be listed, with `account`, `email` and `error`: their runtimes are unknown, not absent);
   `guard_error` (the last cost-guard round failed); `ended` (runtimes that ended while the app
-  watched, newest first, with `reason` `user`, `guard` with its `concern`, or `vanished`). Each
+  watched, newest first, with `reason` `user` (stopped in the window), `command_line` (by
+  `ctl stop`), `guard` with its `concern`, or `vanished`). Each
   runtime has `id` (`account`, `endpoint`, `name`: `null` for one opened in the browser), `label`,
   `account_email`, `on_active_account`, `managed` (started by this app), `accelerator`,
   `hardware`, `gpu`, `vram_mib`, `high_mem`, `region`, `started_at`,
@@ -265,3 +288,54 @@ What the answers hold:
   `null` while not known), `stale` (the window marks it stale: a refresh failed or it is
   old), `eta_secs` (time left at the current rate), `unmanaged_runtimes` (`null`
   when not known), `error` and `history` (recent balances).
+
+Starting and stopping:
+
+- **A preview first.** `start`, `stop` and `cancel` change nothing without `--yes`: they answer
+  `{"preview": {…}}` with what they would do, from what the window's own confirmation shows, or
+  with the code the change would be refused with. With `--yes` they go through the window's own
+  steps: the window shows the progress and a notice that the command line asked, closing the window
+  counts the runtime like any other, and the same limits apply.
+- **Refused, not queued.** A change that cannot happen now (another start under way, an account
+  being switched, the limit reached, the app closing) is refused with its code, and nothing waits
+  to happen later.
+- **`start`** starts a runtime on the active account. `--hardware` is `CPU`, `T4`, `L4`, `G4`,
+  `A100`, `H100`, `V5E1` or `V6E1` (any case), `--name` a session name; everything else comes from
+  Settings → Defaults, as the New session dialog fills it in. No option changes a limit (the
+  runtime limit, spending cap, balance floor, idle stop or session limit): those stay with you in
+  the window. Without `--name` a name is made up, and a start after a preview uses the name it
+  showed. The preview holds `account` (`id`, `email`), `name`, `accelerator`, `high_mem`,
+  `min_vram_mib`, `attempts`, `estimated_rate_cu_per_hour` (an estimate, `≈` in the window; `null`
+  when there is none) with `rate_source` (`measured`, by the app on this hardware at
+  `rate_measured_at`, or `published` by other users), `policy` (when it stops on its own:
+  `max_runtime`, `max_spend_cu`, `min_balance_cu`, `idle_timeout`) and `session_limit` (`limit`;
+  `counted`, the runtimes that count; `allows`; both `null` while the runtimes are not listed, and
+  the start is checked again as it begins).
+- **`stop <runtime>`** stops a runtime on any saved account and ends its billing. `<runtime>` is a
+  session name or an endpoint (`id.name` or `id.endpoint` in `sessions`); a runtime opened in the
+  browser has no name, so its endpoint names it. `--account` with an email or account id keeps to
+  one account, for a name that two accounts have. The preview holds `runtime` (as in `sessions`)
+  and `ends`: `billing` and `files` (everything on the runtime is wiped), and `port_forwards` when
+  it has any.
+- **Operations.** `start --yes` and `stop --yes` answer at once with `{"operation": {…}}`, as
+  `ctl operation <id>` shows it. A stop gets an id too: it runs `colab stop` and checks that the
+  runtime is gone, which takes seconds or longer, and the app answers one request at a time. An
+  operation has `id`, `kind` (`start` or `stop`), `state` (`running`, `succeeded`, `failed` with an
+  `error`, or `cancelled`), `cancelling`, `started_at`, `ended_at`, `account` (`id`, `email`) and
+  `runtime` (for a start `name`, `accelerator`, `high_mem`; for a stop `id`, `label`). A start also
+  has `progress`, its steps as the window lists them (each with an `event` such as `allocating`,
+  `probed`, `releasing`, `retrying` or `ready`), and once it succeeded `outcome` (`name`,
+  `hardware`, `attempts`, `below_spec`, `watchdog`, `started_at`). `ok` only says that the app
+  answered; how the operation went is its `state`.
+- **Waiting:** `operation <id> --wait <seconds>` asks again until the operation ends or the time
+  is up, then answers as `operation <id>` does. A wait that runs out answers with the operation
+  still `running`: that is not a failure, and the operation goes on.
+- **Cancelling:** `cancel <id> --yes` cancels a start, and anything it got is given back, so
+  nothing it started is left billing. Cancel in the window ends the operation as `cancelled` too.
+  A stop cannot be cancelled (`not_cancellable`), nor an operation that has ended
+  (`operation_ended`). Nothing else cancels: a `ctl` that is stopped or killed while it waits
+  leaves the operation running.
+- **How long an id lasts:** until the app quits, and the app keeps the 100 operations that ended
+  last. For an id from before that, from before a restart, or one it never gave, `operation`
+  answers `unknown_operation`, which says nothing about how the operation went: `sessions` shows
+  what runs.

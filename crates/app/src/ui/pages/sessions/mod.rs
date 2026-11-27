@@ -289,6 +289,11 @@ fn ended(state: &AppState, handle: &Entity<AppState>, cx: &App) -> Option<AnyEle
                 theme.colors.fg_muted,
                 tr(cx, keys::ENDED_USER),
             ),
+            EndReason::CommandLine => (
+                IconName::Square,
+                theme.colors.fg_muted,
+                tr(cx, keys::ENDED_COMMAND_LINE),
+            ),
             EndReason::Guard(concern) => (
                 IconName::Shield,
                 theme.colors.danger,

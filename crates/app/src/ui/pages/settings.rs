@@ -70,10 +70,12 @@ pub fn render(state: &AppState, handle: &Entity<AppState>, inputs: &Inputs, cx: 
 }
 
 pub const CONTROL_SELECTOR: &str = "settings-cli-control";
+pub const CONTROL_CHANGES_SELECTOR: &str = "settings-cli-changes";
 
-/// Whether `colab-playground ctl` may read what the app shows.
+/// Whether `colab-playground ctl` may read what the app shows, and whether it may also start
+/// and stop runtimes: a second step, off while reading is.
 fn control(state: &AppState, handle: &Entity<AppState>, cx: &App) -> impl IntoElement {
-    let toggle = handle.clone();
+    let (toggle, toggle_changes) = (handle.clone(), handle.clone());
     SettingsSection::new(tr(cx, keys::SETTINGS_CONTROL_SECTION_TITLE))
         .description(tr(cx, keys::SETTINGS_CONTROL_SECTION_DESCRIPTION))
         .row(
@@ -85,6 +87,19 @@ fn control(state: &AppState, handle: &Entity<AppState>, cx: &App) -> impl IntoEl
                         .name(tr(cx, keys::SETTINGS_CONTROL_TITLE))
                         .on_change(move |on, _, cx| {
                             toggle.update(cx, |state, cx| state.set_cli_control(on, cx))
+                        }),
+                )),
+        )
+        .row(
+            SettingsRow::new(tr(cx, keys::SETTINGS_CONTROL_CHANGES_TITLE))
+                .description(tr(cx, keys::SETTINGS_CONTROL_CHANGES_DESCRIPTION))
+                .control(tagged(
+                    CONTROL_CHANGES_SELECTOR,
+                    Switch::new(CONTROL_CHANGES_SELECTOR, state.allows_cli_changes())
+                        .name(tr(cx, keys::SETTINGS_CONTROL_CHANGES_TITLE))
+                        .disabled(!state.allows_cli_control())
+                        .on_change(move |on, _, cx| {
+                            toggle_changes.update(cx, |state, cx| state.set_cli_changes(on, cx))
                         }),
                 )),
         )

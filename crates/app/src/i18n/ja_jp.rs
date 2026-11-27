@@ -100,11 +100,35 @@ pub(super) const MESSAGES: Messages = &[
     (SETTINGS_CONTROL_TITLE, "コマンド ラインからの操作を許可"),
     (
         SETTINGS_CONTROL_DESCRIPTION,
-        "オンにすると、このコンピューターであなたが実行するプログラムが colab-playground ctl コマンドで、アカウント、ランタイム、使用量をこのウィンドウの表示どおりに読み取れます。変更はできません。",
+        "オンにすると、このコンピューターであなたが実行するプログラムが colab-playground ctl コマンドで、アカウント、ランタイム、使用量をこのウィンドウの表示どおりに読み取れます。これだけでは何も変更できません。",
+    ),
+    (
+        SETTINGS_CONTROL_CHANGES_TITLE,
+        "ランタイムの開始と停止も許可",
+    ),
+    (
+        SETTINGS_CONTROL_CHANGES_DESCRIPTION,
+        "オンにすると、それらのプログラムが使用中のアカウントでランタイムを開始し (停止するまでコンピューティング ユニットを消費します)、保存済みのどのアカウントのランタイムも停止できます。既定値と上限はそのまま適用され、変更できるのはこのウィンドウだけです。",
     ),
     (
         CONTROL_OFF,
         "コマンド ラインからの操作はオフになっています。{app} の {page} → {section} → {setting} でオンにしてください。",
+    ),
+    (
+        CONTROL_CHANGES_OFF,
+        "コマンド ラインからのランタイムの開始と停止はオフになっています。{app} の {page} → {section} → {setting} でオンにしてください。",
+    ),
+    (
+        CTL_STARTING_TOAST,
+        "コマンド ラインからの指示で {name} を開始しています",
+    ),
+    (
+        CTL_STOPPING_TOAST,
+        "コマンド ラインからの指示で {name} を停止しています",
+    ),
+    (
+        CTL_CANCELLING_TOAST,
+        "コマンド ラインからの指示で {name} の開始をキャンセルしています",
     ),
     (
         TOAST_OPEN_FOLDER_FAILED_TITLE,
@@ -753,6 +777,7 @@ pub(super) const MESSAGES: Messages = &[
     (ENDED_TITLE, "最近終了"),
     (ENDED_LINE, "{name} · {email}"),
     (ENDED_USER, "手動で停止しました。"),
+    (ENDED_COMMAND_LINE, "コマンド ラインから停止しました。"),
     (ENDED_GUARD, "コストガードにより停止：{why}"),
     (
         ENDED_VANISHED,

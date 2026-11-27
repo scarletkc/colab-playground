@@ -49,9 +49,10 @@ Goals
 - Plugins: everything beyond the Colab core is a plugin. `llama-cpp` is bundled.
 - A mock backend drives the whole UI without WSL, the CLI or a Google account.
 - Control from the command line: `colab-playground ctl` lets scripts and AI agents read what the
-  running app shows. It asks the copy of the app that owns the state and never builds a backend
-  of its own, so it sees what the window shows. It is off until the user turns it on in
-  Settings. So far it only reads ([what comes next](ROADMAP.md#headless-control)).
+  running app shows, and start and stop runtimes through it. It asks the copy of the app that
+  owns the state and never builds a backend of its own, so what it reads and does is what the
+  window shows. It is off until the user turns it on in Settings, and starting and stopping need
+  a second permission of their own ([what comes next](ROADMAP.md#headless-control)).
 
 Non-goals (v1)
 
@@ -132,6 +133,13 @@ Properties the code must keep. A change that breaks one is wrong even if every t
   returns a secret.** It listens on loopback only. A request without the owner's token, which is
   kept in a file only the user can read, gets nothing. The token is never on a command line or in
   a log. Answers hold what the window shows, never a token, key or password.
+- **The command line changes things only through the window's own paths, and only when
+  allowed.** Allowing it to read never allows it to change anything. A command that changes
+  something answers with what it would do and changes nothing unless `--yes` is given. No command
+  loosens a cost guard: a runtime it starts gets the Defaults and the limits, which only the
+  window changes. A change that cannot happen now (the app busy starting, closing, updating or
+  changing accounts) is refused, not queued. A client that goes away cancels nothing; an
+  operation ends on its own or when it is cancelled by name.
 - **The number of sessions the app creates is capped**, so a retry loop cannot fan out into many
   billed VMs.
 - **The app replaces itself only when the user asks, and only with a download whose signature

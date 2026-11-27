@@ -1,5 +1,5 @@
 //! Control from the command line: `colab-playground ctl <command>` asks the copy of the app
-//! that owns the state, so a script or an AI agent sees what the window shows.
+//! that owns the state, so what a script or an AI agent reads and does is what the window shows.
 //!
 //! Only one process may own a state: core keeps the credential slot lock, the ledger, the
 //! session cap and the tunnels in memory, so two processes on the same data would corrupt each
@@ -13,7 +13,8 @@
 //! The owner listens on a loopback port the OS picks. Every local user can reach a loopback
 //! port, so the boundary is a token, new at every start, kept in a file only this user can
 //! read; the request carries it in the body, never on a command line. One JSON object per
-//! line each way, one request per connection.
+//! line each way, one request per connection, answered at once: a long operation answers with
+//! an id that the client follows with further requests, so no connection waits on one.
 
 mod ctl;
 mod owner;
@@ -24,7 +25,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use colab_playground_core::{backend::BackendKind as Flavor, paths::default_local_data_dir};
+use colab_playground_core::{
+    backend::BackendKind as Flavor, paths::default_local_data_dir, sessions::Accelerator,
+};
 use serde::{Deserialize, Serialize};
 
 pub use ctl::{CtlArgs, CtlError, Outcome, parse_args, run as run_ctl, usage as ctl_usage};
@@ -34,26 +37,34 @@ pub use owner::{Claim, Owner, Service, answer, claim, claim_within, listen, mark
 /// because Windows ships one exe that self-update replaces whole.
 pub const CTL_COMMAND: &str = "ctl";
 
-/// Bumped when a request or a response changes in a way an older copy would misread.
+/// Bumped when a request or a response changes in a way an older copy would misread. Not for a
+/// new command: an older owner refuses a command it does not know as `invalid_request`, and a
+/// bump would also keep a newer second launch from bringing an older owner's window forward.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// The longest request line the owner reads; a request is a few short fields.
 pub const MAX_REQUEST_BYTES: u64 = 16 * 1024;
 
-/// What a client asks. `Activate` is the second launch asking the owner to show its window;
-/// `ctl` offers only the others.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// What a client asks, with its arguments under `args` (left out for a command without any).
+/// `Activate` is the second launch asking the owner to show its window; `ctl` offers the others.
+/// The owner refuses an argument it does not know rather than ignore it, and a command that
+/// changes something changes nothing unless its `yes` is true.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "command", content = "args", rename_all = "snake_case")]
 pub enum Command {
     Activate,
     Status,
     Accounts,
     Sessions,
     Usage,
+    Start(StartArgs),
+    Stop(StopArgs),
+    Operation(OperationArgs),
+    Cancel(CancelArgs),
 }
 
 impl Command {
-    /// The commands `ctl` offers, in the order its usage lists them.
+    /// The commands that read and take no arguments, in the order `ctl`'s usage lists them.
     pub const READ: [Command; 4] = [
         Command::Status,
         Command::Accounts,
@@ -61,15 +72,70 @@ impl Command {
         Command::Usage,
     ];
 
-    pub fn name(self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             Command::Activate => "activate",
             Command::Status => "status",
             Command::Accounts => "accounts",
             Command::Sessions => "sessions",
             Command::Usage => "usage",
+            Command::Start(_) => "start",
+            Command::Stop(_) => "stop",
+            Command::Operation(_) => "operation",
+            Command::Cancel(_) => "cancel",
         }
     }
+
+    /// Whether the command can change something, so it needs the user's second permission.
+    /// Its preview is included: it is the same command asked without `yes`.
+    pub fn changes(&self) -> bool {
+        matches!(
+            self,
+            Command::Start(_) | Command::Stop(_) | Command::Cancel(_)
+        )
+    }
+}
+
+/// Starts a runtime on the active account. Everything else comes from the Defaults, as the
+/// New session dialog fills it in.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartArgs {
+    /// `None`: the Defaults' hardware.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accelerator: Option<Accelerator>,
+    /// `None`: a name made up for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub yes: bool,
+}
+
+/// Stops a runtime on any saved account and ends its billing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StopArgs {
+    /// A session name or an endpoint, as `sessions` lists them.
+    pub runtime: String,
+    /// An account's email or id, for a name that more than one account has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    #[serde(default)]
+    pub yes: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OperationArgs {
+    pub id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CancelArgs {
+    pub id: String,
+    #[serde(default)]
+    pub yes: bool,
 }
 
 /// One request line.
@@ -79,6 +145,7 @@ pub struct Request {
     pub token: Token,
     /// The backend the client looks for; an owner of the other kind refuses.
     pub backend: Flavor,
+    #[serde(flatten)]
     pub command: Command,
 }
 
@@ -105,10 +172,44 @@ pub enum Code {
     WrongBackend,
     /// The user has not allowed control from the command line.
     ControlOff,
+    /// The user allows reading but not starting and stopping runtimes.
+    ChangesOff,
     /// The owner is on its way out (closing, or restarting into an update).
     Quitting,
     /// The owner did not answer in time.
     Timeout,
+    /// What the command needs is still loading, or could not be loaded.
+    NotReady,
+    NoActiveAccount,
+    /// An account is being added, switched or removed.
+    AccountChanging,
+    /// A runtime is being started already.
+    AlreadyStarting,
+    /// Someone is filling in the New session form in the window.
+    FormOpen,
+    /// The active account has as many runtimes as this app starts per account.
+    SessionLimitReached,
+    /// No listed runtime has that name or endpoint.
+    NoSuchRuntime,
+    /// More than one listed runtime has that name or endpoint.
+    AmbiguousRuntime,
+    AlreadyStopping,
+    /// This run of the app has no operation with that id (it never had, forgot it, or the id
+    /// is from before the app restarted).
+    UnknownOperation,
+    OperationEnded,
+    /// A stop cannot be cancelled.
+    NotCancellable,
+}
+
+/// Where an operation that `start` or `stop` began stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationState {
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -238,9 +339,11 @@ pub fn endpoint_file(dir: &Path, flavor: Flavor) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use colab_playground_core::backend::BackendKind as Flavor;
+    use colab_playground_core::{backend::BackendKind as Flavor, sessions::Accelerator};
 
-    use super::{Code, Command, Request, Response, Token, endpoint_file, lock_file};
+    use super::{
+        Code, Command, Request, Response, StartArgs, StopArgs, Token, endpoint_file, lock_file,
+    };
 
     #[test]
     fn a_request_and_a_response_round_trip_as_one_line() {
@@ -253,13 +356,54 @@ mod tests {
         let line = serde_json::to_string(&request).expect("serialises");
         assert!(!line.contains('\n'));
         assert_eq!(
-            line,
-            r#"{"v":1,"token":"abc","backend":"mock","command":"sessions"}"#
+            line, r#"{"v":1,"token":"abc","backend":"mock","command":"sessions"}"#,
+            "a read request is what an owner of the first version reads"
         );
         assert_eq!(
             serde_json::from_str::<Request>(&line).expect("parses"),
             request
         );
+
+        let start = Request {
+            command: Command::Start(StartArgs {
+                accelerator: Some(Accelerator::T4),
+                name: None,
+                yes: true,
+            }),
+            ..request
+        };
+        let line = serde_json::to_string(&start).expect("serialises");
+        assert_eq!(
+            line,
+            r#"{"v":1,"token":"abc","backend":"mock","command":"start","args":{"accelerator":"T4","yes":true}}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<Request>(&line).expect("parses"),
+            start
+        );
+        let preview: Command =
+            serde_json::from_str(r#"{"command":"stop","args":{"runtime":"t4-91c2"}}"#)
+                .expect("parses");
+        assert_eq!(
+            preview,
+            Command::Stop(StopArgs {
+                runtime: "t4-91c2".into(),
+                account: None,
+                yes: false,
+            }),
+            "without yes it is a preview"
+        );
+        for refused in [
+            r#"{"command":"stop","args":{"runtime":"t4-91c2","force":true}}"#,
+            r#"{"command":"stop"}"#,
+            r#"{"command":"start","args":{"yes":"true"}}"#,
+            r#"{"command":"status","args":{"account":"lin"}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<Command>(refused).is_err(),
+                "{refused} is refused, not read as something else"
+            );
+        }
 
         let response = Response::failure(Some(Flavor::Real), Code::ControlOff, None);
         let line = serde_json::to_string(&response).expect("serialises");

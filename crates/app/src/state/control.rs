@@ -1,4 +1,5 @@
-//! What `colab-playground ctl` is told: what the app shows now, as JSON with stable names.
+//! What `colab-playground ctl` is told: what the app shows now, as JSON with stable names, and
+//! the two permissions in front of everything it asks (what it may change is in `operations`).
 //!
 //! Unknown is never reported as empty or zero (`docs/DESIGN.md`, "Invariants"). A list the
 //! app has not loaded is left out and its `state` says why; a total over accounts whose usage
@@ -19,7 +20,7 @@ use colab_playground_core::{
 use gpui::{App, Context};
 use serde::Serialize;
 
-use super::{AppState, EndReason, Load, Op, runtime_label, usage::is_stale};
+use super::{AppState, EndReason, Load, Op, operations::Refusal, runtime_label, usage::is_stale};
 use crate::{
     control::{Code, Command, Response},
     i18n::{keys, tr, tr_args},
@@ -122,7 +123,7 @@ struct Listing<'a> {
 }
 
 #[derive(Serialize)]
-struct RuntimeAnswer<'a> {
+pub(super) struct RuntimeAnswer<'a> {
     id: &'a RuntimeRef,
     label: String,
     account_email: Option<&'a str>,
@@ -222,37 +223,83 @@ impl AppState {
         self.settings.allow_cli_control
     }
 
+    /// Whether `colab-playground ctl` may also start and stop runtimes.
+    pub fn allows_cli_changes(&self) -> bool {
+        self.settings.allow_cli_control && self.settings.allow_cli_changes
+    }
+
+    /// Turning control off takes starting and stopping back too, so turning it on again later
+    /// allows reading only, until starting and stopping are allowed again as well.
     pub fn set_cli_control(&mut self, on: bool, cx: &mut Context<Self>) {
         log::info!("control: from the command line -> {on}");
         self.settings.allow_cli_control = on;
+        if !on {
+            self.settings.allow_cli_changes = false;
+        }
         self.persist_settings(cx);
         cx.notify();
     }
 
-    /// The answer to a read command, or why there is none.
-    pub fn control_answer(&self, command: Command, cx: &App) -> Response {
+    pub fn set_cli_changes(&mut self, on: bool, cx: &mut Context<Self>) {
+        log::info!("control: starting and stopping from the command line -> {on}");
+        self.settings.allow_cli_changes = on && self.settings.allow_cli_control;
+        self.persist_settings(cx);
+        cx.notify();
+    }
+
+    /// The answer to a command, after doing what it asks, or why there is none.
+    pub fn control_answer(&mut self, command: Command, cx: &mut Context<Self>) -> Response {
         let flavor = self.flavor();
-        if !self.allows_cli_control() {
+        let turned_off = |code, message, setting, cx: &App| {
             let message = tr_args(
                 cx,
-                keys::CONTROL_OFF,
+                message,
                 &[
                     ("app", &tr(cx, keys::APP_NAME)),
                     ("page", &tr(cx, keys::NAV_SETTINGS)),
                     ("section", &tr(cx, keys::SETTINGS_CONTROL_SECTION_TITLE)),
-                    ("setting", &tr(cx, keys::SETTINGS_CONTROL_TITLE)),
+                    ("setting", &tr(cx, setting)),
                 ],
             );
-            return Response::failure(Some(flavor), Code::ControlOff, Some(message.to_string()));
+            Response::failure(Some(flavor), code, Some(message.to_string()))
+        };
+        if !self.allows_cli_control() {
+            return turned_off(
+                Code::ControlOff,
+                keys::CONTROL_OFF,
+                keys::SETTINGS_CONTROL_TITLE,
+                cx,
+            );
         }
+        if command.changes() && !self.allows_cli_changes() {
+            return turned_off(
+                Code::ChangesOff,
+                keys::CONTROL_CHANGES_OFF,
+                keys::SETTINGS_CONTROL_CHANGES_TITLE,
+                cx,
+            );
+        }
+        let read = |answer: Result<serde_json::Value, serde_json::Error>| {
+            Ok(answer.expect("answers serialise to JSON"))
+        };
         let data = match command {
-            Command::Status => serde_json::to_value(self.status_answer()),
-            Command::Accounts => serde_json::to_value(self.accounts_answer()),
-            Command::Sessions => serde_json::to_value(self.sessions_answer()),
-            Command::Usage => serde_json::to_value(self.usage_answer()),
+            Command::Status => read(serde_json::to_value(self.status_answer())),
+            Command::Accounts => read(serde_json::to_value(self.accounts_answer())),
+            Command::Sessions => read(serde_json::to_value(self.sessions_answer())),
+            Command::Usage => read(serde_json::to_value(self.usage_answer())),
+            Command::Operation(args) => self.control_operation(&args.id),
+            Command::Start(args) => self.control_start(args, cx),
+            Command::Stop(args) => self.control_stop(args, cx),
+            Command::Cancel(args) => self.control_cancel(args, cx),
             Command::Activate => Ok(serde_json::json!({})),
         };
-        Response::success(flavor, data.expect("answers serialise to JSON"))
+        match data {
+            Ok(data) => Response::success(flavor, data),
+            Err(Refusal { code, message }) => {
+                log::info!("control: refused ({code:?}): {message}");
+                Response::failure(Some(flavor), code, Some(message))
+            }
+        }
     }
 
     fn status_answer(&self) -> StatusAnswer<'_> {
@@ -343,6 +390,7 @@ impl AppState {
                 .map(|ended| {
                     let (reason, concern) = match &ended.reason {
                         EndReason::User => ("user", None),
+                        EndReason::CommandLine => ("command_line", None),
                         EndReason::Guard(concern) => ("guard", Some(concern)),
                         EndReason::Vanished => ("vanished", None),
                     };
@@ -359,7 +407,7 @@ impl AppState {
         }
     }
 
-    fn runtime_answer<'a>(&'a self, runtime: &'a Runtime) -> RuntimeAnswer<'a> {
+    pub(super) fn runtime_answer<'a>(&'a self, runtime: &'a Runtime) -> RuntimeAnswer<'a> {
         let tracked = runtime.tracked.as_ref();
         RuntimeAnswer {
             id: &runtime.id,

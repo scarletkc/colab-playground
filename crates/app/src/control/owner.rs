@@ -20,7 +20,6 @@ use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
 };
 use gpui::{App, Entity, Global};
-use serde::Deserialize;
 
 use super::{
     Code, Command, Endpoint, MAX_REQUEST_BYTES, PROTOCOL_VERSION, Response, Token, ctl,
@@ -38,8 +37,8 @@ const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// Bytes asked of the connection at a time; a request fits in one.
 const READ_CHUNK: usize = 1024;
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
-/// How long the listener waits for the foreground, which answers from memory and makes no
-/// backend call.
+/// How long the listener waits for the foreground, which answers from memory and waits on no
+/// backend call: a command that starts one answers once it is under way.
 pub(super) const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// What a launch found.
@@ -270,53 +269,67 @@ fn read_request(stream: &TcpStream, deadline: Instant) -> io::Result<String> {
     Ok(String::from_utf8_lossy(&line).into_owned())
 }
 
-/// Every field optional, so the token is checked before anything else about the request.
-#[derive(Deserialize)]
-struct RawRequest {
-    #[serde(default)]
-    token: Option<String>,
-    #[serde(default)]
-    v: Option<u32>,
-    #[serde(default)]
-    backend: Option<serde_json::Value>,
-    #[serde(default)]
-    command: Option<serde_json::Value>,
-}
+/// The fields of a request; any other is refused rather than ignored, so a newer client's
+/// request is never read as a different one.
+const REQUEST_FIELDS: [&str; 5] = ["v", "token", "backend", "command", "args"];
 
 /// The response to one request line. A request without the token learns nothing, not even
-/// which backend answers.
+/// which backend answers: the line is read as a bare object so the token is checked before
+/// anything else about it.
 pub(super) fn respond<H>(line: &str, token: &Token, flavor: Flavor, handler: &mut H) -> Response
 where
     H: FnMut(Command) -> Response + ?Sized,
 {
-    let raw = serde_json::from_str::<RawRequest>(line.trim())
+    let raw = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(line.trim())
         .ok()
-        .filter(|raw| raw.token.as_deref().is_some_and(|sent| token.matches(sent)));
-    let Some(raw) = raw else {
+        .filter(|raw| {
+            raw.get("token")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|sent| token.matches(sent))
+        });
+    let Some(mut raw) = raw else {
         log::warn!("control: refused a request without the token");
         return Response::failure(None, Code::Unauthorized, None);
     };
     let refuse = |code, message: String| Response::failure(Some(flavor), code, Some(message));
-    if raw.v != Some(PROTOCOL_VERSION) {
+    if raw.get("v").and_then(serde_json::Value::as_u64) != Some(u64::from(PROTOCOL_VERSION)) {
         return refuse(
             Code::UnsupportedVersion,
             format!("this copy speaks protocol version {PROTOCOL_VERSION}"),
         );
     }
     let backend = raw
-        .backend
-        .and_then(|value| serde_json::from_value::<Flavor>(value).ok());
+        .get("backend")
+        .and_then(|value| serde_json::from_value::<Flavor>(value.clone()).ok());
     if backend != Some(flavor) {
         return refuse(
             Code::WrongBackend,
             format!("this copy runs on the {} backend", super::kind_name(flavor)),
         );
     }
-    let Some(command) = raw
-        .command
-        .and_then(|value| serde_json::from_value::<Command>(value).ok())
-    else {
-        return refuse(Code::InvalidRequest, "unknown command".to_owned());
+    if let Some(field) = raw
+        .keys()
+        .find(|key| !REQUEST_FIELDS.contains(&key.as_str()))
+    {
+        return refuse(
+            Code::InvalidRequest,
+            format!("this copy does not know the field {field:?}"),
+        );
+    }
+    let mut asked = serde_json::Map::new();
+    for field in ["command", "args"] {
+        if let Some(value) = raw.remove(field).filter(|value| !value.is_null()) {
+            asked.insert(field.to_owned(), value);
+        }
+    }
+    let command = match serde_json::from_value::<Command>(asked.into()) {
+        Ok(command) => command,
+        Err(error) => {
+            return refuse(
+                Code::InvalidRequest,
+                format!("this copy does not understand the request: {error}"),
+            );
+        }
     };
     log::info!("control: asked {}", command.name());
     handler(command)
@@ -360,7 +373,7 @@ pub fn mark_quitting(quitting: bool, cx: &App) {
     }
 }
 
-/// The answer to `command` from what the app shows now.
+/// The answer to `command` from what the app shows now, after doing what it asks.
 pub fn answer(command: Command, state: &Entity<AppState>, cx: &mut App) -> Response {
     let flavor = state.read(cx).flavor();
     let quitting = cx
@@ -378,7 +391,7 @@ pub fn answer(command: Command, state: &Entity<AppState>, cx: &mut App) -> Respo
         cx.activate(true);
         return Response::success(flavor, serde_json::json!({}));
     }
-    state.read(cx).control_answer(command, cx)
+    state.update(cx, |state, cx| state.control_answer(command, cx))
 }
 
 #[cfg(test)]
@@ -449,7 +462,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp dir");
         let (asked, handled) = mpsc::channel();
         listen(dir.path(), Flavor::Mock, move |command| {
-            asked.send(command).expect("the test listens");
+            asked.send(command.clone()).expect("the test listens");
             echo(command)
         })
         .expect("listens");
@@ -520,20 +533,30 @@ mod tests {
             &mut handler,
         );
         assert_eq!(other_kind.code(), Some(Code::WrongBackend));
-        let unknown = answer(
-            &format!(
-                r#"{{"v":{PROTOCOL_VERSION},"token":"secret","backend":"mock","command":"stop"}}"#
-            ),
-            &mut handler,
-        );
-        assert_eq!(unknown.code(), Some(Code::InvalidRequest));
-        let fine = answer(
-            &format!(
-                r#"{{"v":{PROTOCOL_VERSION},"token":"secret","backend":"mock","command":"usage"}}"#
-            ),
-            &mut handler,
-        );
+        let asked = |rest: &str| {
+            format!(r#"{{"v":{PROTOCOL_VERSION},"token":"secret","backend":"mock",{rest}}}"#)
+        };
+        for refused in [
+            r#""command":"bogus""#,
+            r#""command":"stop""#,
+            r#""command":"usage","args":{"account":"lin"}"#,
+            r#""command":"stop","args":{"runtime":"t4-91c2","force":true}"#,
+            r#""command":"stop","args":{"runtime":"t4-91c2"},"yes":true"#,
+            r#""args":{"runtime":"t4-91c2"}"#,
+        ] {
+            assert_eq!(
+                answer(&asked(refused), &mut handler).code(),
+                Some(Code::InvalidRequest),
+                "{refused} is refused, not read as another request"
+            );
+        }
+        let fine = answer(&asked(r#""command":"usage""#), &mut handler);
         assert_eq!(data(&fine)["command"], "usage");
+        let stop = answer(
+            &asked(r#""command":"stop","args":{"runtime":"t4-91c2"}"#),
+            &mut handler,
+        );
+        assert_eq!(data(&stop)["command"], "stop");
     }
 
     #[test]
