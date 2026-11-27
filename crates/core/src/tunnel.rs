@@ -8,7 +8,10 @@
 //! **Cost trap:** `colab ssh --proxy-mode -s NAME` *creates* a runtime when
 //! `NAME` is not in its state file. Before every (re)connect the tunnel checks
 //! that the session is still recorded in the account's state file and fails
-//! with `SessionGone` otherwise, so a reconnect can never allocate a new VM.
+//! with `SessionGone` otherwise. The CLI looks the name up only after it has
+//! started, so a record dropped in between gets past the check: the app's own
+//! stops therefore close the session's tunnels and keep new ones from opening
+//! until `colab stop` is done ([`TunnelManager::close_for_stop`]).
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -500,11 +503,61 @@ struct Entry {
     thread: Option<JoinHandle<()>>,
 }
 
+impl Entry {
+    fn is_of(&self, account: &AccountId, session: &str) -> bool {
+        let i = self.shared.info.lock().unwrap_or_else(|e| e.into_inner());
+        &i.spec.account == account && i.spec.session == session
+    }
+
+    /// Returns once the thread has ended. `run` never ends while its `ssh` runs, and the
+    /// ProxyCommand dies with `ssh` (which hangs it up on exit) or with its process group, so
+    /// afterwards nothing of the tunnel can still look the session up.
+    fn close(mut self) {
+        self.stop.cancel();
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+        self.shared.set(TunnelState::Stopped);
+    }
+}
+
+#[derive(Default)]
+struct Tunnels {
+    open: BTreeMap<TunnelId, Entry>,
+    /// Sessions being stopped, with how many stops are at each (a guard stop and the user's can
+    /// overlap).
+    stopping: BTreeMap<(AccountId, String), usize>,
+}
+
 /// Owns tunnel threads. Dropping it closes every tunnel.
 #[derive(Default)]
 pub struct TunnelManager {
     next: AtomicU64,
-    tunnels: Mutex<BTreeMap<TunnelId, Entry>>,
+    tunnels: Mutex<Tunnels>,
+}
+
+/// Keeps a session's tunnels from opening while a stop is at it; see
+/// [`TunnelManager::close_for_stop`].
+#[must_use = "tunnels can open again as soon as the guard is dropped"]
+pub struct StopGuard<'a> {
+    manager: &'a TunnelManager,
+    key: (AccountId, String),
+}
+
+impl Drop for StopGuard<'_> {
+    fn drop(&mut self) {
+        let mut tunnels = self
+            .manager
+            .tunnels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(stops) = tunnels.stopping.get_mut(&self.key) {
+            *stops = stops.saturating_sub(1);
+            if *stops == 0 {
+                tunnels.stopping.remove(&self.key);
+            }
+        }
+    }
 }
 
 impl std::fmt::Debug for TunnelManager {
@@ -527,8 +580,14 @@ impl TunnelManager {
         events: Option<Sender<TunnelEvent>>,
     ) -> Result<TunnelId> {
         spec.validate()?;
-        let mut map = self.tunnels.lock().unwrap_or_else(|e| e.into_inner());
-        let clash = map.values().any(|e| {
+        let mut tunnels = self.tunnels.lock().unwrap_or_else(|e| e.into_inner());
+        if tunnels
+            .stopping
+            .contains_key(&(spec.account.clone(), spec.session.clone()))
+        {
+            return Err(Error::new(ErrorKind::SessionGone).with("session", &spec.session));
+        }
+        let clash = tunnels.open.values().any(|e| {
             let i = e.shared.info.lock().unwrap_or_else(|e| e.into_inner());
             !i.state.is_terminal() && i.spec.local_port == spec.local_port
         });
@@ -551,7 +610,7 @@ impl TunnelManager {
             .name(format!("tunnel-{}", id.0))
             .spawn(move || run(ctx, spec, stop2, s2))
             .map_err(Error::from)?;
-        map.insert(
+        tunnels.open.insert(
             id,
             Entry {
                 shared,
@@ -568,26 +627,39 @@ impl TunnelManager {
             .tunnels
             .lock()
             .unwrap_or_else(|e| e.into_inner())
+            .open
             .remove(&id);
-        let Some(mut entry) = entry else {
+        let Some(entry) = entry else {
             return Err(Error::invalid("tunnel", "unknown tunnel"));
         };
-        entry.stop.cancel();
-        if let Some(t) = entry.thread.take() {
-            let _ = t.join();
-        }
-        entry.shared.set(TunnelState::Stopped);
+        entry.close();
         Ok(())
     }
 
-    pub fn close_session(&self, account: &AccountId, session: &str) {
-        for t in self
-            .list()
-            .into_iter()
-            .filter(|t| &t.spec.account == account && t.spec.session == session)
-        {
-            let _ = self.close(t.id);
+    /// Closes `session`'s tunnels and refuses new ones until the guard is dropped. A stop holds
+    /// it while `colab stop` runs, which drops the session's record only at its end: a tunnel
+    /// that passed its check before that would have `--proxy-mode` create a runtime under the
+    /// name once the record is gone.
+    pub fn close_for_stop(&self, account: &AccountId, session: &str) -> StopGuard<'_> {
+        let key = (account.clone(), session.to_owned());
+        let closing: Vec<Entry> = {
+            let mut tunnels = self.tunnels.lock().unwrap_or_else(|e| e.into_inner());
+            *tunnels.stopping.entry(key.clone()).or_default() += 1;
+            let ids: Vec<TunnelId> = tunnels
+                .open
+                .iter()
+                .filter(|(_, e)| e.is_of(account, session))
+                .map(|(id, _)| *id)
+                .collect();
+            ids.iter()
+                .filter_map(|id| tunnels.open.remove(id))
+                .collect()
+        };
+        // Joined outside the lock: a listing must not wait for a tunnel's `ssh` to be killed.
+        for entry in closing {
+            entry.close();
         }
+        StopGuard { manager: self, key }
     }
 
     /// Snapshots of all tunnels (including failed ones until closed).
@@ -595,6 +667,7 @@ impl TunnelManager {
         self.tunnels
             .lock()
             .unwrap_or_else(|e| e.into_inner())
+            .open
             .values()
             .map(|e| {
                 e.shared
@@ -613,6 +686,7 @@ impl Drop for TunnelManager {
             .tunnels
             .lock()
             .unwrap_or_else(|e| e.into_inner())
+            .open
             .keys()
             .copied()
             .collect();
@@ -624,6 +698,8 @@ impl Drop for TunnelManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicBool;
+
     use super::*;
 
     fn spec() -> TunnelSpec {
@@ -723,6 +799,85 @@ mod tests {
         assert!(!state_has_session(r#"{"other": {}}"#, "llm"));
         assert!(!state_has_session("", "llm"));
         assert!(!state_has_session("not json", "llm"));
+    }
+
+    fn ctx() -> TunnelCtx {
+        TunnelCtx {
+            host: Host::Local,
+            colab: "colab".into(),
+            base_env: Vec::new(),
+            state_file: HostPath::new("/nowhere/sessions.json"),
+            clock: Arc::new(crate::clock::ManualClock::fixed()),
+        }
+    }
+
+    /// Adds a tunnel whose thread only waits to be cancelled; the flag tells when it ended.
+    fn add_idle_tunnel(m: &TunnelManager, id: u64, spec: TunnelSpec) -> Arc<AtomicBool> {
+        let ended = Arc::new(AtomicBool::new(false));
+        let stop = CancelToken::new();
+        let (stop2, ended2) = (stop.clone(), ended.clone());
+        let thread = std::thread::spawn(move || {
+            while !stop2.is_cancelled() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            ended2.store(true, Ordering::SeqCst);
+        });
+        let id = TunnelId(id);
+        let shared = Arc::new(Shared {
+            info: Mutex::new(TunnelInfo {
+                id,
+                spec,
+                state: TunnelState::Up,
+                healthy: None,
+            }),
+            events: None,
+        });
+        m.tunnels.lock().unwrap().open.insert(
+            id,
+            Entry {
+                shared,
+                stop,
+                thread: Some(thread),
+            },
+        );
+        ended
+    }
+
+    #[test]
+    fn a_stop_closes_its_sessions_tunnels_and_refuses_new_ones_until_it_ends() {
+        let m = TunnelManager::new();
+        let s = spec();
+        let other = TunnelSpec {
+            session: "other".into(),
+            local_port: 18001,
+            ..spec()
+        };
+        let ended = add_idle_tunnel(&m, 1, s.clone());
+        let other_ended = add_idle_tunnel(&m, 2, other);
+
+        let first = m.close_for_stop(&s.account, &s.session);
+        assert!(
+            ended.load(Ordering::SeqCst),
+            "the stop went on before the tunnel ended"
+        );
+        assert!(!other_ended.load(Ordering::SeqCst));
+        let left: Vec<String> = m.list().into_iter().map(|t| t.spec.session).collect();
+        assert_eq!(left, ["other"]);
+
+        let second = m.close_for_stop(&s.account, &s.session);
+        let refused = || {
+            m.open(ctx(), s.clone(), None)
+                .unwrap_err()
+                .is(ErrorKind::SessionGone)
+        };
+        assert!(refused());
+        drop(first);
+        assert!(
+            refused(),
+            "the session opened while a second stop was at it"
+        );
+        drop(second);
+        assert!(m.tunnels.lock().unwrap().stopping.is_empty());
     }
 
     #[test]

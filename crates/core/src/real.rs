@@ -858,9 +858,9 @@ impl Inner {
                 .live_by_endpoint(&target.account, &target.endpoint)
                 .map(|e| e.name.clone())
         });
-        if let Some(n) = &name {
-            self.tunnels.close_session(&target.account, n);
-        }
+        let _closed = name
+            .as_ref()
+            .map(|n| self.tunnels.close_for_stop(&target.account, n));
         let mut stopped_by_cli = false;
         if let Some(n) = &name
             && let Ok((_g, cli, state)) = self.cli_for(&target.account, cancel)
@@ -991,6 +991,8 @@ impl ProvisionOps for RealOps<'_> {
         Ok(vm::parse_hardware(&v))
     }
     fn stop(&self, name: &str, cancel: &CancelToken) -> Result<StopOutcome> {
+        // A runtime being provisioned is listed with its name, so a forward can be open to it.
+        let _closed = self.inner.tunnels.close_for_stop(&self.account, name);
         self.cli.stop(&self.state, name, cancel)
     }
     fn reap(&self, endpoint: &str, cancel: &CancelToken) -> Result<bool> {
