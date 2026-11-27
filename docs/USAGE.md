@@ -145,7 +145,9 @@ cargo run -p colab-playground -- --mock-scenario signed-out --mock-fail cli-miss
   simulated.
 
 Demo mode still reads and writes the normal settings file; set `COLAB_PLAYGROUND_CONFIG_DIR` to
-another folder to keep experiments apart.
+another folder to keep experiments apart. A demo copy and a real one running side by side on that
+file do not undo each other's changes, but each shows a change made in the other only from its
+next start.
 
 ## Where things are stored
 

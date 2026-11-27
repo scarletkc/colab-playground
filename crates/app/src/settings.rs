@@ -4,15 +4,22 @@
 //! aside (`settings.json.corrupt`) and gives defaults, and a field with a bad value falls back
 //! to that field's default without touching the others. New fields must carry
 //! `#[serde(default, deserialize_with = "lenient")]` so old files keep loading.
+//!
+//! Two copies of the app can share the file, such as a demo copy beside a real one, each with its
+//! own settings in memory. So a save writes only what changed in its own copy, and a change made
+//! in the other copy stays.
 
 use std::{
     ffi::OsString,
     fs, io,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
 use colab_playground_core::{Defaults, Toolchain, paths::write_atomic};
 use serde::{Deserialize, Deserializer, Serialize};
+
+type Fields = serde_json::Map<String, serde_json::Value>;
 
 /// Environment variable that replaces the config directory (tests point it at a tempdir).
 pub const CONFIG_DIR_ENV: &str = "COLAB_PLAYGROUND_CONFIG_DIR";
@@ -251,10 +258,21 @@ impl Settings {
 
     /// Pretty JSON with a trailing newline.
     pub fn to_json(&self) -> String {
-        let mut text = serde_json::to_string_pretty(self).expect("settings serialize to JSON");
-        text.push('\n');
-        text
+        pretty_json(self)
     }
+
+    fn fields(&self) -> Fields {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::Object(fields)) => fields,
+            other => panic!("settings serialize to a JSON object, not {other:?}"),
+        }
+    }
+}
+
+fn pretty_json(value: &impl Serialize) -> String {
+    let mut text = serde_json::to_string_pretty(value).expect("settings serialize to JSON");
+    text.push('\n');
+    text
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -313,12 +331,18 @@ pub fn folder_url(dir: &Path) -> Result<String, String> {
 #[derive(Clone, Debug)]
 pub struct SettingsStore {
     dir: Option<PathBuf>,
+    /// The fields as this store last read or wrote them, which tell a save what changed in this
+    /// copy of the app since. Clones share it: they stand for one copy.
+    baseline: Arc<Mutex<Option<Fields>>>,
 }
 
 impl SettingsStore {
     /// A store in `dir`; `None` keeps settings in memory only.
     pub fn new(dir: Option<PathBuf>) -> Self {
-        Self { dir }
+        Self {
+            dir,
+            baseline: Arc::default(),
+        }
     }
 
     pub fn dir(&self) -> Option<&Path> {
@@ -331,6 +355,16 @@ impl SettingsStore {
 
     /// Reads the settings, tolerating a missing or corrupt file.
     pub fn load(&self) -> Loaded {
+        let loaded = self.read();
+        *self.baseline() = Some(baseline(&loaded));
+        loaded
+    }
+
+    fn baseline(&self) -> MutexGuard<'_, Option<Fields>> {
+        self.baseline.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn read(&self) -> Loaded {
         let Some(file) = self.file() else {
             log::warn!("settings: no config directory; settings will not be saved");
             return Loaded::fresh(LoadOutcome::NoConfigDir);
@@ -373,21 +407,85 @@ impl SettingsStore {
         })
     }
 
-    /// Writes the settings atomically. A store without a directory writes nothing. Blocking:
-    /// call it from a background task.
+    /// Writes the settings atomically: the fields that changed since this store last read or
+    /// wrote the file, over what the file holds now, which another copy may have changed.
+    /// Without a file that holds a JSON object, or before the first load, it writes them all. A
+    /// store without a directory writes nothing. Blocking: call it from a background task.
     pub fn save(&self, settings: &Settings) -> io::Result<()> {
         let Some(file) = self.file() else {
             return Ok(());
         };
-        write_atomic(&file, settings.to_json().as_bytes())?;
+        let mut baseline = self.baseline();
+        let fields = settings.fields();
+        let text = match (baseline.as_ref(), stored_fields(&file)) {
+            (Some(baseline), Some(mut stored)) => {
+                write_changes(&mut stored, baseline, &fields);
+                pretty_json(&stored)
+            }
+            _ => settings.to_json(),
+        };
+        write_atomic(&file, text.as_bytes())?;
+        // Only now: after a failed write, the next save still writes this one's changes.
+        *baseline = Some(fields);
         log::info!("settings: saved {}", file.display());
         Ok(())
     }
 }
 
+/// The fields `loaded` holds, less the `defaults` fields the load put back to their default:
+/// the next save then writes the default over the value it could not read, so the warning
+/// about that value is not shown again at every start.
+fn baseline(loaded: &Loaded) -> Fields {
+    let mut fields = loaded.settings.fields();
+    for reset in &loaded.reset_defaults {
+        match fields.get_mut("defaults") {
+            // `read_defaults` names `defaults` itself when it is not an object.
+            Some(serde_json::Value::Object(defaults)) if reset != "defaults" => {
+                defaults.shift_remove(reset);
+            }
+            _ => {
+                fields.shift_remove("defaults");
+            }
+        }
+    }
+    fields
+}
+
+fn stored_fields(file: &Path) -> Option<Fields> {
+    let text = fs::read_to_string(file).ok()?;
+    match serde_json::from_str(&text) {
+        Ok(serde_json::Value::Object(fields)) => Some(fields),
+        _ => None,
+    }
+}
+
+/// Writes over `stored` what changed from `baseline` to `ours`, field by field inside objects
+/// such as `defaults`. A field `ours` no longer has is an option that was cleared.
+fn write_changes(stored: &mut Fields, baseline: &Fields, ours: &Fields) {
+    for (name, after) in ours {
+        let before = baseline.get(name);
+        if before == Some(after) {
+            continue;
+        }
+        match (before, after, stored.get_mut(name)) {
+            (
+                Some(serde_json::Value::Object(before)),
+                serde_json::Value::Object(after),
+                Some(serde_json::Value::Object(stored)),
+            ) => write_changes(stored, before, after),
+            _ => {
+                stored.insert(name.clone(), after.clone());
+            }
+        }
+    }
+    for name in baseline.keys().filter(|name| !ours.contains_key(*name)) {
+        stored.shift_remove(name);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, path::Path};
 
     use super::{
         AppearancePref, LanguagePref, LoadOutcome, SETTINGS_FILE, Settings, SettingsStore,
@@ -398,6 +496,96 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp dir");
         let store = SettingsStore::new(Some(dir.path().join("nested")));
         (dir, store)
+    }
+
+    /// Two copies of the app on one config folder, such as a demo copy beside a real one.
+    fn two_copies() -> (tempfile::TempDir, SettingsStore, SettingsStore) {
+        let (dir, first) = store();
+        let second = SettingsStore::new(first.dir().map(Path::to_path_buf));
+        (dir, first, second)
+    }
+
+    fn on_disk(store: &SettingsStore) -> Settings {
+        let text = fs::read_to_string(store.file().expect("a file")).expect("written");
+        Settings::from_json(&text).expect("an object")
+    }
+
+    #[test]
+    fn a_save_keeps_what_another_copy_changed() {
+        let (_dir, real, demo) = two_copies();
+        let start = Settings {
+            wsl_distro: Some("Debian".into()),
+            allow_cli_control: true,
+            ..Settings::default()
+        };
+        real.save(&start).expect("saved");
+        let mut in_real = real.load().settings;
+        let mut in_demo = demo.load().settings;
+
+        in_real.defaults.max_spend_cu = Some(40.0);
+        in_real.allow_cli_control = false;
+        in_real.wsl_distro = None;
+        real.save(&in_real).expect("saved");
+        in_demo.appearance = AppearancePref::Dark;
+        in_demo.defaults.max_attempts = 5;
+        demo.save(&in_demo).expect("saved");
+
+        let saved = on_disk(&demo);
+        assert_eq!(
+            saved.defaults.max_spend_cu,
+            Some(40.0),
+            "the limit set in the real copy is not put back"
+        );
+        assert!(!saved.allow_cli_control, "nor the switch turned off there");
+        assert_eq!(saved.wsl_distro, None, "nor the cleared distribution");
+        assert_eq!(saved.appearance, AppearancePref::Dark);
+        assert_eq!(saved.defaults.max_attempts, 5);
+
+        // Later saves too write only what changed in that copy since its own last save.
+        in_real.appearance = AppearancePref::Light;
+        real.save(&in_real).expect("saved");
+        in_demo.language = LanguagePref::JaJp;
+        demo.save(&in_demo).expect("saved");
+        let saved = on_disk(&real);
+        assert_eq!(saved.appearance, AppearancePref::Light);
+        assert_eq!(saved.language, LanguagePref::JaJp);
+        assert_eq!(saved.defaults.max_spend_cu, Some(40.0));
+        assert_eq!(saved.defaults.max_attempts, 5);
+        assert!(!saved.allow_cli_control);
+    }
+
+    /// What the file holds after loading `text` and saving one change, and what loads then.
+    fn saved_after_loading(text: &str) -> (serde_json::Value, super::Loaded) {
+        let (_dir, store) = store();
+        let file = store.file().expect("a file");
+        fs::create_dir_all(file.parent().expect("a parent")).expect("dir");
+        fs::write(&file, text).expect("written");
+        let mut settings = store.load().settings;
+        settings.appearance = AppearancePref::Dark;
+        store.save(&settings).expect("saved");
+        let stored = serde_json::from_str(&fs::read_to_string(&file).expect("written"))
+            .expect("the app writes JSON");
+        (stored, store.load())
+    }
+
+    #[test]
+    fn a_save_keeps_unknown_fields_and_writes_over_defaults_that_were_reset() {
+        let text = r#"{"later": 1, "defaults": {"max_attempts": "many", "high_mem": true}}"#;
+        let (stored, again) = saved_after_loading(text);
+        assert_eq!(stored["later"], 1, "a field of another version stays");
+        assert!(
+            again.reset_defaults.is_empty(),
+            "the reset value is written: {stored}"
+        );
+        assert!(again.settings.defaults.high_mem);
+        assert_eq!(again.settings.appearance, AppearancePref::Dark);
+
+        let (stored, again) = saved_after_loading(r#"{"later": 1, "defaults": 3}"#);
+        assert_eq!(stored["later"], 1);
+        assert!(
+            again.reset_defaults.is_empty(),
+            "the reset defaults are written: {stored}"
+        );
     }
 
     #[test]
