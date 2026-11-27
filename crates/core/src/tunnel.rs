@@ -509,9 +509,8 @@ impl Entry {
         &i.spec.account == account && i.spec.session == session
     }
 
-    /// Returns once the thread has ended. `run` never ends while its `ssh` runs, and the
-    /// ProxyCommand dies with `ssh` (which hangs it up on exit) or with its process group, so
-    /// afterwards nothing of the tunnel can still look the session up.
+    /// Returns once the thread has ended: on a cancel, `run` kills its job's process group, the
+    /// ProxyCommand included, before it returns.
     fn close(mut self) {
         self.stop.cancel();
         if let Some(t) = self.thread.take() {

@@ -119,8 +119,8 @@ when changing either.
   releasing the runtime. So a stop in the app first closes the session's
   tunnels, waiting for a connect under way, and refuses new ones until it is
   done. A runtime that ends on its own leaves its record behind, which
-  `--proxy-mode` finds, so it fails instead of creating one (it prunes the
-  record when it refreshes the proxy token). Only another command pruning that
+  `--proxy-mode` finds, so it does not create one (it prunes the record when
+  it refreshes the proxy token). Only another command pruning that
   record, such as `colab sessions`, between a retrying tunnel's check and the
   CLI's own read can still get past the check.
 - The server accepts ed25519/ecdsa keys only (RSA is rejected). The CLI sends
