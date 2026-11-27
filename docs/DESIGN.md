@@ -62,16 +62,32 @@ Non-goals (v1)
 
 They apply to every contributor and agent.
 
-1. **Never run a real `colab` command that touches the account or a runtime** during development
-   or tests: nothing that authenticates, lists, creates, stops, executes or changes credentials
-   (`sessions` prunes local state; most subcommands trigger an update check). The only real
-   invocations allowed are `colab help [CMD]` and `colab version`, which do neither. The CLI is
-   open source (github.com/googlecolab/google-colab-cli, installed version 0.8.0): read it
-   instead of experimenting. Do not use the `colab-operator` skill to try things.
+1. **A real `colab` command spends compute units and changes real state, so an agent runs one
+   only with the user's approval, and whoever runs one cleans up after it.** An agent asks before
+   the first one a task needs, saying what it will run and on which hardware; a yes covers that
+   task only. Afterwards it tells the user what ran and that every runtime it started is gone.
+   Prefer a CPU runtime, stop every runtime you start, and confirm with `colab sessions` that it
+   is gone. No test runs a real `colab` (rules 3 and 4). The CLI is open source
+   (github.com/googlecolab/google-colab-cli, installed version 0.8.0), and its source answers
+   most questions without a runtime.
+   - Pass one throw-away state file (`--config`) to every command: `sessions` prunes from the
+     state file it is given every record the signed-in account does not hold, the app keeps one
+     such file per account, and `stop` of a name its file does not know prints "not found" and
+     exits 0.
+   - List `colab sessions` before `new`, and before a `colab ssh` that can create a runtime
+     ([COLAB_NOTES.md](COLAB_NOTES.md#colab-ssh) says which). Each can fail after allocating a
+     runtime, which then shows as a new `[?]` that `stop` cannot name: release it from the app's
+     Sessions page, or as [COLAB_NOTES.md](COLAB_NOTES.md#the-clis-state---config) describes.
+   - The signed-in account must not change from the first `colab sessions` to the last: the CLI
+     keeps one token for the whole machine, not one per state file, and the app swaps it when the
+     user switches accounts. If `colab whoami` shows that it changed anyway, do not `stop` under
+     the other account: release the runtime from the app's Sessions page, which lists the
+     runtimes of every saved account, or, for an account the app has not saved, sign the CLI back
+     in to it and clean up from there.
 2. Debug builds default to the **mock** backend. The real backend needs `--real` (or
    `COLAB_PLAYGROUND_BACKEND=real`). Release builds default to real; `--mock` forces mock.
-   The app on the real backend runs real `colab` commands, so an agent starts it there only when
-   asked to.
+   The app on the real backend acts on the user's own accounts, state files and runtimes, not on
+   throw-away ones, so an agent starts it there only when asked to.
 3. No test may spawn `wsl.exe`, except the `#[ignore]`d Windows smoke tests of the WSL bridge
    (`wsl_smoke`), which only run `printf`/`cat` round trips and never name `colab`.
 4. The real backend is tested only against the **fake CLI** (`crates/core/tests/fake/`), on unix.
