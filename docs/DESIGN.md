@@ -63,12 +63,16 @@ Non-goals (v1)
 They apply to every contributor and agent.
 
 1. **A real `colab` command spends compute units and changes real state, so whoever runs one
-   cleans up after it.** Create runtimes with a throw-away state file (`--config`): `sessions`
-   prunes from the state file it is given every record the signed-in account does not hold, and
-   the app keeps one such file per account. Prefer a CPU runtime, stop every runtime you start,
-   and confirm with `colab sessions` that it is gone. No test runs a real `colab` (rules 3 and
-   4). The CLI is open source (github.com/googlecolab/google-colab-cli, installed version 0.8.0),
-   and its source answers most questions without a runtime.
+   cleans up after it.** Pass one throw-away state file (`--config`) to every command, from `new`
+   to the last `sessions`: `sessions` prunes from the state file it is given every record the
+   signed-in account does not hold, the app keeps one such file per account, and `stop` of a name
+   its file does not know prints "not found" and exits 0. The sign-in is not in that file: the
+   CLI keeps one token for the whole machine, and the app swaps it when the user switches
+   accounts, so stop and check under the account that created the runtime (`colab whoami`).
+   Prefer a CPU runtime, stop every runtime you start, and confirm with `colab sessions` that it
+   is gone. No test runs a real `colab` (rules 3 and 4). The CLI is open source
+   (github.com/googlecolab/google-colab-cli, installed version 0.8.0), and its source answers
+   most questions without a runtime.
 2. Debug builds default to the **mock** backend. The real backend needs `--real` (or
    `COLAB_PLAYGROUND_BACKEND=real`). Release builds default to real; `--mock` forces mock.
    The app on the real backend acts on the user's own accounts, state files and runtimes, not on
