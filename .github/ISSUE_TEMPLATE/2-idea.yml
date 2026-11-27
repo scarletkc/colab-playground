@@ -1,0 +1,35 @@
+name: Suggest an idea
+description: Something the app could do, or do differently.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Pull requests for features are not accepted from outside the project
+        ([CONTRIBUTING.md](https://github.com/scarletkc/colab-playground/blob/main/CONTRIBUTING.md)).
+        [ROADMAP.md](https://github.com/scarletkc/colab-playground/blob/main/docs/ROADMAP.md)
+        lists what is already planned, and something that runs on a Colab runtime can be a
+        [plugin](https://github.com/scarletkc/colab-playground/blob/main/docs/PLUGINS.md) of your
+        own.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What it would solve
+      description: What you are trying to do, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: How you picture the app helping.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Settings → About shows it. "Give feedback" there fills it in.
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: With the processor architecture.

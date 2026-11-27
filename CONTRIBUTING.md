@@ -4,14 +4,13 @@ This page is for people outside the project. Thank you for taking the time.
 
 ## Issues
 
-Issues are welcome, for bugs and ideas alike.
+Issues are welcome, for bugs and ideas alike: the
+[new issue page](https://github.com/scarletkc/colab-playground/issues/new/choose) has a form for
+each. In the app, Settings → About → "Give feedback" opens that page, and the form you choose has
+the app's version and operating system filled in ([Feedback](docs/USAGE.md#feedback)).
 
-- **A bug:** in the app, Settings → About → "Give feedback" opens a new issue with the app's
-  version and operating system filled in ([Feedback](docs/USAGE.md#feedback)). Say what you did,
-  what you expected and what happened instead.
-- **An idea:** describe the problem it solves for you. [ROADMAP.md](docs/ROADMAP.md) lists what
-  is already planned and why it is not built yet, and
-  [DESIGN.md](docs/DESIGN.md#goals-and-non-goals-v1) what is out of scope.
+For an idea, [ROADMAP.md](docs/ROADMAP.md) lists what is already planned and why it is not built
+yet, and [DESIGN.md](docs/DESIGN.md#goals-and-non-goals-v1) what is out of scope.
 
 ## Pull requests
 
