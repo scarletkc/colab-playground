@@ -28,7 +28,9 @@ use colab_playground_core::real::{RealBackend, RealConfig};
 use colab_playground_core::sessions::{Accelerator, StopReason, WatchdogInfo};
 use colab_playground_core::tunnel::{TunnelEvent, TunnelSpec, TunnelState};
 use colab_playground_core::vm::RunState;
-use colab_playground_core::{CancelToken, Defaults, ErrorKind, Host, ManualClock, Toolchain};
+use colab_playground_core::{
+    CancelToken, Defaults, Error, ErrorKind, Host, ManualClock, Toolchain,
+};
 use serde_json::{Value, json};
 
 struct Fixture {
@@ -1002,15 +1004,20 @@ fn tunnel_uses_per_account_proxy_command_and_never_auto_creates() {
         "tunnel never came up"
     );
     let calls = std::fs::read_to_string(f.state.join("ssh_calls.jsonl")).unwrap();
-    let expected = format!(
-        "ProxyCommand={} --config {} ssh --proxy-mode -s tun1",
-        f.cfg.toolchain.as_ref().unwrap().colab,
+    let proxy = calls
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Vec<String>>(l).ok())
+        .flatten()
+        .find_map(|a| a.strip_prefix("ProxyCommand=").map(str::to_owned))
+        .unwrap_or_else(|| panic!("{calls}"));
+    // The CLI's interpreter runs the guard (its base64 in between), which runs the CLI.
+    let python = &f.cfg.toolchain.as_ref().unwrap().helper_python;
+    assert!(proxy.starts_with(&format!("{python} -P -c ")), "{proxy}");
+    let tail = format!(
+        " --config {} ssh --proxy-mode -s tun1",
         f.state_file(&alice.id).display()
     );
-    assert!(
-        calls.contains(&serde_json::to_string(&expected).unwrap()),
-        "{calls}"
-    );
+    assert!(proxy.ends_with(&tail), "{proxy}");
     assert!(calls.contains(&format!("\"127.0.0.1:{port}:127.0.0.1:8000\"")));
     f.b.close_tunnel(id).unwrap();
     assert!(f.b.tunnels().is_empty());
@@ -1096,6 +1103,89 @@ fn a_forward_asked_for_while_its_session_stops_is_refused_and_creates_nothing() 
         "a runtime was auto-created"
     );
     assert!(f.assignments("alice").is_empty());
+}
+
+/// Opens a forward to `session` of `account` and returns the error it fails with.
+fn forward_failure(f: &Fixture, account: &AccountId, session: &str) -> Error {
+    let (tx, rx) = channel();
+    let spec = TunnelSpec {
+        account: account.clone(),
+        session: session.into(),
+        local_port: free_port(),
+        remote_port: 8000,
+        health_path: None,
+    };
+    f.b.open_tunnel(spec, tx).unwrap();
+    let failed = wait_for(&rx, 30, |e| {
+        matches!(
+            e,
+            TunnelEvent::State {
+                state: TunnelState::Failed { .. },
+                ..
+            }
+        )
+    });
+    match failed {
+        Some(TunnelEvent::State {
+            state: TunnelState::Failed { error },
+            ..
+        }) => error,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The tunnel checks the record before it starts the CLI, which reads the state file only later.
+/// A record pruned in between (as `colab sessions` on the account can do to a runtime that ended)
+/// must not have `--proxy-mode` create a runtime under the name.
+#[test]
+fn a_record_pruned_after_the_tunnels_check_creates_no_runtime() {
+    let f = fixture();
+    let alice = f.adopt_alice();
+    f.provision("pruned", Accelerator::T4);
+    f.knob("proxy_record_pruned", json!(true));
+    let error = forward_failure(&f, &alice.id, "pruned");
+    assert!(error.is(ErrorKind::SessionGone), "{error}");
+    assert!(
+        error.detail.contains("refused to create a runtime"),
+        "{error:?}"
+    );
+    assert!(
+        f.server().get("autocreated").is_none(),
+        "a runtime was auto-created"
+    );
+    assert_eq!(
+        f.assignments("alice").len(),
+        1,
+        "{:?}",
+        f.assignments("alice")
+    );
+}
+
+/// A CLI without the `Client.assign` the guard takes away is not run at all, rather than run
+/// unguarded.
+#[test]
+fn a_cli_the_proxy_guard_cannot_disarm_is_not_run() {
+    let f = fixture();
+    let alice = f.adopt_alice();
+    f.provision("odd", Accelerator::T4);
+    let ran = || {
+        f.calls()
+            .iter()
+            .filter(|c| {
+                c["argv"]
+                    .as_array()
+                    .is_some_and(|a| a.contains(&json!("ssh")))
+            })
+            .count()
+    };
+    f.knob("cli_api_broken", json!(true));
+    let error = forward_failure(&f, &alice.id, "odd");
+    f.knob("cli_api_broken", json!(false));
+    assert!(error.is(ErrorKind::UnsupportedCliVersion), "{error}");
+    assert!(error.detail.contains("unsupported colab CLI"), "{error:?}");
+    assert_eq!(ran(), 0, "the CLI ran");
+    assert!(f.server().get("autocreated").is_none());
+    assert_eq!(f.assignments("alice").len(), 1);
 }
 
 #[test]

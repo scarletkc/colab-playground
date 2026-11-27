@@ -1821,10 +1821,10 @@ impl Backend for RealBackend {
 
     fn open_tunnel(&self, spec: TunnelSpec, events: Events<TunnelEvent>) -> Result<TunnelId> {
         let cancel = CancelToken::new();
-        let (_g, cli, state) = self.inner.cli_for(&spec.account, &cancel)?;
+        let (_g, _cli, state) = self.inner.cli_for(&spec.account, &cancel)?;
         let ctx = TunnelCtx {
             host: self.inner.cfg.host.clone(),
-            colab: cli.colab.clone(),
+            python: self.inner.toolchain()?.helper_python,
             base_env: self.inner.cfg.base_env.clone(),
             state_file: state,
             clock: self.inner.cfg.clock.clone(),

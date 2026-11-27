@@ -8,7 +8,9 @@ exit codes, the copy-paste OAuth prompt, HTTP 400 for unentitled
 accelerators, an allocation request Colab never answers, and ``ssh --proxy-mode`` (including its auto-create of unknown
 session names and HTTP 429). Snippets sent with ``exec`` are compiled (syntax
 errors surface like kernel tracebacks) and the core's known snippets get
-simulated answers. State lives under ``$CPG_FAKE_STATE`` (see fake_common).
+simulated answers. Runtimes are allocated only through the fake
+``Client.assign``, as the real CLI's are. State lives under
+``$CPG_FAKE_STATE`` (see fake_common).
 """
 
 import json
@@ -125,21 +127,10 @@ def cmd_usage(state_path, args):
     return 0
 
 
-def allocate(s, name, session, acc, high_mem):
-    s["counter"] += 1
-    ep = "gpu-%s-s-%04d" % (acc.lower(), s["counter"]) if acc != "NONE" else "m-s-%04d" % s["counter"]
-    vram = {"T4": 15360, "L4": 23034, "G4": 97887, "H100": 81559}.get(acc)
-    if acc == "A100":
-        seq = s["knobs"]["a100_sequence"]
-        idx = s.setdefault("a100_count", 0)
-        vram = seq[min(idx, len(seq) - 1)]
-        s["a100_count"] = idx + 1
-    variant = "GPU" if acc in ("T4", "L4", "G4", "A100", "H100") else ("TPU" if acc.startswith("V") else "DEFAULT")
-    fc.account_state(s, name)["assignments"][ep] = {
-        "accelerator": acc, "variant": variant, "shape": "HIGH_RAM" if high_mem else "STANDARD",
-        "vram": vram, "created": time.time(), "session": session,
-    }
-    return ep
+def assign(name, session, acc, high_mem):
+    """Allocates the way the real CLI does, through `Client.assign`, looked up at the call so the
+    tunnel's guard can take it away."""
+    return fc.Client(fc.Prod(), None, name=name).assign(session, acc, high_mem)
 
 
 def cmd_new(state_path, args):
@@ -159,8 +150,7 @@ def cmd_new(state_path, args):
         if s["knobs"]["no_answer_hangs"]:
             # Colab allocates a VM but the reply never arrives, so the CLI records
             # no session (the VM is listed as `[?]`) and keeps waiting.
-            allocate(s, name, session, acc, "--high-mem" in args)
-            fc.save_server(s)
+            assign(name, session, acc, "--high-mem" in args)
             time.sleep(600)
             return 1
         # How 0.8.0 (Typer with rich) ends once its retries of the request ran out
@@ -168,8 +158,7 @@ def cmd_new(state_path, args):
         err("ReadTimeout: HTTPSConnectionPool(host='colab.research.google.com', port=443): ")
         err("Read timed out. (read timeout=120)")
         return 1
-    ep = allocate(s, name, session, acc, "--high-mem" in args)
-    fc.save_server(s)
+    ep = assign(name, session, acc, "--high-mem" in args)
     records = load_state(state_path)
     records[session] = {"name": session, "token": "proxy-token", "url": "https://proxy.invalid", "endpoint": ep,
                         "token_expires_at": "2999-01-01T00:00:00Z", "accelerator": acc, "variant": "GPU",
@@ -386,16 +375,21 @@ def cmd_ssh(state_path, args):
         return 2
     name = require_account()
     session = opt(args, "-s", "--session")
+    if fc.knob("proxy_record_pruned"):
+        # Another command pruning the record after the tunnel checked it.
+        records = load_state(state_path)
+        records.pop(session, None)
+        save_state(state_path, records)
     records = load_state(state_path)
-    s = fc.server()
     if session not in records:
-        # Real CLI behaviour: `--proxy-mode -s NAME` creates a missing session.
-        ep = allocate(s, name, session, "NONE", False)
+        # Real CLI behaviour: `--proxy-mode -s NAME` creates a missing session, as `colab new` does.
+        ep = assign(name, session, "NONE", False)
+        s = fc.server()
         s.setdefault("autocreated", []).append(session)
         fc.save_server(s)
         records[session] = {"name": session, "token": "t", "url": "u", "endpoint": ep}
         save_state(state_path, records)
-    if s["knobs"]["ssh_busy"]:
+    if fc.knob("ssh_busy"):
         err("[colab] Already-active SSH session (HTTP 429): another `colab ssh` is connected to this runtime. Disconnect it and retry.")
         return 1
     # Bridge: stay connected until ssh closes our stdin.

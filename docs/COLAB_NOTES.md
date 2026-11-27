@@ -113,16 +113,14 @@ when changing either.
   `NAME` is not in its state file, and so does a bare `colab ssh` (no `-s`)
   when the state file holds no session; both go through `colab new`. A tunnel
   reconnecting after its session was stopped would silently start a new billed
-  VM. The app checks that the session is still recorded before every
-  (re)connect, but the CLI reads the state file only once it has started, and
-  `colab stop` drops the record last, after shutting the kernel down and
-  releasing the runtime. So a stop in the app first closes the session's
-  tunnels, waiting for a connect under way, and refuses new ones until it is
-  done. A runtime that ends on its own leaves its record behind, which
-  `--proxy-mode` finds, so it does not create one (it prunes the record when
-  it refreshes the proxy token). Only another command pruning that
-  record, such as `colab sessions`, between a retrying tunnel's check and the
-  CLI's own read can still get past the check.
+  VM. Checking the record before starting the CLI is not enough: the CLI reads
+  the state file only once it has started, `colab stop` drops the record last
+  (after shutting the kernel down and releasing the runtime), and `colab
+  sessions` prunes the record of a runtime that ended on its own. Every
+  allocation in the CLI goes through `Client.assign`, so the app's tunnels run
+  the CLI's entry point with that method replaced by a refusal, and run no CLI
+  that lacks it. A stop in the app also closes the session's tunnels first and
+  refuses new ones until it is done.
 - The server accepts ed25519/ecdsa keys only (RSA is rejected). The CLI sends
   the first of `~/.ssh/id_ed25519.pub`, `id_ecdsa.pub`.
 - The tunnel lives with the process that started it; the VM keeps running when

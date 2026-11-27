@@ -9,9 +9,11 @@
 //! `NAME` is not in its state file. Before every (re)connect the tunnel checks
 //! that the session is still recorded in the account's state file and fails
 //! with `SessionGone` otherwise. The CLI looks the name up only after it has
-//! started, so a record dropped in between gets past the check: the app's own
-//! stops therefore close the session's tunnels and keep new ones from opening
-//! until `colab stop` is done ([`TunnelManager::close_for_stop`]).
+//! started, so a record dropped in between gets past the check. The CLI
+//! therefore runs under `assets/proxy_guard.py`, which takes away its only way
+//! to allocate a runtime. The app's own stops also close the session's tunnels
+//! and keep new ones from opening until `colab stop` is done
+//! ([`TunnelManager::close_for_stop`]).
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,6 +22,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
 use serde::{Deserialize, Serialize};
 
 use crate::accounts::AccountId;
@@ -118,20 +122,36 @@ pub enum TunnelEvent {
     },
 }
 
-/// `colab --config <state> ssh --proxy-mode -s <name>` as a shell string for
-/// OpenSSH's `ProxyCommand` (which expands `%` tokens in it, then always runs
-/// it through a shell).
-pub fn proxy_command(colab: &str, state_file: &HostPath, session: &str) -> String {
+/// Runs `colab ssh --proxy-mode` with the CLI unable to allocate a runtime.
+const PROXY_GUARD_PY: &str = include_str!("../assets/proxy_guard.py");
+
+/// What [`PROXY_GUARD_PY`] prints when it has kept the CLI from creating a runtime, and when it
+/// cannot run this CLI that way.
+const PROXY_REFUSED: &str = "[colab-playground] refused to create a runtime";
+const PROXY_UNSUPPORTED: &str = "[colab-playground] unsupported colab CLI";
+
+/// The `python -c` program that runs [`PROXY_GUARD_PY`], which follows it base64-encoded. Neither
+/// holds a quote, backslash, `%` or newline: OpenSSH splits the `-o` value by quoting rules of its
+/// own and expands `%` tokens in it, and then the user's shell, which can be fish, runs it.
+const PROXY_LOADER: &str = "import sys,base64;exec(base64.b64decode(sys.argv.pop(1)))";
+
+/// `colab --config <state> ssh --proxy-mode -s <name>` under [`PROXY_GUARD_PY`], run by `python`
+/// (the CLI's interpreter), as a shell string for OpenSSH's `ProxyCommand` (which expands `%`
+/// tokens in it, then always runs it through a shell). `-P` keeps the working directory out of
+/// the module path, as running the `colab` script does.
+pub fn proxy_command(python: &str, state_file: &HostPath, session: &str) -> String {
     format!(
-        "{} --config {} ssh --proxy-mode -s {}",
-        shell_quote(colab),
+        "{} -P -c {} {} --config {} ssh --proxy-mode -s {}",
+        shell_quote(python),
+        shell_quote(PROXY_LOADER),
+        B64.encode(PROXY_GUARD_PY),
         shell_quote(state_file.as_str()),
         shell_quote(session)
     )
     .replace('%', "%%")
 }
 
-pub fn ssh_args(colab: &str, state_file: &HostPath, spec: &TunnelSpec) -> Result<Vec<String>> {
+pub fn ssh_args(python: &str, state_file: &HostPath, spec: &TunnelSpec) -> Result<Vec<String>> {
     spec.validate()?;
     let opt = |s: &str| ["-o".to_owned(), s.to_owned()];
     let mut args = vec![
@@ -154,7 +174,7 @@ pub fn ssh_args(colab: &str, state_file: &HostPath, spec: &TunnelSpec) -> Result
     }
     args.extend(opt(&format!(
         "ProxyCommand={}",
-        proxy_command(colab, state_file, &spec.session)
+        proxy_command(python, state_file, &spec.session)
     )));
     args.push("-L".into());
     args.push(format!(
@@ -214,7 +234,10 @@ pub fn classify_ssh_output(stderr: &str, code: Option<i32>) -> Option<ErrorKind>
         Some(ErrorKind::AuthRequired)
     } else if has("Could not read the OAuth token from the OS keyring") {
         Some(ErrorKind::KeyringUnavailable)
-    } else if (has("ession '") && has("not found"))
+    } else if has(PROXY_UNSUPPORTED) {
+        Some(ErrorKind::UnsupportedCliVersion)
+    } else if has(PROXY_REFUSED)
+        || (has("ession '") && has("not found"))
         || has("appears to be lost")
         || has("(HTTP 404)")
     {
@@ -241,7 +264,8 @@ pub fn state_has_session(state_json: &str, session: &str) -> bool {
 #[derive(Clone)]
 pub struct TunnelCtx {
     pub host: Host,
-    pub colab: String,
+    /// The CLI's interpreter, which runs the ProxyCommand.
+    pub python: String,
     pub base_env: Vec<(String, String)>,
     /// The owning account's state file.
     pub state_file: HostPath,
@@ -375,7 +399,7 @@ fn run(ctx: TunnelCtx, spec: TunnelSpec, stop: CancelToken, shared: Arc<Shared>)
         Err(e) if e.kind == ErrorKind::Cancelled => return shared.set(TunnelState::Stopped),
         Err(e) => return fail(&shared, e),
     }
-    let args = match ssh_args(&ctx.colab, &ctx.state_file, &spec) {
+    let args = match ssh_args(&ctx.python, &ctx.state_file, &spec) {
         Ok(a) => a,
         Err(e) => return fail(&shared, e),
     };
@@ -384,7 +408,8 @@ fn run(ctx: TunnelCtx, spec: TunnelSpec, stop: CancelToken, shared: Arc<Shared>)
         if stop.is_cancelled() {
             return shared.set(TunnelState::Stopped);
         }
-        // Never let `--proxy-mode` auto-create a runtime: the session must be recorded.
+        // `--proxy-mode` would create a session that is not recorded. The guard refuses that
+        // too, but only once the job has started; here it ends as `SessionGone` before.
         match fs.read(&ctx.state_file, &stop) {
             Ok(Some(text)) if state_has_session(&text, &spec.session) => {}
             Ok(_) => {
@@ -769,14 +794,22 @@ mod tests {
         }
     }
 
+    const LOADER_QUOTED: &str = "'import sys,base64;exec(base64.b64decode(sys.argv.pop(1)))'";
+
     #[test]
     fn ssh_argv_uses_per_account_config_in_proxy_command() {
         let state =
             HostPath::new("/home/u/.local/share/colab-playground/accounts/a1/sessions.json");
-        let args = ssh_args("/home/u/.local/bin/colab", &state, &spec()).unwrap();
+        let python = "/home/u/.local/share/uv/tools/google-colab-cli/bin/python";
+        let args = ssh_args(python, &state, &spec()).unwrap();
         assert_eq!(&args[..4], ["-N", "-T", "-F", "/dev/null"]);
         assert!(args.contains(&"ExitOnForwardFailure=yes".to_owned()));
-        assert!(args.contains(&"ProxyCommand=/home/u/.local/bin/colab --config /home/u/.local/share/colab-playground/accounts/a1/sessions.json ssh --proxy-mode -s llm".to_owned()));
+        let expected = format!(
+            "ProxyCommand={python} -P -c {LOADER_QUOTED} {} --config {} ssh --proxy-mode -s llm",
+            B64.encode(PROXY_GUARD_PY),
+            state.as_str()
+        );
+        assert!(args.contains(&expected), "{args:?}");
         let l = args.iter().position(|a| a == "-L").unwrap();
         assert_eq!(args[l + 1], "127.0.0.1:18000:127.0.0.1:8000");
         assert_eq!(args.last().unwrap(), "root@colab-runtime");
@@ -785,27 +818,48 @@ mod tests {
     #[test]
     fn proxy_command_quotes_odd_paths() {
         let p = proxy_command(
-            "/opt/my tools/colab",
+            "/opt/my tools/python",
             &HostPath::new("/d/it's/s.json"),
             "s1",
         );
+        let guard = B64.encode(PROXY_GUARD_PY);
         assert_eq!(
             p,
-            r"'/opt/my tools/colab' --config '/d/it'\''s/s.json' ssh --proxy-mode -s s1"
+            format!(
+                r"'/opt/my tools/python' -P -c {LOADER_QUOTED} {guard} --config '/d/it'\''s/s.json' ssh --proxy-mode -s s1"
+            )
         );
     }
 
     #[test]
     fn proxy_command_escapes_openssh_percent_tokens() {
         let p = proxy_command(
-            "/opt/100%h/colab",
+            "/opt/100%h/python",
             &HostPath::new("/d/a%p/b%%r/s.json"),
             "s1",
         );
+        let guard = B64.encode(PROXY_GUARD_PY);
         assert_eq!(
             p,
-            "'/opt/100%%h/colab' --config '/d/a%%p/b%%%%r/s.json' ssh --proxy-mode -s s1"
+            format!(
+                "'/opt/100%%h/python' -P -c {LOADER_QUOTED} {guard} --config '/d/a%%p/b%%%%r/s.json' ssh --proxy-mode -s s1"
+            )
         );
+    }
+
+    #[test]
+    fn the_guard_reaches_python_whole_and_prints_what_the_tunnel_matches() {
+        assert!(
+            !PROXY_LOADER.contains(['\'', '"', '\\', '%', '\n', '#', '$']),
+            "{PROXY_LOADER}"
+        );
+        let p = proxy_command("/p", &HostPath::new("/s.json"), "s1");
+        let (_, rest) = p.split_once(LOADER_QUOTED).unwrap();
+        let encoded = rest.split_whitespace().next().unwrap();
+        assert_eq!(B64.decode(encoded).unwrap(), PROXY_GUARD_PY.as_bytes());
+        for line in [PROXY_REFUSED, PROXY_UNSUPPORTED] {
+            assert!(PROXY_GUARD_PY.contains(&format!("\"{line}\"")), "{line}");
+        }
     }
 
     #[test]
@@ -839,6 +893,16 @@ mod tests {
             Some(ErrorKind::SessionGone)
         );
         assert_eq!(
+            c(
+                "[colab] Creating runtime 'llm'...\n[colab-playground] refused to create a runtime: the session is not recorded"
+            ),
+            Some(ErrorKind::SessionGone)
+        );
+        assert_eq!(
+            c("[colab-playground] unsupported colab CLI: no Client.assign"),
+            Some(ErrorKind::UnsupportedCliVersion)
+        );
+        assert_eq!(
             c("kex_exchange_identification: Connection closed by remote host"),
             None
         );
@@ -861,7 +925,7 @@ mod tests {
     fn ctx() -> TunnelCtx {
         TunnelCtx {
             host: Host::Local,
-            colab: "colab".into(),
+            python: "python3".into(),
             base_env: Vec::new(),
             state_file: HostPath::new("/nowhere/sessions.json"),
             clock: Arc::new(crate::clock::ManualClock::fixed()),
