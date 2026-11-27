@@ -42,9 +42,10 @@ when changing either.
   report one.
 - The host of the runtime's proxy URL names it:
   `8080-m-s-…-b.us-west1.prod.r.colab.dev`. The CLI keeps that URL in its
-  state file and gets it with every assignment it lists. Seen once, on a CPU
-  runtime (2026-11-27); whether GPU and TPU hosts look the same is not known.
-- On that runtime the metadata server answered `instance/zone` with 404, no
+  state file, and every assignment it lists carries the same host. Seen on two
+  CPU runtimes (2026-11-27, `us-west1` and `us-central1`); whether GPU and TPU
+  hosts look the same is not known.
+- On the first, the metadata server answered `instance/zone` with 404, no
   environment variable named a region, and two IP geolocation services
   (Cloudflare's `cdn-cgi/trace`, ipinfo.io) placed its address in The Dalles,
   Oregon, where `us-west1` is.
