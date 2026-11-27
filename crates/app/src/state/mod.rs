@@ -556,8 +556,9 @@ impl AppState {
         }
     }
 
-    /// Writes the settings on the background executor. Saves run one after another, so the
-    /// file always ends with the latest settings; a failure shows a toast.
+    /// Writes the settings on the background executor. Saves run one after another, in the
+    /// order they were made, so an older value never lands after a newer one; a failure shows
+    /// a toast.
     pub(crate) fn persist_settings(&mut self, cx: &mut Context<Self>) {
         let store = self.store.clone();
         let settings = self.settings.clone();
