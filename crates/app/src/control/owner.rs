@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc::{self, RecvTimeoutError},
     },
     thread,
@@ -75,6 +75,23 @@ pub struct Service {
 struct Job {
     command: Command,
     reply: mpsc::Sender<Response>,
+    claim: Arc<AtomicU8>,
+}
+
+/// Where a job stands between the listener, which waits only so long, and the foreground. It
+/// leaves `PENDING` once, to one side: a request the listener answered `timeout` is never done
+/// afterwards, when it could start a billed runtime nobody was told about.
+const PENDING: u8 = 0;
+const TAKEN: u8 = 1;
+const ABANDONED: u8 = 2;
+
+impl Job {
+    /// Takes the job for the foreground to do. False when the listener stopped waiting for it.
+    fn take(&self) -> bool {
+        self.claim
+            .compare_exchange(PENDING, TAKEN, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
 }
 
 /// Set when the app is on its way out, so a second launch waits for the lock instead of
@@ -137,7 +154,7 @@ impl Owner {
         let quitting = self.quitting.clone();
         let flavor = self.flavor;
         let endpoint = listen(&self.dir, flavor, move |command| {
-            forward(&jobs, &quitting, flavor, command)
+            forward(&jobs, &quitting, flavor, command, ANSWER_TIMEOUT)
         })?;
         self.endpoint = Some(endpoint.clone());
         Ok(Service {
@@ -164,24 +181,41 @@ fn remove_endpoint(path: &Path) {
     }
 }
 
-/// Hands one request to the foreground and waits for its answer.
+/// Hands one request to the foreground and waits up to `wait` for it to begin on it. Answers
+/// `timeout` only for a request the foreground then never does.
 fn forward(
     jobs: &UnboundedSender<Job>,
     quitting: &AtomicBool,
     flavor: Flavor,
     command: Command,
+    wait: Duration,
 ) -> Response {
     let gone = || Response::failure(Some(flavor), Code::Quitting, None);
     if quitting.load(Ordering::SeqCst) {
         return gone();
     }
     let (reply, answer) = mpsc::channel();
-    if jobs.unbounded_send(Job { command, reply }).is_err() {
+    let claim = Arc::new(AtomicU8::new(PENDING));
+    let job = Job {
+        command,
+        reply,
+        claim: claim.clone(),
+    };
+    if jobs.unbounded_send(job).is_err() {
         return gone();
     }
-    match answer.recv_timeout(ANSWER_TIMEOUT) {
+    match answer.recv_timeout(wait) {
         Ok(response) => response,
-        Err(RecvTimeoutError::Timeout) => Response::failure(Some(flavor), Code::Timeout, None),
+        Err(RecvTimeoutError::Timeout) => {
+            let abandoned = claim
+                .compare_exchange(PENDING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok();
+            if abandoned {
+                return Response::failure(Some(flavor), Code::Timeout, None);
+            }
+            // The foreground has begun on it: its answer says what was done.
+            answer.recv().unwrap_or_else(|_| gone())
+        }
         Err(RecvTimeoutError::Disconnected) => gone(),
     }
 }
@@ -355,11 +389,18 @@ pub fn serve(service: Service, state: Entity<AppState>, cx: &mut App) {
     let state = state.downgrade();
     cx.spawn(async move |cx| {
         while let Some(job) = jobs.next().await {
+            if !job.take() {
+                log::warn!(
+                    "control: left {} undone; its client was told the app did not answer in time",
+                    job.command.name()
+                );
+                continue;
+            }
             let response = cx.update(|cx| match state.upgrade() {
                 Some(state) => answer(job.command, &state, cx),
                 None => Response::failure(None, Code::Quitting, None),
             });
-            // The listener gave up waiting: nobody is left to tell.
+            // The listener is gone only when the app is on its way out.
             let _ = job.reply.send(response);
         }
     })
@@ -407,7 +448,7 @@ mod tests {
     use colab_playground_core::backend::BackendKind as Flavor;
     use futures::StreamExt;
 
-    use super::{Claim, Owner, claim_within, listen, read_request, respond};
+    use super::{Claim, Job, Owner, claim_within, forward, listen, read_request, respond};
     use crate::control::{
         Code, Command, Endpoint, PROTOCOL_VERSION, Response, Token, ctl, endpoint_file,
     };
@@ -607,7 +648,8 @@ mod tests {
         let (asked, activated) = mpsc::channel();
         thread::spawn(move || {
             while let Some(job) = futures::executor::block_on(service.jobs.next()) {
-                asked.send(job.command).expect("the test listens");
+                assert!(job.take());
+                asked.send(job.command.clone()).expect("the test listens");
                 let _ = job
                     .reply
                     .send(Response::success(Flavor::Mock, serde_json::json!({})));
@@ -624,6 +666,34 @@ mod tests {
             claim_within(dir.path(), Flavor::Real, SHORT),
             Claim::Owner(_)
         ));
+    }
+
+    #[test]
+    fn a_request_answered_as_timed_out_is_never_done_afterwards() {
+        let flavor = Flavor::Mock;
+        let quitting = std::sync::atomic::AtomicBool::new(false);
+        let start = || Command::Start(crate::control::StartArgs::default());
+        let wait = Duration::from_millis(20);
+
+        // The foreground is busy for longer than the listener waits.
+        let (jobs, mut inbox) = futures::channel::mpsc::unbounded::<Job>();
+        let answer = forward(&jobs, &quitting, flavor, start(), wait);
+        assert_eq!(answer.code(), Some(Code::Timeout));
+        let late = futures::executor::block_on(inbox.next()).expect("still queued");
+        assert!(!late.take(), "the foreground leaves it undone");
+
+        // The foreground began before the wait ran out: its answer is the one given.
+        let (jobs, mut inbox) = futures::channel::mpsc::unbounded::<Job>();
+        let foreground = thread::spawn(move || {
+            let job = futures::executor::block_on(inbox.next()).expect("queued");
+            assert!(job.take());
+            thread::sleep(SHORT);
+            let done = Response::success(flavor, serde_json::json!({ "operation": "x-1" }));
+            job.reply.send(done).expect("the listener still waits");
+        });
+        let answer = forward(&jobs, &quitting, flavor, start(), wait);
+        foreground.join().expect("the foreground ran");
+        assert!(answer.ok, "{answer:?}");
     }
 
     #[test]

@@ -207,7 +207,7 @@ and does nothing on its own: it never starts the app, signs in or runs `colab`.
    colab-playground ctl start --hardware T4         # what a start would do; --yes starts it
    colab-playground ctl stop a100-7f3a              # what a stop would do; --yes stops it
    colab-playground ctl operation <id> --wait 600   # follow a start or a stop until it ends
-   colab-playground ctl cancel <id> --yes           # cancel a start; its runtime is given back
+   colab-playground ctl cancel <id> --yes           # cancel a start and give back what it got
    ```
 
 - **Which app it asks:** the one on the backend the app itself would pick: `--mock` or `--real`,
@@ -333,8 +333,11 @@ Starting and stopping:
 - **Waiting:** `operation <id> --wait <seconds>` asks again until the operation ends or the time
   is up, then answers as `operation <id>` does. A wait that runs out answers with the operation
   still `running`: that is not a failure, and the operation goes on.
-- **Cancelling:** `cancel <id> --yes` cancels a start, and anything it got is given back, so
-  nothing it started is left billing. Cancel in the window ends the operation as `cancelled` too.
+- **Cancelling:** `cancel <id> --yes` asks a start to stop and to give back anything it got; it
+  answers at once, with the operation still `running` and `cancelling`. The operation ends as
+  `cancelled` once nothing it got is left billing. If a runtime could not be given back, it ends
+  as `failed` with the error `orphan_suspected` instead, and that runtime may still bill:
+  `sessions` lists it, and `stop` ends it. Cancel in the window ends the operation the same way.
   A stop cannot be cancelled (`not_cancellable`), nor an operation that has ended
   (`operation_ended`). Nothing else cancels: a `ctl` that is stopped or killed while it waits
   leaves the operation running.
