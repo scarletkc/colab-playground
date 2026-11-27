@@ -725,6 +725,9 @@ catalog_keys! {
     SETTINGS_FEEDBACK_DESCRIPTION => "app.b12.settings_feedback_description",
     PROV_RATE_MEASURED => "app.b13.prov_rate_measured",
     PROV_RATE_PUBLISHED => "app.b13.prov_rate_published",
+    SETTINGS_SPONSOR_TITLE => "app.b14.settings_sponsor_title",
+    SETTINGS_SPONSOR_DESCRIPTION => "app.b14.settings_sponsor_description",
+    SETTINGS_SPONSOR => "app.b14.settings_sponsor",
 }
 
 /// A message table: `(key, message)` pairs; `{name}` marks an argument.
