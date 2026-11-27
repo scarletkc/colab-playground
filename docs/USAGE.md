@@ -70,14 +70,15 @@ The app checks GitHub for a newer release, and installs it when you ask.
 
 ## Feedback
 
-- **Any time:** Settings → About → "Give feedback" opens a new issue on GitHub in your browser,
-  with the app's version and operating system filled in.
+- **Any time:** Settings → About → "Give feedback" opens GitHub in your browser, where you choose
+  to report a problem or suggest an idea. Either form has the app's version and operating system
+  filled in.
 - **When the app asks:** after a few runtimes or deployments, the app asks whether you enjoy it,
   with "Star on GitHub" (the project page) and "Give feedback". It asks only right after you stop
   a runtime while nothing else runs or starts, at most twice, and never again once you choose
   either link.
-- **What is sent:** opening the issue form passes the app's version and operating system to GitHub
-  in its link. Nothing is posted until you submit the form, and the app itself sends nothing.
+- **What is sent:** opening the issue forms passes the app's version and operating system to
+  GitHub in the link. Nothing is posted until you submit the form, and the app itself sends nothing.
 
 ## Requirements
 
@@ -145,7 +146,9 @@ cargo run -p colab-playground -- --mock-scenario signed-out --mock-fail cli-miss
   simulated.
 
 Demo mode still reads and writes the normal settings file; set `COLAB_PLAYGROUND_CONFIG_DIR` to
-another folder to keep experiments apart.
+another folder to keep experiments apart. A demo copy and a real one running side by side on that
+file do not undo each other's changes, but each shows a change made in the other only from its
+next start.
 
 ## Where things are stored
 

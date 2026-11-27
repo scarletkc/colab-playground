@@ -11,6 +11,11 @@ Nothing is checked twice, and nothing waits for a person to check it by hand.
   suite locally as well: while working, run only the checks of what you changed.
 - A pull request that changes only docs (Markdown files and `docs/`) builds and tests nothing.
   The CI jobs still report, because `main` waits for them, with every step skipped.
+- A push to `main` repeats no CI job that passed on its pull request: the branch was up to date
+  with `main`, so the job checked the same files. A job still runs there when its pull request
+  did not pass it, when the push changes the build cache's key (`Cargo.toml`, `Cargo.lock`, the
+  toolchain), or when `main` no longer has that job's cache, because pull requests build from
+  `main`'s cache and never save their own.
 - What the mock backend or the fake CLI covers is not checked again on the real backend.
 - A check that a test, a script or an agent can make is automated, never left to a person. A
   check on the real Colab spends compute units, so an agent makes one only with the user's

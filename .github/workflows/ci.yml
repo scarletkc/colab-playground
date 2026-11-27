@@ -17,33 +17,81 @@ env:
 
 # The Linux and Windows job names below are the status checks the `main` ruleset requires
 # (docs/RELEASING.md). Renaming one of them or changing the matrix means updating the ruleset
-# too, or no pull request can be merged. The macOS job is not required: a runner is often never
+# too, or no pull request can be merged, and the job list in `changes`, or `main` checks again
+# what a pull request already checked. The macOS job is not required: a runner is often never
 # assigned to it.
 jobs:
-  # A pull request that changes only docs has nothing to build or test. The jobs below still run
-  # for it, because the ruleset waits for their names, but skip every step. Only a clear "docs
-  # only" answer skips: a push to `main` or a failed lookup builds and tests everything.
+  # Lists in `skip` the jobs below with nothing to check; they still run, because the ruleset
+  # waits for their names, but skip every step. Two cases:
+  # - a pull request that changes only docs has nothing to build or test;
+  # - a push to `main` repeats nothing its pull request already checked (docs/TESTING.md).
+  # Only a clear answer skips: a failed lookup builds and tests everything.
   changes:
     name: Changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      actions: read # main's build caches
+      checks: read # the checks that passed on the pull request
+      contents: read
       pull-requests: read
     outputs:
-      code: ${{ steps.files.outputs.code }}
+      skip: ${{ steps.plan.outputs.skip }}
     steps:
-      - id: files
-        if: github.event_name == 'pull_request'
+      - id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_FILES: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
-        # A renamed file counts under both names. `grep -c` reads the whole list, where `-q`
-        # could end the pipe early and fail it.
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.sha }}
         run: |
-          files=$(gh api "$PR_FILES" --paginate --jq '.[] | .filename, (.previous_filename // empty)') || exit 0
-          [ -n "$files" ] || exit 0
-          other=$(printf '%s\n' "$files" | grep -cvE '(\.md$|^docs/)' || true)
-          if [ "$other" = 0 ]; then echo "code=false" >> "$GITHUB_OUTPUT"; fi
+          all='["linux","windows-latest","macos-latest"]'
+          # A renamed file counts under both names.
+          pr_files() {
+            gh api "repos/$REPO/pulls/$1/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'
+          }
+
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            files=$(pr_files "$PR") || exit 0
+            [ -n "$files" ] || exit 0
+            # `grep -c` reads the whole list, where `-q` could end the pipe early and fail it.
+            other=$(printf '%s\n' "$files" | grep -cvE '(\.md$|^docs/)' || true)
+            if [ "$other" = 0 ]; then echo "skip=$all" >> "$GITHUB_OUTPUT"; fi
+            exit 0
+          fi
+
+          # A push to main: the pull request it squash-merged.
+          read -r number head < <(gh api "repos/$REPO/commits/$SHA/pulls" \
+            --jq ".[] | select(.merge_commit_sha == \"$SHA\") | \"\(.number) \(.head.sha)\"") || exit 0
+          [ -n "$head" ] || exit 0
+          # The pull request was up to date with main when it was merged. main only moves
+          # forward, so it was also up to date whenever CI ran on its head: every such run
+          # checked exactly the files of this push.
+          parent=$(gh api "repos/$REPO/commits/$SHA" --jq '.parents[0].sha') || exit 0
+          status=$(gh api "repos/$REPO/compare/$parent...$head" --jq .status) || exit 0
+          [ "$status" = ahead ] || exit 0
+          # Pull requests restore main's build cache and never save one. A change to its key
+          # (the toolchain, the dependencies) is saved only by building here.
+          files=$(pr_files "$number") || exit 0
+          key=$(printf '%s\n' "$files" | grep -cE '(^|/)(Cargo\.(toml|lock)|rust-toolchain(\.toml)?)$|(^|/)\.cargo/|^\.github/workflows/ci\.yml$' || true)
+          [ "$key" = 0 ] || exit 0
+          passed=$(gh api "repos/$REPO/commits/$head/check-runs" --paginate \
+            --jq '.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success") | .name') || exit 0
+          skip=""
+          # Per job: its entry in `skip`, its check name (the job's `name` below) and the start
+          # of its cache key (rust-cache: v0-rust-<job id>-<Node's os.type()>-).
+          while IFS='|' read -r job check cache; do
+            grep -qxF "$check" <<< "$passed" || continue
+            # GitHub deletes a cache unused for 7 days, and pull requests would then build
+            # everything from scratch.
+            count=$(gh api "repos/$REPO/actions/caches?ref=refs/heads/main&key=$cache" --jq .total_count) || continue
+            if [ "$count" -gt 0 ]; then skip="${skip:+$skip,}\"$job\""; fi
+          done <<'JOBS'
+          linux|Linux (fmt, clippy, test)|v0-rust-linux-Linux-
+          windows-latest|windows-latest (check, tests)|v0-rust-check-Windows_NT-
+          macos-latest|macos-latest (check, tests)|v0-rust-check-Darwin-
+          JOBS
+          echo "skip=[$skip]" >> "$GITHUB_OUTPUT"
 
   linux:
     name: Linux (fmt, clippy, test)
@@ -52,33 +100,36 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # The steps run only when `true`: when `changes` did not list this job in `skip`.
+      BUILD: ${{ !contains(fromJSON(needs.changes.outputs.skip || '[]'), 'linux') }}
     steps:
       - uses: actions/checkout@v7
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
       - uses: dtolnay/rust-toolchain@v1
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
         with:
           toolchain: "1.98"
           components: rustfmt, clippy
       # Pull requests restore main's cache and save none of their own: each saved copy is large,
       # and the repository's cache quota would evict main's copies.
       - uses: Swatinem/rust-cache@v2
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # gpui's Wayland and X11 backends link xkbcommon and fontconfig (same list as Ely's CI).
       - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-x11-dev libfontconfig-dev
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
       - run: cargo fmt --all -- --check
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
       # Release downloads are built without demo data (package.yml). No other step compiles that
       # configuration, so a break in it would first show when a release is built.
       - run: cargo clippy -p colab-playground --no-default-features --locked -- -D warnings
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
       - run: cargo test --workspace --locked
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
 
   check:
     name: ${{ matrix.os }} (check, tests)
@@ -90,21 +141,23 @@ jobs:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      BUILD: ${{ !contains(fromJSON(needs.changes.outputs.skip || '[]'), matrix.os) }} # as in the linux job
     steps:
       - uses: actions/checkout@v7
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
       - uses: dtolnay/rust-toolchain@v1
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
         with:
           toolchain: "1.98"
       - uses: Swatinem/rust-cache@v2
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }} # as in the linux job
       # No `cargo check` first: the two test steps compile every target of both crates, and a
       # check would compile them a second time.
       - run: cargo test -p colab-playground-core --locked
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'
       # The app's headless UI tests: the title strip, fonts and paths differ per OS.
       - run: cargo test -p colab-playground --locked
-        if: needs.changes.outputs.code != 'false'
+        if: env.BUILD == 'true'

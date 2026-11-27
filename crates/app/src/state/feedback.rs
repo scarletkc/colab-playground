@@ -22,17 +22,19 @@ pub const ASK_AGAIN_AFTER: Duration = Duration::from_secs(30 * 24 * 3600);
 /// The project's page on GitHub (the package repository), where it can be starred.
 pub const PROJECT_PAGE: &str = env!("CARGO_PKG_REPOSITORY");
 
-/// GitHub's form for a new issue, with this build's version and system filled in under the
-/// place where the user writes.
+/// Ids of text fields that every issue form in `.github/ISSUE_TEMPLATE/` has. Released apps keep
+/// linking them, so renaming one leaves it empty for every user of those versions.
+const VERSION_FIELD: &str = "version";
+const SYSTEM_FIELD: &str = "os";
+
+/// GitHub's choice of issue forms, with this build's version and system filled in: GitHub passes
+/// the fields given to the chooser on to the form the user picks.
 pub fn feedback_page() -> String {
-    let build = format!(
-        "\n\n{} {} ({})",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        platform::system()
-    );
-    let body: String = url::form_urlencoded::byte_serialize(build.as_bytes()).collect();
-    format!("{PROJECT_PAGE}/issues/new?body={body}")
+    let fields = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair(VERSION_FIELD, env!("CARGO_PKG_VERSION"))
+        .append_pair(SYSTEM_FIELD, &platform::system())
+        .finish();
+    format!("{PROJECT_PAGE}/issues/new/choose?{fields}")
 }
 
 /// Whether the app may ask at `now` (seconds since the Unix epoch).
@@ -111,7 +113,6 @@ impl AppState {
         self.answer_prompt(PROJECT_PAGE, cx);
     }
 
-    /// Opens a new issue from the prompt.
     pub fn give_feedback_from_prompt(&mut self, cx: &mut Context<Self>) {
         self.answer_prompt(&feedback_page(), cx);
     }
@@ -126,8 +127,11 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::{
-        ASK_AGAIN_AFTER, MOST_ASKS, PROJECT_PAGE, READY_BEFORE_ASKING, due, feedback_page,
+        ASK_AGAIN_AFTER, MOST_ASKS, PROJECT_PAGE, READY_BEFORE_ASKING, SYSTEM_FIELD, VERSION_FIELD,
+        due, feedback_page,
     };
     use crate::settings::Settings;
 
@@ -169,20 +173,46 @@ mod tests {
     }
 
     #[test]
-    fn the_issue_form_carries_the_version_and_the_system() {
+    fn the_issue_forms_get_the_version_and_the_system() {
         let page = feedback_page();
         let query = page
-            .strip_prefix(&format!("{PROJECT_PAGE}/issues/new?"))
-            .expect("the project's issue form");
-        let body: Vec<(String, String)> = url::form_urlencoded::parse(query.as_bytes())
+            .strip_prefix(&format!("{PROJECT_PAGE}/issues/new/choose?"))
+            .expect("the project's choice of issue forms");
+        let fields: Vec<(String, String)> = url::form_urlencoded::parse(query.as_bytes())
             .into_owned()
             .collect();
-        let [(name, text)] = body.as_slice() else {
-            panic!("one body parameter: {body:?}");
-        };
-        assert_eq!(name, "body");
-        assert!(text.starts_with("\n\n"), "room to write above: {text:?}");
-        assert!(text.contains(env!("CARGO_PKG_VERSION")), "{text:?}");
-        assert!(text.contains(&crate::platform::system()), "{text:?}");
+        assert_eq!(
+            fields,
+            [
+                (
+                    VERSION_FIELD.to_owned(),
+                    env!("CARGO_PKG_VERSION").to_owned()
+                ),
+                (SYSTEM_FIELD.to_owned(), crate::platform::system()),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_issue_form_has_the_fields_the_link_fills_in() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/ISSUE_TEMPLATE");
+        let mut forms = 0;
+        for entry in std::fs::read_dir(&dir).expect("the issue forms") {
+            let path = entry.expect("an issue form").path();
+            if path.file_name() == Some("config.yml".as_ref()) {
+                continue;
+            }
+            let form = std::fs::read_to_string(&path).expect("a readable issue form");
+            for id in [VERSION_FIELD, SYSTEM_FIELD] {
+                let field = format!("id: {id}");
+                assert!(
+                    form.lines().any(|line| line.trim() == field),
+                    "{} has no `{id}` field",
+                    path.display()
+                );
+            }
+            forms += 1;
+        }
+        assert!(forms > 0, "no issue forms in {}", dir.display());
     }
 }
