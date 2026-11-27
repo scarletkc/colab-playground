@@ -1,9 +1,10 @@
 //! Updates: whether a newer release is published, and installing it in place when the user
 //! asks.
 //!
-//! The automatic check runs once per start, from the usage poller (so never before the first
-//! frame or the setup checks). A check that gets no answer is tried again hourly on the backend
-//! clock until one does. A failed automatic check is only shown in Settings → About; a manual
+//! The automatic check runs at every start, from the usage poller (so never before the first
+//! frame or the setup checks), then once a day on the backend clock while the app runs. Nothing
+//! about it is saved, so a restart checks again. A check that gets no answer is tried again
+//! hourly until one does. A failed automatic check is only shown in Settings → About; a manual
 //! one also says so in a toast. A found release is announced once per version (a banner the
 //! user can dismiss for that version) and stays marked in the sidebar and in About until this
 //! build is at least that version.
@@ -32,6 +33,8 @@ use crate::{
     settings::OnByDefault,
 };
 
+/// How often the automatic check asks GitHub again while the app runs.
+pub const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 3600);
 // Offline at start-up still gets a check once the network is back, without asking GitHub at
 // every POLL_CHECK meanwhile.
 const UPDATE_RETRY_INTERVAL: Duration = Duration::from_secs(3600);
@@ -204,7 +207,8 @@ impl AppState {
     }
 
     /// One poller wake: checks when automatic checks are on, no check has got an answer in
-    /// this run and an hour has passed since the last try (on the backend clock).
+    /// this run or the last one is a day old, and an hour has passed since the last try (on the
+    /// backend clock).
     pub(crate) fn maybe_check_updates(&mut self, cx: &mut Context<Self>) {
         if self.checks_updates() && !self.ops.is_running(Op::UpdateCheck) {
             self.run_update_check(false, cx);
@@ -216,16 +220,16 @@ impl AppState {
             return;
         }
         if !manual {
-            if self.update_answered {
-                return;
-            }
             match &self.backend {
                 Ok(backend) => {
                     let now = secs(backend.now());
-                    if self
+                    let due_answer = self
+                        .update_answered_at
+                        .is_none_or(|last| now >= last + UPDATE_INTERVAL.as_secs());
+                    let due_retry = self
                         .update_attempted_at
-                        .is_some_and(|last| now < last + UPDATE_RETRY_INTERVAL.as_secs())
-                    {
+                        .is_none_or(|last| now >= last + UPDATE_RETRY_INTERVAL.as_secs());
+                    if !(due_answer && due_retry) {
                         return;
                     }
                 }
@@ -253,7 +257,7 @@ impl AppState {
                 state.update_attempted_at = Some(now);
                 match outcome {
                     Ok(UpdateStatus::UpToDate) => {
-                        state.update_answered = true;
+                        state.update_answered_at = Some(now);
                         state.update = UpdateCheck::UpToDate;
                         if state
                             .settings
@@ -266,7 +270,7 @@ impl AppState {
                         }
                     }
                     Ok(UpdateStatus::Available(release)) => {
-                        state.update_answered = true;
+                        state.update_answered_at = Some(now);
                         state.settings.update_latest = Some(release.version.clone());
                         state.update = UpdateCheck::Available(release);
                         // Where the app is may have changed since start-up.

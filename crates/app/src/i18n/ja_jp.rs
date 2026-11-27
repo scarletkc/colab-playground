@@ -1190,7 +1190,7 @@ pub(super) const MESSAGES: Messages = &[
     (UPDATE_AUTO, "アップデートを自動で確認"),
     (
         UPDATE_AUTO_HINT,
-        "起動するたびに 1 回 GitHub に問い合わせます。送信するのはアプリのバージョンだけです。",
+        "起動するたびに、また起動中は 1 日に 1 回 GitHub に問い合わせます。送信するのはアプリのバージョンだけです。",
     ),
     (
         UPDATE_NOTICE_TITLE,

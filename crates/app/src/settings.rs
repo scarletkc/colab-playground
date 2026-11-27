@@ -109,7 +109,7 @@ pub struct Settings {
         skip_serializing_if = "Option::is_none"
     )]
     pub colab_python: Option<String>,
-    /// Check GitHub for a newer release automatically (once per start).
+    /// Check GitHub for a newer release automatically (at every start, then once a day).
     #[serde(default, deserialize_with = "lenient")]
     pub check_updates: OnByDefault,
     /// The newest release a check found, while it is newer than this build.

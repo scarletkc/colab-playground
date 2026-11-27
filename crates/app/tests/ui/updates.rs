@@ -201,17 +201,22 @@ fn an_automatic_failure_stays_quiet(cx: &mut TestAppContext) {
     assert_eq!(app.mock.update_checks(), 2, "retried after an hour");
     assert!(app.shown(UPDATE_MARK_SELECTOR));
     later(&mut app, Duration::from_secs(3600));
-    assert_eq!(app.mock.update_checks(), 2, "answered, so not asked again");
+    assert_eq!(
+        app.mock.update_checks(),
+        2,
+        "answered, so not again within the day"
+    );
 }
 
 #[gpui::test]
-fn it_checks_once_per_start(cx: &mut TestAppContext) {
+fn it_checks_at_start_then_once_a_day(cx: &mut TestAppContext) {
     let mut app = TestApp::new(cx);
     app.advance(POLL_CHECK);
     assert_eq!(app.mock.update_checks(), 1);
     later(&mut app, Duration::from_secs(3600));
-    later(&mut app, Duration::from_secs(25 * 3600));
-    assert_eq!(app.mock.update_checks(), 1, "not again while the app runs");
+    assert_eq!(app.mock.update_checks(), 1, "not again within the day");
+    later(&mut app, colab_playground::state::UPDATE_INTERVAL);
+    assert_eq!(app.mock.update_checks(), 2, "again after a day");
 }
 
 fn with(extra: MockFailures) -> Options {

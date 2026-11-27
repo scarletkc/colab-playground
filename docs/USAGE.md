@@ -36,8 +36,9 @@ the real-mode requirements below apply.
 
 The app checks GitHub for a newer release, and installs it when you ask.
 
-- **Automatic check:** once, shortly after each start. A check that fails is tried again every hour
-  until one gets an answer. Turn it off in Settings → About → "Check for updates automatically".
+- **Automatic check:** shortly after each start, then once a day while the app runs. A check that
+  fails is tried again every hour until one gets an answer. Turn it off in Settings → About →
+  "Check for updates automatically".
 - **By hand:** Settings → About → "Check for updates".
 - **When a newer version exists:** a notice appears once for that version, and the Settings entry
   stays marked until you have updated. "Download and restart", on the notice and in Settings →
