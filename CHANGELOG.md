@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/scarletkc/colab-playground/compare/v0.6.0...v0.7.0) (2026-11-28)
+
+
+### Added
+
+* **app:** show the program that runs ctl in Settings, with a copy button ([#123](https://github.com/scarletkc/colab-playground/issues/123)) ([9248255](https://github.com/scarletkc/colab-playground/commit/9248255ee3b870cf9988216b8032f38427ffa8f5))
+
 ## [0.6.0](https://github.com/scarletkc/colab-playground/compare/v0.5.0...v0.6.0) (2026-11-28)
 
 
