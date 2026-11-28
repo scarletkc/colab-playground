@@ -273,7 +273,11 @@ def simulate(code, env, s, ep, a):
         return {"signalled": bool(run)}
     if "fuse.drive" in code:
         mounted = bool(a.get("drive", {}).get("mounted"))
-        return {"mounted": mounted, "folder": "/content/drive/MyDrive" if mounted else None}
+        if not mounted:
+            return {"mounted": False, "folder": None, "mounts": [], "entries": ["FileNotFoundError"]}
+        return {"mounted": True, "folder": "/content/drive/MyDrive",
+                "mounts": ["drive /content/drive fuse.drive rw,nosuid,nodev,relatime 0 0"],
+                "entries": ["MyDrive", "Shareddrives"]}
     return None
 
 

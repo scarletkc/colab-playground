@@ -133,47 +133,96 @@ pub fn not_connected(detail: impl Into<String>) -> Error {
     Error::new(ErrorKind::DriveNotConnected).detail(detail)
 }
 
-/// Python for `colab exec`: whether Drive is mounted and which folder holds the user's files.
+/// Python for `colab exec`: whether Drive is mounted, which folder holds the user's files, and
+/// what was seen on the way (the mount table's lines about Drive, what the mount point holds).
 pub fn check_snippet() -> String {
     let folders: Vec<String> = FOLDERS.iter().map(|f| format!("{f:?}")).collect();
     format!(
         r#"import json, os
 _root = "{MOUNT_POINT}"
 _mounted = False
+_mounts = []
 try:
     with open("/proc/mounts") as _fh:
         for _line in _fh:
             _f = _line.split()
+            if "drive" in _line:
+                _mounts.append(_line.strip())
             if len(_f) > 2 and _f[1] == _root and _f[2] == "fuse.drive":
                 _mounted = True
-except OSError:
-    pass
+except OSError as _e:
+    _mounts.append(type(_e).__name__)
+try:
+    _entries = sorted(os.listdir(_root))[:20]
+except OSError as _e:
+    _entries = [type(_e).__name__]
 _folder = None
 for _name in ({}, ):
     if _mounted and os.path.isdir(os.path.join(_root, _name)):
         _folder = os.path.join(_root, _name)
         break
-print("{RESULT_MARKER}" + json.dumps({{"mounted": _mounted, "folder": _folder}}))
+print("{RESULT_MARKER}" + json.dumps({{"mounted": _mounted, "folder": _folder,
+                                     "mounts": _mounts[:5], "entries": _entries}}))
 "#,
         folders.join(", ")
     )
 }
 
-/// The folder [`check_snippet`] found, or `None` when Drive is not mounted.
-pub fn parse_check(v: &serde_json::Value) -> Result<Option<String>> {
+/// What [`check_snippet`] found on the runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriveCheck {
+    /// The folder holding the user's files; `None` when Drive is not mounted.
+    pub folder: Option<String>,
+    /// What the check saw, for an error's details.
+    pub seen: String,
+}
+
+pub fn parse_check(v: &serde_json::Value) -> Result<DriveCheck> {
+    let listed = |key: &str| {
+        let items: Vec<&str> = v
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .map(|items| items.iter().filter_map(serde_json::Value::as_str).collect())
+            .unwrap_or_default();
+        if items.is_empty() {
+            "nothing".to_owned()
+        } else {
+            items.join("; ")
+        }
+    };
+    let seen = format!(
+        "mount table on Drive: {}; {MOUNT_POINT} holds: {}",
+        listed("mounts"),
+        listed("entries")
+    );
     let mounted = v.get("mounted").and_then(serde_json::Value::as_bool);
     let folder = v.get("folder").and_then(serde_json::Value::as_str);
     match (mounted, folder) {
-        (Some(true), Some(folder)) => Ok(Some(folder.to_owned())),
+        (Some(true), Some(folder)) => Ok(DriveCheck {
+            folder: Some(folder.to_owned()),
+            seen,
+        }),
         (Some(true), None) => Err(not_connected(format!(
-            "Drive is mounted at {MOUNT_POINT}, but none of {} is in it",
+            "Drive is mounted at {MOUNT_POINT}, but none of {} is in it ({seen})",
             FOLDERS.join(", ")
         ))),
-        (Some(false), _) => Ok(None),
+        (Some(false), _) => Ok(DriveCheck { folder: None, seen }),
         (None, _) => {
             Err(Error::new(ErrorKind::Parse).detail(format!("unexpected Drive check: {v}")))
         }
     }
+}
+
+/// The end of what `colab drivemount` printed, for an error's details, without the address of
+/// the consent page.
+fn said(out: &ScriptOutput) -> String {
+    let lines: Vec<&str> = out
+        .stdout
+        .lines()
+        .chain(out.stderr.lines())
+        .filter(|line| !line.trim().is_empty() && !line.contains(CONSENT))
+        .collect();
+    tail(&lines.join("\n"), 800)
 }
 
 /// `colab --config <state> drivemount -s <session>` under [`DRIVE_MOUNT_PY`], run by `python`
@@ -261,7 +310,7 @@ impl Connection<'_> {
     /// is not asked again.
     pub fn connect(&self, step: &dyn Fn(DriveStep), cancel: &CancelToken) -> Result<String> {
         step(DriveStep::Connecting);
-        if let Some(folder) = self.check(cancel)? {
+        if let Some(folder) = self.check(cancel)?.folder {
             step(DriveStep::Connected {
                 folder: folder.clone(),
             });
@@ -291,7 +340,8 @@ impl Connection<'_> {
             if !attempt.out.success() {
                 return Err(classify_failure(&attempt.out));
             }
-            if let Some(folder) = self.check(cancel)? {
+            let check = self.check(cancel)?;
+            if let Some(folder) = check.folder {
                 step(DriveStep::Connected {
                     folder: folder.clone(),
                 });
@@ -304,11 +354,15 @@ impl Connection<'_> {
                 step(DriveStep::Connecting);
                 continue;
             }
-            return Err(not_connected(tail(&attempt.out.stderr, 800)));
+            return Err(not_connected(format!(
+                "Drive is not mounted at {MOUNT_POINT} ({}); `colab drivemount` said: {}",
+                check.seen,
+                said(&attempt.out)
+            )));
         }
     }
 
-    fn check(&self, cancel: &CancelToken) -> Result<Option<String>> {
+    fn check(&self, cancel: &CancelToken) -> Result<DriveCheck> {
         let v = self
             .cli
             .exec_json(self.state, self.session, &[], &check_snippet(), 60, cancel)?;
@@ -485,6 +539,9 @@ mod tests {
         assert!(req.env.contains(&("HOME".into(), "/h".into())));
         assert!(req.env.contains(&("CPG_PYTHON".into(), "/x/python".into())));
         assert_eq!(req.stdin, crate::host::StdinMode::Pipe);
+        // The wrapper travels on the command line, which WSL keeps short.
+        let wsl = crate::Host::Wsl { distro: None };
+        assert!(wsl.invocation(&req, true).is_ok());
         assert!(mount_request(&cli, "/x/python", &state, "-s x").is_err());
     }
 
@@ -497,16 +554,18 @@ mod tests {
             "{snippet}"
         );
         let v = |j: &str| serde_json::from_str::<serde_json::Value>(j).unwrap();
+        let mounted = parse_check(&v(r#"{"mounted": true, "folder": "/content/drive/MyDrive",
+            "mounts": ["drive /content/drive fuse.drive rw 0 0"], "entries": ["MyDrive"]}"#))
+        .unwrap();
+        assert_eq!(mounted.folder.as_deref(), Some("/content/drive/MyDrive"));
+        let missing = parse_check(&v(
+            r#"{"mounted": false, "folder": null, "mounts": [], "entries": ["FileNotFoundError"]}"#,
+        ))
+        .unwrap();
+        assert_eq!(missing.folder, None);
         assert_eq!(
-            parse_check(&v(
-                r#"{"mounted": true, "folder": "/content/drive/MyDrive"}"#
-            ))
-            .unwrap(),
-            Some("/content/drive/MyDrive".into())
-        );
-        assert_eq!(
-            parse_check(&v(r#"{"mounted": false, "folder": null}"#)).unwrap(),
-            None
+            missing.seen,
+            "mount table on Drive: nothing; /content/drive holds: FileNotFoundError"
         );
         assert!(
             parse_check(&v(r#"{"mounted": true, "folder": null}"#))
@@ -514,6 +573,20 @@ mod tests {
                 .is(ErrorKind::DriveNotConnected)
         );
         assert!(parse_check(&v("{}")).unwrap_err().is(ErrorKind::Parse));
+    }
+
+    #[test]
+    fn what_the_cli_said_leaves_out_the_consent_page() {
+        let out = ScriptOutput {
+            code: Some(0),
+            stdout: format!("{CONSENT} https://accounts.google.com/x\n\nMounted at /content/drive"),
+            stderr: "ValueError: mount failed".into(),
+            killed: false,
+        };
+        assert_eq!(
+            said(&out),
+            "Mounted at /content/drive\nValueError: mount failed"
+        );
     }
 
     #[test]
