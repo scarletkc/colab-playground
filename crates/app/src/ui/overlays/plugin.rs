@@ -101,6 +101,7 @@ pub(super) fn install(
                 .iter()
                 .map(|need| match need {
                     Capability::HfToken => tr(cx, keys::PLUGIN_NEEDS_HF_TOKEN).to_string(),
+                    Capability::Drive => tr(cx, keys::PLUGIN_NEEDS_DRIVE).to_string(),
                 })
                 .collect();
             let ports: Vec<String> = manifest

@@ -130,6 +130,14 @@ and Settings → About → Backend must read "Colab CLI".
     quit". After the deadline plus 2 minutes the runtime must be gone from the Colab web UI and,
     after restarting the app, from Sessions. If it is still there 5 minutes past the deadline,
     stop it by hand: the watchdog did not release it.
+11. **Google Drive** (CPU runtime). Install from a folder a plugin whose manifest declares
+    `needs = ["drive"]` and whose `run.sh` is
+    `ls "$PLUGIN_DRIVE_DIR"; echo '{"state": "ready"}' >"$PLUGIN_STATUS_FILE"`. Deploy it on "CPU only"
+    with "Connect Google Drive" on. Expect "Connecting Google Drive…", then the authorization
+    page: click Continue before allowing anything and expect "Colab didn't get access to your
+    Drive" with the page asked for again; then open the page, allow access as the active account
+    and click Continue. Expect the Google Drive step done with "/content/drive/MyDrive", the log
+    listing your Drive, and "Drive connected" on the runtime's card. Then "Stop and end billing".
 
 **Afterwards, make sure nothing is billing:** Sessions shows "Nothing is running" with no "Couldn't
 list runtimes on …" error for any account, the burn rate reads "Not in use", and the Colab web UI's

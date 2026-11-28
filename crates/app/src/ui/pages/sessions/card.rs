@@ -117,6 +117,15 @@ pub(super) fn render(
     if runtime.high_mem {
         badges = badges.child(Badge::new(tr(cx, keys::RUNTIME_HIGH_MEM)));
     }
+    if tracked.is_some_and(|t| t.drive_connected_at.is_some()) {
+        badges = badges.child(tagged(
+            format!("runtime-drive {label}"),
+            div()
+                .id(SharedString::from(format!("drive-{key}")))
+                .tooltip(Tooltip::text(tr(cx, keys::RUNTIME_DRIVE_HINT)))
+                .child(Badge::new(tr(cx, keys::RUNTIME_DRIVE)).tone(Tone::Info)),
+        ));
+    }
     if stopping {
         badges = badges.child(Badge::new(tr(cx, keys::RUNTIME_STOPPING)).tone(Tone::Info));
     }

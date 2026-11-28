@@ -219,6 +219,7 @@ const FAILURES: &[(&str, Inject)] = &[
     ("update-install-fails", |f| f.update_install_fails = true),
     ("runtimes-fail", |f| f.runtimes_listing_fails = true),
     ("plugin-unloadable", |f| f.plugin_unloadable = true),
+    ("drive-consent-missed", |f| f.drive_consent_missed = true),
 ];
 
 #[cfg(feature = "mock")]

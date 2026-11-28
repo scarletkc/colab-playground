@@ -1175,4 +1175,44 @@ pub(super) const MESSAGES: Messages = &[
         "Colab Playground 是免費的開放原始碼軟體。在 GitHub 上贊助能支持它的持續開發。",
     ),
     (SETTINGS_SPONSOR, "在 GitHub 上贊助"),
+    (
+        PLUGIN_NEEDS_DRIVE,
+        "你的 Google 雲端硬碟（如果部署時選擇連接）",
+    ),
+    (RUN_DRIVE_TITLE, "Google 雲端硬碟"),
+    (RUN_DRIVE_SWITCH, "連接 Google 雲端硬碟"),
+    (
+        RUN_DRIVE_ON,
+        "外掛程式啟動前，你要在瀏覽器中允許存取。在執行階段停止前，它上面的任何程式碼（包括這個外掛程式）都能讀取、修改和刪除你雲端硬碟中的所有內容。",
+    ),
+    (
+        RUN_DRIVE_ON_CONNECTED,
+        "這個工作階段已經連接了雲端硬碟，外掛程式會直接拿到它的資料夾，不再詢問你。",
+    ),
+    (RUN_DRIVE_OFF, "外掛程式不會用到你的 Google 雲端硬碟。"),
+    (
+        RUN_TARGET_DRIVE,
+        "{name} 上已連接 Google 雲端硬碟。在它停止前，它上面的任何程式碼（包括這個外掛程式）都能讀取、修改和刪除你雲端硬碟中的所有內容。",
+    ),
+    (RUN_DRIVE_CONNECTING, "正在連接 Google 雲端硬碟…"),
+    (
+        RUN_DRIVE_CONSENT,
+        "開啟授權頁面，以 {email} 允許存取，然後回到這裡按一下「繼續」。Colab 大約會等 2 分鐘。",
+    ),
+    (
+        RUN_DRIVE_MISSED,
+        "Colab 沒有拿到存取你雲端硬碟的授權。請在授權頁面以 {email} 允許存取，然後按一下「繼續」。",
+    ),
+    (RUN_DRIVE_OPEN, "開啟授權頁面"),
+    (RUN_DRIVE_CONTINUE, "繼續"),
+    (
+        RUN_DRIVE_CONNECTED,
+        "已連接，直到執行階段停止。外掛程式會在 {folder} 中找到你的檔案。",
+    ),
+    (RUNTIME_DRIVE, "已連接雲端硬碟"),
+    (
+        RUNTIME_DRIVE_HINT,
+        "你的 Google 雲端硬碟已連接到這個執行階段，直到它停止。它上面的任何程式碼都能讀取、修改和刪除你雲端硬碟中的所有內容。",
+    ),
+    (ERR_DRIVE_NOT_CONNECTED, "無法連接 Google 雲端硬碟。"),
 ];

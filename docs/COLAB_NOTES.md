@@ -126,6 +126,36 @@ when changing either.
 - The tunnel lives with the process that started it; the VM keeps running when
   it ends.
 
+## `colab drivemount`
+
+Read from the CLI's source and Colab's `google.colab.drive`; not yet seen on a
+runtime.
+
+- It runs `drive.mount('<path>')` in the kernel, with the path written into that
+  Python as given (default `/content/drive`).
+- `drive.mount` asks the frontend for the consent (a `colab_request` of type
+  `dfs_ephemeral`) even when Drive is mounted already, and waits for the answer
+  for its `timeout_ms`: **120 s**, which the CLI leaves as is. Without an answer
+  it carries on and starts DriveFS anyway, without the consent; `colab exec`
+  calls on the runtime wait behind it meanwhile. An answer with an `error` ends
+  `drive.mount` at once with a `MessageError`.
+- The CLI first checks whether the consent is there (a dry run). If not, it
+  prints the consent URL, tries to open a browser and waits for Enter on
+  `/dev/tty`, else on stdin, ignoring what it reads (end of input counts as
+  Enter). Then it hands the consent over and answers the kernel only if that
+  request returned HTTP 200; otherwise it prints "Error propagating" and leaves
+  the kernel waiting.
+- The whole call is limited to 600 s, and it exits **0** even when the mount
+  failed (the traceback goes to stderr), as `colab exec` does. Success prints
+  "Mounted at /content/drive".
+- DriveFS mounts on the mount point itself (`fuse.drive` in the mount table); the
+  user's files are in `MyDrive` under it (Colab's check for an existing mount
+  looks for `My Drive`). The mount point must be empty or missing.
+- Writes reach Drive in the background. `drive.flush_and_unmount()` pushes them
+  and unmounts, with no messages to the frontend.
+- Killed mid-call, the CLI leaves `running` set in its state file, which only
+  `colab status` shows ("BUSY").
+
 ## llama.cpp on the VM
 
 1. **Do not build from source.** `cmake -DGGML_CUDA=ON` takes 10+ minutes on a

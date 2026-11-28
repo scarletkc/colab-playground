@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::accounts::{Account, AccountId, AccountsView};
 use crate::clock::CancelToken;
 use crate::defaults::Defaults;
+use crate::drive::DriveStep;
 use crate::error::{Error, ErrorKind, Result};
 use crate::guard::Decision;
 use crate::hf::HfModel;
@@ -241,6 +242,10 @@ pub struct PluginRunSpec {
     /// Stop a session provisioned for this run when the run fails. (A
     /// cancelled run always stops the session it provisioned.)
     pub stop_on_failure: bool,
+    /// Connect the user's Google Drive to the runtime before the script starts. Only for a
+    /// plugin that declares `needs = ["drive"]`; the user chooses it for each run.
+    #[serde(default)]
+    pub drive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -248,6 +253,12 @@ pub struct PluginRunSpec {
 pub enum PluginRunEvent {
     /// Provisioning progress (fresh sessions only).
     Provision(ProvisionEvent),
+    /// Connecting the user's Google Drive to the session, before the script starts.
+    Drive {
+        account: AccountId,
+        session: String,
+        step: DriveStep,
+    },
     Launched {
         session: String,
         /// Run id (run directory name on the VM).
@@ -440,6 +451,10 @@ pub trait Backend: Send + Sync {
         events: Events<PluginRunEvent>,
         cancel: &CancelToken,
     ) -> Result<PluginRunOutcome>;
+    /// The user says they allowed access on the consent page that a run connecting Google
+    /// Drive to `session` showed ([`DriveStep::Consent`]); the run goes on. Refused when no
+    /// connection waits on that session.
+    fn confirm_drive_access(&self, account: &AccountId, session: &str) -> Result<()>;
 
     // ---- app secrets (stored in the keyring vault; never returned to the UI)
     /// Stores a secret such as `hf_token`.
@@ -543,6 +558,7 @@ pub fn run_template(info: &PluginInfo, defaults: &Defaults, taken: &[String]) ->
         inputs,
         target: RunTarget::Provision(spec),
         stop_on_failure: true,
+        drive: false,
     }
 }
 

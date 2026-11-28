@@ -23,13 +23,14 @@ use crate::backend::*;
 use crate::cli::StopOutcome;
 use crate::clock::{CancelToken, Clock, ManualClock, SystemClock};
 use crate::defaults::Defaults;
+use crate::drive::{self, DriveStep};
 use crate::error::{Error, ErrorKind, Result};
 use crate::guard::{Decision, GuardPolicy, SpendMeter, evaluate};
 use crate::hf::HfModel;
 use crate::host::{Host, Line, ProbeReport, Stream};
 use crate::plugins::{
-    Manifest, PluginFailure, PluginInfo, PluginList, PluginOrigin, PluginPreview, PluginStore,
-    discard_preview, resolve_endpoints, resolve_inputs,
+    Capability, Manifest, PluginFailure, PluginInfo, PluginList, PluginOrigin, PluginPreview,
+    PluginStore, discard_preview, resolve_endpoints, resolve_inputs,
 };
 use crate::provision::{
     self, Hardware, ProvisionEvent, ProvisionOps, ProvisionOutcome, ProvisionSpec,
@@ -124,6 +125,9 @@ pub struct MockFailures {
     /// and report each account in `RuntimesView::errors`. Leaving such an account affects
     /// `switch_impact` as `runtimes_listing_fails` does.
     pub unlisted_accounts: Vec<String>,
+    /// Colab does not get the first consent a run connecting Google Drive asks for, so the run
+    /// asks again.
+    pub drive_consent_missed: bool,
 }
 
 impl Default for MockFailures {
@@ -154,6 +158,7 @@ impl Default for MockFailures {
             runtimes_listing_fails: false,
             plugin_unloadable: false,
             unlisted_accounts: vec![],
+            drive_consent_missed: false,
         }
     }
 }
@@ -402,6 +407,15 @@ pub const MOCK_UNADOPTED_EMAIL: &str = "pat@example.com";
 
 /// The folder [`MockFailures::plugin_unloadable`] puts in the plugins directory.
 pub const UNLOADABLE_PLUGIN: &str = "image-studio";
+
+/// The consent page a simulated Google Drive connection asks the user to open.
+pub const MOCK_DRIVE_CONSENT_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth?client_id=demo.apps.googleusercontent.com&scope=drive";
+
+/// Where a simulated Google Drive connection puts the user's files.
+pub const MOCK_DRIVE_FOLDER: &str = "/content/drive/MyDrive";
+
+/// How often a simulated Drive connection looks whether the user allowed access.
+const CONSENT_POLL: Duration = Duration::from_millis(250);
 
 fn unloadable_plugin() -> PluginFailure {
     let error = Manifest::parse("api = 2\n").expect_err("api 2 is newer than this build");
@@ -681,6 +695,8 @@ impl World {
 pub struct MockBackend {
     cfg: Arc<MockConfig>,
     world: Arc<Mutex<World>>,
+    /// Runs connecting Google Drive that wait for the user's consent.
+    drive_consents: Arc<drive::Consents>,
 }
 
 impl std::fmt::Debug for MockBackend {
@@ -777,12 +793,14 @@ impl MockBackend {
                     spend: SpendMeter::new(started),
                     stopped: None,
                     measured_rate: None,
+                    drive_connected_at: None,
                 });
             }
         }
         MockBackend {
             cfg: Arc::new(cfg),
             world: Arc::new(Mutex::new(world)),
+            drive_consents: Arc::default(),
         }
     }
 
@@ -852,6 +870,65 @@ impl MockBackend {
 
     fn step(&self, cancel: &CancelToken) -> Result<()> {
         self.cfg.clock.sleep(self.cfg.step_delay, cancel)
+    }
+
+    /// Simulates connecting the user's Google Drive: the consent page, waiting for the user to
+    /// say they allowed access ([`Backend::confirm_drive_access`]), and the folder.
+    fn connect_drive(
+        &self,
+        account: &AccountId,
+        session: &str,
+        events: &Events<PluginRunEvent>,
+        cancel: &CancelToken,
+    ) -> Result<String> {
+        let step = |step| {
+            let _ = events.send(PluginRunEvent::Drive {
+                account: account.clone(),
+                session: session.to_owned(),
+                step,
+            });
+        };
+        step(DriveStep::Connecting);
+        self.step(cancel)?;
+        let connected = self
+            .w()
+            .ledger
+            .live(account, session)
+            .is_some_and(|e| e.drive_connected_at.is_some());
+        if !connected {
+            let mut miss = self.w().failures.drive_consent_missed;
+            loop {
+                let waiting = self.drive_consents.wait(account, session);
+                step(DriveStep::Consent {
+                    url: MOCK_DRIVE_CONSENT_URL.into(),
+                });
+                let asked = self.now_();
+                while !waiting.confirmed() {
+                    if self.now_().duration_since(asked).unwrap_or_default() > drive::CONSENT_WAIT {
+                        return Err(drive::not_connected(
+                            "nobody said access was allowed in time",
+                        ));
+                    }
+                    self.cfg.clock.sleep(CONSENT_POLL, cancel)?;
+                }
+                drop(waiting);
+                step(DriveStep::Connecting);
+                self.step(cancel)?;
+                if !miss {
+                    break;
+                }
+                miss = false;
+                step(DriveStep::Missed);
+            }
+        }
+        let now = self.now_();
+        let _ = self.w().ledger.update(account, session, |e| {
+            e.drive_connected_at.get_or_insert(now);
+        });
+        step(DriveStep::Connected {
+            folder: MOCK_DRIVE_FOLDER.into(),
+        });
+        Ok(MOCK_DRIVE_FOLDER.into())
     }
 
     fn ready(&self) -> Result<()> {
@@ -1626,6 +1703,7 @@ impl Backend for MockBackend {
             watchdog: outcome.watchdog.clone(),
             stopped: None,
             measured_rate: None,
+            drive_connected_at: None,
         })?;
         Ok(outcome)
     }
@@ -1941,6 +2019,21 @@ impl Backend for MockBackend {
                 );
             }
         };
+        if spec.drive && plugin.manifest.needs.contains(&Capability::Drive) {
+            match self.connect_drive(&account, &session, &events, cancel) {
+                Ok(folder) => {
+                    let _ = events.send(PluginRunEvent::Log {
+                        lines: vec![format!("[mock] Google Drive: {folder}")],
+                    });
+                }
+                Err(e) => {
+                    if provisioned && (e.is(ErrorKind::Cancelled) || spec.stop_on_failure) {
+                        stop_it(self);
+                    }
+                    return Err(e);
+                }
+            }
+        }
         let run_id = format!("{}-{}", plugin.manifest.id, &crate::accounts::nonce()[..8]);
         let _ = events.send(PluginRunEvent::Launched {
             session: session.clone(),
@@ -2041,6 +2134,10 @@ impl Backend for MockBackend {
             status,
             endpoints,
         })
+    }
+
+    fn confirm_drive_access(&self, account: &AccountId, session: &str) -> Result<()> {
+        self.drive_consents.confirm(account, session)
     }
 
     fn set_secret(&self, name: &str, value: &str, _: &CancelToken) -> Result<()> {
@@ -2859,6 +2956,64 @@ mod tests {
         let out = m.run_plugin(spec, tx, &nc()).unwrap();
         assert_eq!(out.status.state, RunState::Ready);
         assert!(out.status.outputs.is_empty(), "{:?}", out.status.outputs);
+    }
+
+    fn install_drive_plugin(m: &MockBackend) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("plugin.toml"),
+            "api = 1\nid = \"drive-demo\"\nversion = \"0.1.0\"\nneeds = [\"drive\"]\n\
+             [name]\nen = \"Drive demo\"\n[run]\nscript = \"main.py\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("main.py"), "print('hi')\n").unwrap();
+        let preview = m.inspect_plugin_folder(dir.path()).unwrap();
+        m.install_plugin(&preview).unwrap();
+    }
+
+    #[test]
+    fn drive_is_connected_only_when_the_run_asks_and_waits_for_the_users_consent() {
+        let (m, clock) = mock(MockScenario::single());
+        install_drive_plugin(&m);
+        let drive_steps = |rx: mpsc::Receiver<PluginRunEvent>| -> Vec<DriveStep> {
+            rx.try_iter()
+                .filter_map(|e| match e {
+                    PluginRunEvent::Drive { step, .. } => Some(step),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let (tx, rx) = mpsc::channel();
+        let spec = m.plugin_run_template("drive-demo").unwrap();
+        assert!(!spec.drive, "off until the user turns it on");
+        m.run_plugin(spec, tx, &nc()).unwrap();
+        assert!(drive_steps(rx).is_empty());
+
+        // Nobody says access was allowed: the run gives up and stops the runtime it started.
+        let mut spec = m.plugin_run_template("drive-demo").unwrap();
+        spec.drive = true;
+        let before = m.runtimes(&nc()).unwrap().runtimes.len();
+        let started = clock.now();
+        let (tx, rx) = mpsc::channel();
+        let err = m.run_plugin(spec, tx, &nc()).unwrap_err();
+        assert!(err.is(ErrorKind::DriveNotConnected), "{err:?}");
+        assert!(clock.now().duration_since(started).unwrap() > drive::CONSENT_WAIT);
+        assert_eq!(
+            drive_steps(rx),
+            [
+                DriveStep::Connecting,
+                DriveStep::Consent {
+                    url: MOCK_DRIVE_CONSENT_URL.into()
+                }
+            ]
+        );
+        assert_eq!(m.runtimes(&nc()).unwrap().runtimes.len(), before);
+        let account = m.accounts(&nc()).unwrap().active.unwrap();
+        assert!(
+            m.confirm_drive_access(&account, "anything").is_err(),
+            "nothing waits"
+        );
     }
 
     #[test]

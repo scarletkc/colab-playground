@@ -31,6 +31,10 @@ use crate::{
 };
 
 pub const RUN_START: &str = "run-start";
+/// Selector of the switch that connects Google Drive for the run.
+pub const RUN_DRIVE: &str = "run-drive";
+/// Selector of the warning that the session picked to run on has Google Drive connected.
+pub const RUN_TARGET_DRIVE: &str = "run-target-drive";
 /// Selector of a Hugging Face search result: `hf-result <repo>`.
 pub fn hf_result_selector(repo: &str) -> String {
     format!("hf-result {repo}")
@@ -81,6 +85,9 @@ pub(super) fn render(
             _ => tr(cx, keys::RUN_HF_TOKEN_NONE),
         };
         page = page.child(InlineMessage::new(Severity::Info, text));
+    }
+    if AppState::wants_drive(info) {
+        page = page.child(drive_card(form, state, handle, cx));
     }
     page = page.child(target_card(form, state, handle, inputs, cx));
     if let Some(error) = &form.error {
@@ -414,6 +421,42 @@ fn quant_preview(
         .into_any_element()
 }
 
+/// Whether to connect the user's Google Drive for the run, and what that gives code on the
+/// runtime.
+fn drive_card(form: &RunForm, state: &AppState, handle: &Entity<AppState>, cx: &App) -> AnyElement {
+    let connected = form
+        .existing
+        .as_deref()
+        .is_some_and(|name| state.drive_connected_on(name));
+    let toggle = handle.clone();
+    let switch = Switch::new(RUN_DRIVE, form.drive)
+        .label(tr(cx, keys::RUN_DRIVE_SWITCH))
+        .on_change(move |on, _, cx| {
+            toggle.update(cx, |state, cx| {
+                state.edit_run_form(|form| form.drive = on, cx)
+            })
+        });
+    let note = match (form.drive, connected) {
+        (true, false) => {
+            InlineMessage::new(Severity::Warning, tr(cx, keys::RUN_DRIVE_ON)).into_any_element()
+        }
+        (true, true) => Caption::new(tr(cx, keys::RUN_DRIVE_ON_CONNECTED)).into_any_element(),
+        (false, _) => Caption::new(tr(cx, keys::RUN_DRIVE_OFF)).into_any_element(),
+    };
+    Card::new()
+        .header(CardHeader::new(tr(cx, keys::RUN_DRIVE_TITLE)))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(tagged(RUN_DRIVE, switch))
+                .child(note),
+        )
+        .w_full()
+        .into_any_element()
+}
+
 /// Where to run: a new session (its options and name) or an existing one.
 fn target_card(
     form: &RunForm,
@@ -467,6 +510,20 @@ fn target_card(
         card = card.child(tagged(
             selector,
             InlineMessage::new(Severity::Warning, tr_args(cx, key, &[("name", name)])),
+        ));
+    }
+    // The mount is the runtime's, not the plugin's: any plugin run there can reach it.
+    if let Some(name) = form
+        .existing
+        .as_deref()
+        .filter(|name| state.drive_connected_on(name))
+    {
+        card = card.child(tagged(
+            RUN_TARGET_DRIVE,
+            InlineMessage::new(
+                Severity::Warning,
+                tr_args(cx, keys::RUN_TARGET_DRIVE, &[("name", name)]),
+            ),
         ));
     }
     if form.existing.is_none()

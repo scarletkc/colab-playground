@@ -24,6 +24,7 @@ use crate::backend::*;
 use crate::cli::{Cli, CliCommand, StopOutcome};
 use crate::clock::{CancelToken, Clock};
 use crate::defaults::Defaults;
+use crate::drive;
 use crate::error::{Error, ErrorKind, Result};
 use crate::guard::{Decision, GuardPolicy, SpendMeter, evaluate};
 use crate::hf::{HfClient, HfModel};
@@ -34,8 +35,9 @@ use crate::hostfs::HostFs;
 use crate::http::HttpClient;
 use crate::paths::{DataLayout, HostPath};
 use crate::plugins::{
-    PluginInfo, PluginList, PluginOrigin, PluginPreview, PluginStore, clear_staging, clone_git,
-    contains_secret, discard_preview, redact, redact_json, resolve_endpoints, resolve_inputs,
+    Capability, PluginInfo, PluginList, PluginOrigin, PluginPreview, PluginStore, clear_staging,
+    clone_git, contains_secret, discard_preview, redact, redact_json, resolve_endpoints,
+    resolve_inputs,
 };
 use crate::provision::{
     self, Hardware, ProvisionEvent, ProvisionOps, ProvisionOutcome, ProvisionSpec,
@@ -95,6 +97,7 @@ mod reconciliation_tests {
             watchdog: None,
             stopped: None,
             measured_rate: None,
+            drive_connected_at: None,
         };
         backend.inner.st().ledger.upsert(entry("old")).unwrap();
         let sample = backend.inner.reconciliation_sample();
@@ -131,6 +134,7 @@ mod reconciliation_tests {
                     watchdog: None,
                     stopped: None,
                     measured_rate: None,
+                    drive_connected_at: None,
                 })
                 .unwrap();
         }
@@ -172,6 +176,7 @@ mod reconciliation_tests {
                 watchdog: None,
                 stopped: None,
                 measured_rate: None,
+                drive_connected_at: None,
             })
             .unwrap();
         let listing = |endpoint: &str| {
@@ -228,6 +233,7 @@ mod reconciliation_tests {
             watchdog: None,
             stopped: None,
             measured_rate: None,
+            drive_connected_at: None,
         };
         let listing = |endpoints: &[&str]| -> Vec<RemoteAssignment> {
             endpoints
@@ -312,6 +318,7 @@ mod reconciliation_tests {
             watchdog: None,
             stopped: None,
             measured_rate: None,
+            drive_connected_at: None,
         };
         for endpoint in [
             None,
@@ -453,6 +460,8 @@ struct Inner {
     login_active: AtomicBool,
     /// Keeps WSL up between commands, so its keyring stays unlocked (see [`HostKeepalive`]).
     keepalive: HostKeepalive,
+    /// Runs connecting Google Drive that wait for the user's consent.
+    drive_consents: drive::Consents,
 }
 
 #[derive(Clone)]
@@ -507,6 +516,7 @@ impl RealBackend {
                 state: Mutex::new(state),
                 tunnels: TunnelManager::new(),
                 login_active: AtomicBool::new(false),
+                drive_consents: drive::Consents::default(),
             }),
         })
     }
@@ -1662,6 +1672,7 @@ impl Backend for RealBackend {
             watchdog: outcome.watchdog.clone(),
             stopped: None,
             measured_rate: None,
+            drive_connected_at: None,
         })?;
         Ok(outcome)
     }
@@ -1941,12 +1952,16 @@ impl Backend for RealBackend {
             .collect();
         let helper = self.inner.helper()?;
         for need in &manifest.needs {
-            if let Ok(Some(v)) = helper.secret_get(need.secret_name(), cancel) {
+            let Some(name) = need.secret_name() else {
+                continue;
+            };
+            if let Ok(Some(v)) = helper.secret_get(name, cancel) {
                 env.push((need.env_key().to_owned(), v.clone()));
                 secret_keys.push(need.env_key().to_owned());
                 secrets.push(v);
             }
         }
+        let drive = spec.drive && manifest.needs.contains(&Capability::Drive);
         // Names only (no values): lets the VM-side poll scrub these values.
         env.push((vm::ENV_SECRET_KEYS.to_owned(), secret_keys.join(",")));
         let account = self
@@ -1981,9 +1996,18 @@ impl Backend for RealBackend {
                 name: Some(session.clone()),
             }
         };
-        let result = self.run_on(
-            &plugin, &account, &session, env, &secrets, &endpoints, &events, cancel,
-        );
+        let connected = if drive {
+            self.connect_drive(&account, &session, &events, cancel)
+                .map(Some)
+        } else {
+            Ok(None)
+        };
+        let result = connected.and_then(|folder| {
+            env.extend(folder.map(|f| (Capability::Drive.env_key().to_owned(), f)));
+            self.run_on(
+                &plugin, &account, &session, env, &secrets, &endpoints, &events, cancel,
+            )
+        });
         // A cancelled run always gives back the runtime it provisioned.
         if let Err(e) = &result
             && provisioned
@@ -1998,6 +2022,10 @@ impl Backend for RealBackend {
             );
         }
         result
+    }
+
+    fn confirm_drive_access(&self, account: &AccountId, session: &str) -> Result<()> {
+        self.inner.drive_consents.confirm(account, session)
     }
 
     fn set_secret(&self, name: &str, value: &str, cancel: &CancelToken) -> Result<()> {
@@ -2210,6 +2238,41 @@ impl RealBackend {
         self.inner
             .helper()?
             .history_redact(session, secrets, &CancelToken::new())
+    }
+
+    /// Connects the user's Google Drive to `session` ([`drive::Connection`]) and records it in
+    /// the ledger; returns the folder holding the user's files.
+    fn connect_drive(
+        &self,
+        account: &AccountId,
+        session: &str,
+        events: &Events<PluginRunEvent>,
+        cancel: &CancelToken,
+    ) -> Result<String> {
+        let (_g, cli, state) = self.inner.cli_for(account, cancel)?;
+        let python = self.inner.toolchain()?.helper_python;
+        let step = |step| {
+            let _ = events.send(PluginRunEvent::Drive {
+                account: account.clone(),
+                session: session.to_owned(),
+                step,
+            });
+        };
+        let folder = drive::Connection {
+            cli: &cli,
+            python: &python,
+            state: &state,
+            account,
+            session,
+            consents: &self.inner.drive_consents,
+        }
+        .connect(&step, cancel)?;
+        let now = self.inner.now();
+        // Changed in memory either way; a write that failed is made by the next one.
+        let _ = self.inner.st().ledger.update(account, session, |e| {
+            e.drive_connected_at.get_or_insert(now);
+        });
+        Ok(folder)
     }
 
     fn hf_token(&self, cancel: &CancelToken) -> Option<String> {

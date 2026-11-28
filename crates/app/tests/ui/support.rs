@@ -102,6 +102,8 @@ pub struct TestApp<'a> {
     pub clock: ManualClock,
     /// Cancels a backend call at one of its later waits (see [`CancelSwitch`]).
     pub cancel_switch: CancelSwitch,
+    /// Acts while a backend call waits (see [`WaitHook`]).
+    pub wait_hook: WaitHook,
     config: Option<TempDir>,
     config_dir: Option<PathBuf>,
 }
@@ -127,6 +129,7 @@ impl<'a> TestApp<'a> {
             mock: started.mock,
             clock: started.clock,
             cancel_switch: started.cancel_switch,
+            wait_hook: started.wait_hook,
             config: started.config,
             config_dir: started.config_dir,
         };
@@ -356,6 +359,7 @@ struct Started {
     mock: MockBackend,
     clock: ManualClock,
     cancel_switch: CancelSwitch,
+    wait_hook: WaitHook,
     config: Option<TempDir>,
     config_dir: Option<PathBuf>,
 }
@@ -379,9 +383,11 @@ fn start(cx: &mut TestAppContext, options: Options) -> Started {
     let (mut mock_config, clock) = MockConfig::headless(options.scenario);
     mock_config.step_delay = Duration::ZERO;
     let cancel_switch = CancelSwitch::default();
+    let wait_hook = WaitHook::default();
     mock_config.clock = Arc::new(SwitchedClock {
         inner: clock.clone(),
         switch: cancel_switch.clone(),
+        hook: wait_hook.clone(),
     });
     mock_config.failures = options.failures;
     let mock = MockBackend::new(mock_config);
@@ -401,6 +407,7 @@ fn start(cx: &mut TestAppContext, options: Options) -> Started {
         mock,
         clock,
         cancel_switch,
+        wait_hook,
         config,
         config_dir,
     }
@@ -471,9 +478,25 @@ impl CancelSwitch {
     }
 }
 
+/// Runs a step at each wait on the mock's clock, until the step says it is done, as a person who
+/// acts while a backend call waits on them (such as allowing access to Google Drive). Headless
+/// calls run to completion in one go, so a click cannot land in the middle of one.
+#[derive(Clone, Default)]
+pub struct WaitHook(Arc<std::sync::Mutex<Option<WaitStep>>>);
+
+type WaitStep = Box<dyn FnMut() -> bool + Send>;
+
+impl WaitHook {
+    /// `step` runs at every wait from now until it returns true.
+    pub fn set(&self, step: impl FnMut() -> bool + Send + 'static) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(Box::new(step));
+    }
+}
+
 struct SwitchedClock {
     inner: ManualClock,
     switch: CancelSwitch,
+    hook: WaitHook,
 }
 
 impl colab_playground_core::clock::Clock for SwitchedClock {
@@ -487,6 +510,12 @@ impl colab_playground_core::clock::Clock for SwitchedClock {
         cancel: &colab_playground_core::CancelToken,
     ) -> colab_playground_core::Result<()> {
         use std::sync::atomic::Ordering;
+        {
+            let mut hook = self.hook.0.lock().unwrap_or_else(|e| e.into_inner());
+            if hook.as_mut().is_some_and(|step| step()) {
+                *hook = None;
+            }
+        }
         let left = self.switch.0.load(Ordering::SeqCst);
         if left > 0 {
             self.switch.0.store(left - 1, Ordering::SeqCst);

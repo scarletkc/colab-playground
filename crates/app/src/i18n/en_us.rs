@@ -1368,4 +1368,47 @@ pub(super) const MESSAGES: Messages = &[
         "Colab Playground is free and open source. Sponsoring it on GitHub supports its development.",
     ),
     (SETTINGS_SPONSOR, "Sponsor on GitHub"),
+    (
+        PLUGIN_NEEDS_DRIVE,
+        "Your Google Drive, if you connect it when you deploy",
+    ),
+    (RUN_DRIVE_TITLE, "Google Drive"),
+    (RUN_DRIVE_SWITCH, "Connect Google Drive"),
+    (
+        RUN_DRIVE_ON,
+        "You allow access in your browser before the plugin starts. Until the runtime stops, any code on it, this plugin included, can read, change and delete everything in your Drive.",
+    ),
+    (
+        RUN_DRIVE_ON_CONNECTED,
+        "Drive is connected on this session already, so the plugin gets its folder without asking you again.",
+    ),
+    (RUN_DRIVE_OFF, "The plugin runs without your Google Drive."),
+    (
+        RUN_TARGET_DRIVE,
+        "Google Drive is connected on {name}. Until it stops, any code on it, this plugin included, can read, change and delete everything in your Drive.",
+    ),
+    (RUN_DRIVE_CONNECTING, "Connecting Google Drive…"),
+    (
+        RUN_DRIVE_CONSENT,
+        "Open the authorization page and allow access as {email}, then come back and click Continue. Colab waits about 2 minutes.",
+    ),
+    (
+        RUN_DRIVE_MISSED,
+        "Colab didn't get access to your Drive. Allow access as {email} on the authorization page, then click Continue.",
+    ),
+    (RUN_DRIVE_OPEN, "Open the authorization page"),
+    (RUN_DRIVE_CONTINUE, "Continue"),
+    (
+        RUN_DRIVE_CONNECTED,
+        "Connected until the runtime stops. The plugin finds your files in {folder}.",
+    ),
+    (RUNTIME_DRIVE, "Drive connected"),
+    (
+        RUNTIME_DRIVE_HINT,
+        "Your Google Drive is connected to this runtime until it stops. Any code on it can read, change and delete everything in your Drive.",
+    ),
+    (
+        ERR_DRIVE_NOT_CONNECTED,
+        "Google Drive couldn't be connected.",
+    ),
 ];

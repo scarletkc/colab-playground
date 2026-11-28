@@ -5,8 +5,8 @@ Mimics the observable behaviour of google-colab-cli 0.8.0 that the core relies
 on: global ``--config`` state files and their pruning, ``sessions`` / ``usage``
 / ``new`` / ``exec`` / ``stop`` / ``version`` / ``whoami`` output formats and
 exit codes, the copy-paste OAuth prompt, HTTP 400 for unentitled
-accelerators, an allocation request Colab never answers, and ``ssh --proxy-mode`` (including its auto-create of unknown
-session names and HTTP 429). Snippets sent with ``exec`` are compiled (syntax
+accelerators, an allocation request Colab never answers, ``ssh --proxy-mode`` (including its auto-create of unknown
+session names and HTTP 429), and ``drivemount`` (see fake_automation). Snippets sent with ``exec`` are compiled (syntax
 errors surface like kernel tracebacks) and the core's known snippets get
 simulated answers. Runtimes are allocated only through the fake
 ``Client.assign``, as the real CLI's are. State lives under
@@ -271,6 +271,13 @@ def simulate(code, env, s, ep, a):
         if run:
             run["killed"] = True
         return {"signalled": bool(run)}
+    if "fuse.drive" in code:
+        mounted = bool(a.get("drive", {}).get("mounted"))
+        if not mounted:
+            return {"mounted": False, "folder": None, "mounts": [], "entries": ["FileNotFoundError"]}
+        return {"mounted": True, "folder": "/content/drive/MyDrive",
+                "mounts": ["drive /content/drive fuse.drive rw,nosuid,nodev,relatime 0 0"],
+                "entries": ["MyDrive", "Shareddrives"]}
     return None
 
 
@@ -398,6 +405,27 @@ def cmd_ssh(state_path, args):
     return 0
 
 
+def cmd_drivemount(state_path, args):
+    name = require_account()
+    session = opt(args, "-s", "--session")
+    # The real one is in the CLI's automation module, which only the drive wrapper's interpreter
+    # has here.
+    automation = sys.modules.get("colab_cli.commands.automation")
+    if automation is None:
+        err("fake colab: drivemount runs only under the fake interpreter")
+        return 2
+    _, ep, a = lookup(state_path, name, session)
+    drive = dict(a.get("drive", {}))
+    automation.drivemount(session, drive)
+    # Read again: a test changes knobs while the mount waits for the user.
+    s = fc.server()
+    assignment = fc.account_state(s, name)["assignments"].get(ep)
+    if assignment is not None:
+        assignment["drive"] = drive
+        fc.save_server(s)
+    return 0
+
+
 def main():
     argv = sys.argv[1:]
     log_call(argv)
@@ -413,7 +441,7 @@ def main():
         out("Version: 0.8.0-fake")
         return 0
     handlers = {"sessions": cmd_sessions, "usage": cmd_usage, "new": cmd_new, "exec": cmd_exec,
-                "stop": cmd_stop, "whoami": cmd_whoami, "ssh": cmd_ssh}
+                "stop": cmd_stop, "whoami": cmd_whoami, "ssh": cmd_ssh, "drivemount": cmd_drivemount}
     if cmd not in handlers:
         err("Error: No such command '%s'." % cmd)
         return 2

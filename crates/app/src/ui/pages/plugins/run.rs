@@ -5,6 +5,7 @@
 
 use colab_playground_core::{
     backend::PluginRunOutcome,
+    drive::DriveStep,
     plugins::{PluginInfo, ResolvedEndpoint},
     tunnel::{TunnelSpec, TunnelState},
     vm::RunState,
@@ -26,8 +27,9 @@ use gpui::{
 };
 
 use crate::{
+    format,
     i18n::{keys, tr, tr_args},
-    state::{AppState, Load, Op, PluginRun, RunPhase},
+    state::{AppState, DriveProgress, Load, Op, PluginRun, RunPhase},
     ui::{
         error_view, metrics,
         parts::{cancel_work_button, step_icon, step_spinner},
@@ -43,6 +45,12 @@ pub const RUN_STOP: &str = "run-stop";
 pub const RUN_SESSION_UNKNOWN_SELECTOR: &str = "run-session-unknown";
 /// Selector around an endpoint card: `endpoint <id>`.
 pub const ENDPOINT_SELECTOR: &str = "endpoint";
+/// Selector of the Google Drive step: `drive-step connecting`, `consent`, `connected` or `ended`.
+pub const RUN_DRIVE_STEP: &str = "drive-step";
+/// Selector of "Open the authorization page".
+pub const DRIVE_OPEN: &str = "drive-open";
+/// Selector of Continue, once access is allowed.
+pub const DRIVE_CONTINUE: &str = "drive-continue";
 
 pub(super) fn render(state: &AppState, handle: &Entity<AppState>, cx: &App) -> Page {
     let Some(run) = state.plugin_run() else {
@@ -81,6 +89,9 @@ pub(super) fn render(state: &AppState, handle: &Entity<AppState>, cx: &App) -> P
                 )
                 .w_full(),
         );
+    }
+    if let Some(drive) = &run.drive {
+        page = page.child(drive_card(run, drive, state, handle, cx));
     }
     if let Some(info) = info {
         page = page.child(stages(run, info, state, cx));
@@ -195,6 +206,112 @@ fn stages(run: &PluginRun, info: &PluginInfo, state: &AppState, cx: &App) -> Any
         .into_any_element()
 }
 
+/// Connecting the user's Google Drive: the consent page to open and Continue while the run
+/// waits for the user, then where the plugin finds the files.
+fn drive_card(
+    run: &PluginRun,
+    drive: &DriveProgress,
+    state: &AppState,
+    handle: &Entity<AppState>,
+    cx: &App,
+) -> AnyElement {
+    let theme = cx.theme();
+    let running = matches!(run.phase, RunPhase::Running);
+    let (step, marker) = match &drive.step {
+        DriveStep::Connected { .. } => (
+            "connected",
+            step_icon(IconName::CircleCheck, theme.colors.success),
+        ),
+        _ if !running => ("ended", step_icon(IconName::CircleX, theme.colors.danger)),
+        DriveStep::Consent { .. } => ("consent", step_spinner("drive")),
+        _ => ("connecting", step_spinner("drive")),
+    };
+    let mut details = div().pl_6().flex().flex_col().gap_2();
+    match &drive.step {
+        DriveStep::Connected { folder } => {
+            details = details.child(Caption::new(tr_args(
+                cx,
+                keys::RUN_DRIVE_CONNECTED,
+                &[("folder", folder)],
+            )));
+        }
+        DriveStep::Consent { url } if running => {
+            let email = format::email(
+                cx,
+                run.account.as_ref().and_then(|a| state.account_email(a)),
+            );
+            let key = if drive.missed {
+                keys::RUN_DRIVE_MISSED
+            } else {
+                keys::RUN_DRIVE_CONSENT
+            };
+            let severity = if drive.missed {
+                Severity::Warning
+            } else {
+                Severity::Info
+            };
+            let (open_url, confirm) = (url.clone(), handle.clone());
+            details = details
+                .child(InlineMessage::new(
+                    severity,
+                    tr_args(cx, key, &[("email", &email)]),
+                ))
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_2()
+                        .child(tagged(
+                            DRIVE_OPEN,
+                            Button::new(DRIVE_OPEN, tr(cx, keys::RUN_DRIVE_OPEN))
+                                .primary()
+                                .icon(IconName::ExternalLink)
+                                .on_click(move |_, _, cx| cx.open_url(&open_url)),
+                        ))
+                        .child(CopyButton::new("drive-copy", url.clone()))
+                        .child(tagged(
+                            DRIVE_CONTINUE,
+                            Button::new(DRIVE_CONTINUE, tr(cx, keys::RUN_DRIVE_CONTINUE))
+                                .disabled(drive.confirming)
+                                .on_click(move |_, _, cx| {
+                                    confirm.update(cx, |state, cx| state.confirm_drive_access(cx))
+                                }),
+                        )),
+                );
+        }
+        _ if running => {
+            details = details.child(Caption::new(tr(cx, keys::RUN_DRIVE_CONNECTING)));
+        }
+        _ => {}
+    }
+    Card::new()
+        .header(CardHeader::new(tr(cx, keys::RUN_DRIVE_TITLE)))
+        .child(tagged(
+            format!("{RUN_DRIVE_STEP} {step}"),
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .text_size(theme.text_size(TextSize::Sm))
+                        .child(marker)
+                        .child(
+                            div()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(tr(cx, keys::RUN_DRIVE_SWITCH)),
+                        ),
+                )
+                .child(details),
+        ))
+        .w_full()
+        .into_any_element()
+}
+
 fn outcome(run: &PluginRun, state: &AppState, handle: &Entity<AppState>, cx: &App) -> AnyElement {
     let mut section = div().flex().flex_col().gap_2().w_full();
     match &run.phase {
@@ -222,11 +339,17 @@ fn outcome(run: &PluginRun, state: &AppState, handle: &Entity<AppState>, cx: &Ap
                     ))),
             );
         }
-        RunPhase::Ready(_) => {
-            section = section.child(InlineMessage::new(
-                Severity::Success,
-                tr(cx, keys::RUN_READY),
-            ));
+        RunPhase::Ready(outcome) => {
+            // "Its addresses are below" only holds for a plugin that offers some.
+            let text = if outcome.endpoints.is_empty() {
+                let name = state
+                    .plugin(&run.plugin)
+                    .map_or_else(|| run.plugin.clone(), |info| state.plugin_name(info));
+                tr_args(cx, keys::RUN_BANNER_READY, &[("name", &name)])
+            } else {
+                tr(cx, keys::RUN_READY)
+            };
+            section = section.child(InlineMessage::new(Severity::Success, text));
         }
         RunPhase::Failed(error) => {
             section = section.child(error_view::alert(

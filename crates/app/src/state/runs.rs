@@ -11,6 +11,7 @@ use colab_playground_core::{
     Error, ErrorKind,
     accounts::AccountId,
     backend::{Backend, PluginRunEvent, PluginRunOutcome, PluginRunSpec, RunTarget, Runtime},
+    drive::DriveStep,
     hf::HfModel,
     plugins::{InputKind, InputValue, PluginInfo},
     provision::ProvisionSpec,
@@ -71,6 +72,9 @@ pub struct RunForm {
     pub target_lost: Option<TargetLost>,
     /// Stop a session provisioned for this run when the run fails.
     pub stop_on_failure: bool,
+    /// Connect the user's Google Drive for this run (a plugin that asks for it; off until the
+    /// user turns it on).
+    pub drive: bool,
     pub hf: HfLookup,
     pub error: Option<Error>,
 }
@@ -97,6 +101,18 @@ pub struct PluginRun {
     pub status: Option<RunStatus>,
     pub log: RunLog,
     pub phase: RunPhase,
+    /// Connecting the user's Google Drive, for a run that asked for it.
+    pub drive: Option<DriveProgress>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DriveProgress {
+    /// Never [`DriveStep::Missed`], which only sets `missed`.
+    pub step: DriveStep,
+    /// Colab did not get the consent the last time, so it is asked for again.
+    pub missed: bool,
+    /// The user said they allowed access, and the run has not answered yet.
+    pub confirming: bool,
 }
 
 /// Lines of a run's log the app keeps, the newest ones. The log view builds every line it has
@@ -208,6 +224,7 @@ impl AppState {
             existing_account: None,
             target_lost: None,
             stop_on_failure: template.stop_on_failure,
+            drive: false,
             hf: HfLookup::default(),
             error: None,
         });
@@ -447,6 +464,7 @@ impl AppState {
             inputs,
             target,
             stop_on_failure: form.stop_on_failure,
+            drive: form.drive && AppState::wants_drive(&info),
         };
         self.plugin_run = Some(PluginRun {
             plugin: form.plugin.clone(),
@@ -457,6 +475,7 @@ impl AppState {
             status: None,
             log: RunLog::default(),
             phase: RunPhase::Running,
+            drive: None,
         });
         self.plugin_view = PluginView::Run;
         self.run_backend_streaming(
@@ -484,6 +503,29 @@ impl AppState {
         };
         match event {
             PluginRunEvent::Provision(event) => run.provision.push(event, at),
+            PluginRunEvent::Drive {
+                account,
+                session,
+                step,
+            } => {
+                run.account = Some(account);
+                run.session = Some(session);
+                let drive = run.drive.get_or_insert(DriveProgress {
+                    step: DriveStep::Connecting,
+                    missed: false,
+                    confirming: false,
+                });
+                drive.confirming = false;
+                match step {
+                    DriveStep::Missed => drive.missed = true,
+                    step => {
+                        if matches!(step, DriveStep::Connected { .. }) {
+                            drive.missed = false;
+                        }
+                        drive.step = step;
+                    }
+                }
+            }
             PluginRunEvent::Launched { session, .. } => run.session = Some(session),
             PluginRunEvent::Status(status) => run.status = Some(status),
             PluginRunEvent::Log { lines } => run.log.extend(lines),
@@ -543,6 +585,38 @@ impl AppState {
             self.open_tunnel(spec, false, cx);
         }
         self.after_runtime_change(cx);
+    }
+
+    /// The user says they allowed access on the Google Drive consent page the run showed.
+    pub fn confirm_drive_access(&mut self, cx: &mut Context<Self>) {
+        let Some(run) = &mut self.plugin_run else {
+            return;
+        };
+        let (Some(account), Some(session)) = (run.account.clone(), run.session.clone()) else {
+            return;
+        };
+        let Some(drive) = run
+            .drive
+            .as_mut()
+            .filter(|d| matches!(d.step, DriveStep::Consent { .. }) && !d.confirming)
+        else {
+            return;
+        };
+        drive.confirming = true;
+        self.run_latest(
+            cx,
+            move |backend, _| backend.confirm_drive_access(&account, &session),
+            |state, result, cx| {
+                if let Err(error) = result {
+                    if let Some(drive) = state.plugin_run.as_mut().and_then(|r| r.drive.as_mut()) {
+                        drive.confirming = false;
+                    }
+                    state.toast_error(&error, cx);
+                }
+                cx.notify();
+            },
+        );
+        cx.notify();
     }
 
     /// Asks the run to stop; a session it provisioned is stopped too.

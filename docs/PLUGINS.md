@@ -122,6 +122,7 @@ map to the same name are rejected. Missing optional inputs are simply absent.
 | `PLUGIN_STATUS_FILE` | `$PLUGIN_RUN_DIR/status.json` |
 | `PLUGIN_HEARTBEAT` | heartbeat file read by the VM watchdog |
 | `PLUGIN_HF_TOKEN` | the user's saved Hugging Face token, only with `needs = ["hf_token"]` and only if one is saved |
+| `PLUGIN_DRIVE_DIR` | the folder holding the user's Google Drive files (`/content/drive/MyDrive`), only with `needs = ["drive"]` and only when the user connected Drive for the run |
 
 `.py` scripts run with the VM's Python (`python -u`), `.sh` scripts with
 `bash`. stdout and stderr go to `$PLUGIN_RUN_DIR/run.log`, which the app
@@ -137,8 +138,22 @@ from the kernel, so it survives dropped connections.
 | name | effect |
 |---|---|
 | `hf_token` | `PLUGIN_HF_TOKEN` is set when the user has saved a Hugging Face token on the Plugins page. Treat it as optional. |
+| `drive` | The run form offers to connect the user's Google Drive, off until the user turns it on ([Google Drive](#google-drive)). `PLUGIN_DRIVE_DIR` is set when it is connected. Treat it as optional. |
 
 Unknown capability names are rejected.
+
+### Google Drive
+
+- **Connecting.** Before the script starts, the app has Colab mount the user's Drive on the
+  runtime. When Colab needs the user's consent, the run view shows Google's consent page and
+  waits until the user says they allowed access. A runtime that has Drive connected already is not
+  asked again.
+- **On the runtime.** Drive stays connected until the runtime stops, and every process on the
+  runtime can read, change and delete everything in it: later runs there of any plugin too, which
+  the run form says when such a session is picked.
+- **Writes.** Files written to the folder reach Drive in the background, so a runtime that stops
+  right after writing can lose them. `from google.colab import drive; drive.flush_and_unmount()`
+  pushes every change and then unmounts Drive.
 
 ## Status protocol
 
@@ -212,7 +227,10 @@ then whenever `/slots` reports a request in progress.
   and so are input values (types, options, ranges, `owner/name` repo ids).
 - **No privileges.** A plugin gets no access to the user's accounts, tokens or
   files. It only receives the inputs the user typed and the capabilities it
-  declared.
+  declared. Google Drive is the exception: once the user connects it for a run
+  of a plugin that declares `drive`, every process on that runtime can read,
+  change and delete it until the runtime stops, later runs of plugins that do
+  not declare `drive` included ([Google Drive](#google-drive)).
 
 ## Testing a plugin
 
@@ -221,5 +239,6 @@ then whenever `/slots` reports a request in progress.
 - Run the script on a cheap CPU or T4 session first; `run.log` and
   `status.json` are in the run directory on the VM.
 - In mock mode (`--mock`, the default for debug builds) runs are simulated stage
-  by stage from your manifest. This checks the form and stage labels without a
-  VM. Install from a folder there; Git URLs are not simulated.
+  by stage from your manifest, connecting Google Drive included. This checks the
+  form and stage labels without a VM. Install from a folder there; Git URLs are
+  not simulated.

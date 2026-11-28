@@ -1479,4 +1479,50 @@ pub(super) const MESSAGES: Messages = &[
         "Colab Playground は無料のオープンソース ソフトウェアです。GitHub でスポンサーになると、開発の継続を支援できます。",
     ),
     (SETTINGS_SPONSOR, "GitHub でスポンサーになる"),
+    (
+        PLUGIN_NEEDS_DRIVE,
+        "Google ドライブ（デプロイ時に接続した場合）",
+    ),
+    (RUN_DRIVE_TITLE, "Google ドライブ"),
+    (RUN_DRIVE_SWITCH, "Google ドライブを接続"),
+    (
+        RUN_DRIVE_ON,
+        "プラグインの開始前に、ブラウザーでアクセスを許可します。ランタイムが停止するまで、その上のすべてのコード（このプラグインを含む）が、ドライブ内のすべてを読み取り、変更し、削除できます。",
+    ),
+    (
+        RUN_DRIVE_ON_CONNECTED,
+        "このセッションにはドライブが接続済みのため、プラグインは改めて確認せずにフォルダーを受け取ります。",
+    ),
+    (
+        RUN_DRIVE_OFF,
+        "プラグインは Google ドライブなしで実行されます。",
+    ),
+    (
+        RUN_TARGET_DRIVE,
+        "{name} には Google ドライブが接続されています。停止するまで、その上のすべてのコード（このプラグインを含む）が、ドライブ内のすべてを読み取り、変更し、削除できます。",
+    ),
+    (RUN_DRIVE_CONNECTING, "Google ドライブを接続しています…"),
+    (
+        RUN_DRIVE_CONSENT,
+        "認証ページを開いて {email} としてアクセスを許可してから、ここに戻って「続行」をクリックしてください。Colab が待つのは約 2 分です。",
+    ),
+    (
+        RUN_DRIVE_MISSED,
+        "Colab はドライブへのアクセス権を受け取れませんでした。認証ページで {email} としてアクセスを許可してから、「続行」をクリックしてください。",
+    ),
+    (RUN_DRIVE_OPEN, "認証ページを開く"),
+    (RUN_DRIVE_CONTINUE, "続行"),
+    (
+        RUN_DRIVE_CONNECTED,
+        "ランタイムが停止するまで接続されています。プラグインは {folder} でファイルを見つけます。",
+    ),
+    (RUNTIME_DRIVE, "ドライブ接続中"),
+    (
+        RUNTIME_DRIVE_HINT,
+        "このランタイムには、停止するまで Google ドライブが接続されています。その上のすべてのコードが、ドライブ内のすべてを読み取り、変更し、削除できます。",
+    ),
+    (
+        ERR_DRIVE_NOT_CONNECTED,
+        "Google ドライブを接続できませんでした。",
+    ),
 ];

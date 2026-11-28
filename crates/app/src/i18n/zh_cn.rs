@@ -1155,4 +1155,44 @@ pub(super) const MESSAGES: Messages = &[
         "Colab Playground 是免费的开源软件。在 GitHub 上赞助能支持它的持续开发。",
     ),
     (SETTINGS_SPONSOR, "在 GitHub 上赞助"),
+    (
+        PLUGIN_NEEDS_DRIVE,
+        "你的 Google 云端硬盘（如果部署时选择连接）",
+    ),
+    (RUN_DRIVE_TITLE, "Google 云端硬盘"),
+    (RUN_DRIVE_SWITCH, "连接 Google 云端硬盘"),
+    (
+        RUN_DRIVE_ON,
+        "插件启动前，你要在浏览器中允许访问。在运行时停止前，它上面的任何代码（包括这个插件）都能读取、修改和删除你云端硬盘中的所有内容。",
+    ),
+    (
+        RUN_DRIVE_ON_CONNECTED,
+        "这个会话已经连接了云端硬盘，插件会直接拿到它的文件夹，不再询问你。",
+    ),
+    (RUN_DRIVE_OFF, "插件不会用到你的 Google 云端硬盘。"),
+    (
+        RUN_TARGET_DRIVE,
+        "{name} 上已连接 Google 云端硬盘。在它停止前，它上面的任何代码（包括这个插件）都能读取、修改和删除你云端硬盘中的所有内容。",
+    ),
+    (RUN_DRIVE_CONNECTING, "正在连接 Google 云端硬盘…"),
+    (
+        RUN_DRIVE_CONSENT,
+        "打开授权页面，以 {email} 允许访问，然后回到这里点击“继续”。Colab 大约会等 2 分钟。",
+    ),
+    (
+        RUN_DRIVE_MISSED,
+        "Colab 没有拿到访问你云端硬盘的授权。请在授权页面以 {email} 允许访问，然后点击“继续”。",
+    ),
+    (RUN_DRIVE_OPEN, "打开授权页面"),
+    (RUN_DRIVE_CONTINUE, "继续"),
+    (
+        RUN_DRIVE_CONNECTED,
+        "已连接，直到运行时停止。插件会在 {folder} 中找到你的文件。",
+    ),
+    (RUNTIME_DRIVE, "已连接云端硬盘"),
+    (
+        RUNTIME_DRIVE_HINT,
+        "你的 Google 云端硬盘已连接到这个运行时，直到它停止。它上面的任何代码都能读取、修改和删除你云端硬盘中的所有内容。",
+    ),
+    (ERR_DRIVE_NOT_CONNECTED, "无法连接 Google 云端硬盘。"),
 ];

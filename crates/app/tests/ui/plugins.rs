@@ -16,9 +16,9 @@ use colab_playground::{
         pages::{
             overview::{INSTALL_SELECTOR, QUICK_DEPLOY_SELECTOR, deploy_selector},
             plugins::{
-                ENDPOINT_SELECTOR, INSTALL_CHECK, RUN_START, RUN_STOP, check_failed_selector,
-                failed_selector, hf_result_selector, overview_selector, plugin_selector,
-                remove_failed_selector, run_selector,
+                ENDPOINT_SELECTOR, INSTALL_CHECK, RUN_DRIVE, RUN_DRIVE_STEP, RUN_START, RUN_STOP,
+                RUN_TARGET_DRIVE, check_failed_selector, failed_selector, hf_result_selector,
+                overview_selector, plugin_selector, remove_failed_selector, run_selector,
             },
         },
     },
@@ -26,7 +26,8 @@ use colab_playground::{
 use colab_playground_core::{
     CancelToken, ErrorKind,
     backend::{Backend, PluginRunEvent, RuntimeRef},
-    mock::{MockFailures, MockRuntime, MockScenario, UNLOADABLE_PLUGIN},
+    drive::DriveStep,
+    mock::{MOCK_DRIVE_FOLDER, MockFailures, MockRuntime, MockScenario, UNLOADABLE_PLUGIN},
     sessions::Accelerator,
     tunnel::TunnelState,
 };
@@ -225,6 +226,164 @@ fn a_runtime_is_only_called_stopped_when_its_account_was_listed(cx: &mut TestApp
     app.update(|state, cx| state.load_runtimes(cx));
     assert!(!app.shown("run-session-stopped"));
     assert!(app.shown(colab_playground::ui::pages::plugins::RUN_SESSION_UNKNOWN_SELECTOR));
+}
+
+const DRIVE_MANIFEST: &str = r#"api = 1
+id = "drive-demo"
+version = "0.1.0"
+needs = ["drive"]
+
+[name]
+en = "Back up to Drive"
+
+[provision]
+accelerator = "NONE"
+
+[run]
+script = "run.sh"
+
+[[stages]]
+id = "copy"
+[stages.label]
+en = "Copy the files"
+"#;
+
+/// Installs a plugin that asks for Google Drive and opens its run form; the folder is removed
+/// when what this returns is dropped.
+fn open_drive_form(app: &mut TestApp<'_>) -> tempfile::TempDir {
+    let fixture = tempfile::tempdir().expect("a fixture folder");
+    std::fs::write(fixture.path().join("plugin.toml"), DRIVE_MANIFEST).expect("manifest");
+    std::fs::write(fixture.path().join("run.sh"), "ls \"$PLUGIN_DRIVE_DIR\"\n").expect("script");
+    app.click(Route::Plugins.nav_selector());
+    let folder = fixture.path().display().to_string();
+    app.fill(|inputs| inputs.plugin_source.clone(), &folder);
+    app.click(INSTALL_CHECK);
+    app.click(INSTALL_CONFIRM);
+    app.click(&run_selector("drive-demo"));
+    assert_eq!(app.read(|state, _| state.plugin_view()), PluginView::Form);
+    fixture
+}
+
+fn drive_switch_on(app: &mut TestApp<'_>) -> Option<bool> {
+    app.read(|state, _| state.run_form().map(|form| form.drive))
+}
+
+fn new_session_name(app: &mut TestApp<'_>) -> String {
+    app.read_root(|root, cx| root.inputs().run_session_name.read(cx).text().to_owned())
+}
+
+/// Allows access as the user would, at the first `times` consent pages a run on `session`
+/// waits on.
+fn allow_drive_access(app: &mut TestApp<'_>, session: String, times: usize) {
+    let mock = app.mock.clone();
+    let account = app
+        .read(|state, _| {
+            state
+                .accounts()
+                .ready()
+                .and_then(|view| view.active.clone())
+        })
+        .expect("an active account");
+    let mut allowed = 0;
+    app.wait_hook.set(move || {
+        if mock.confirm_drive_access(&account, &session).is_ok() {
+            allowed += 1;
+        }
+        allowed == times
+    });
+}
+
+fn drive_step(app: &mut TestApp<'_>) -> Option<DriveStep> {
+    app.read(|state, _| {
+        state
+            .plugin_run()
+            .and_then(|run| run.drive.as_ref())
+            .map(|drive| drive.step.clone())
+    })
+}
+
+#[gpui::test]
+fn drive_is_connected_for_a_run_once_the_user_allows_access(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
+    let _fixture = open_drive_form(&mut app);
+    assert!(app.shown(RUN_DRIVE), "the plugin asks for Google Drive");
+    assert_eq!(
+        drive_switch_on(&mut app),
+        Some(false),
+        "off until turned on"
+    );
+    app.click(RUN_DRIVE);
+    assert_eq!(drive_switch_on(&mut app), Some(true));
+
+    let session = new_session_name(&mut app);
+    allow_drive_access(&mut app, session.clone(), 1);
+    app.click(RUN_START);
+    assert!(
+        matches!(run_phase(&mut app), Some(RunPhase::Ready(_))),
+        "{:?}",
+        run_phase(&mut app)
+    );
+    assert_eq!(
+        drive_step(&mut app),
+        Some(DriveStep::Connected {
+            folder: MOCK_DRIVE_FOLDER.into()
+        })
+    );
+    assert!(app.shown(&format!("{RUN_DRIVE_STEP} connected")));
+
+    // The runtime's card says so, and so does a form that would run anything there.
+    app.click(Route::Sessions.nav_selector());
+    assert!(app.shown(&format!("runtime-drive {session}")));
+    app.update(|state, cx| state.open_run_form("llama-cpp".into(), cx));
+    assert!(!app.shown(RUN_DRIVE), "this plugin does not ask for Drive");
+    assert!(!app.shown(RUN_TARGET_DRIVE));
+    app.update(|state, cx| state.pick_run_target(Some(session.clone()), cx));
+    assert!(app.shown(RUN_TARGET_DRIVE));
+}
+
+#[gpui::test]
+fn a_consent_colab_did_not_get_is_asked_for_again(cx: &mut TestAppContext) {
+    let options = Options {
+        failures: MockFailures {
+            drive_consent_missed: true,
+            ..MockFailures::default()
+        },
+        ..Options::scenario(MockScenario::single())
+    };
+    let mut app = TestApp::with(cx, options);
+    let _fixture = open_drive_form(&mut app);
+    app.click(RUN_DRIVE);
+    let session = new_session_name(&mut app);
+    allow_drive_access(&mut app, session, 2);
+    app.click(RUN_START);
+    assert!(
+        matches!(run_phase(&mut app), Some(RunPhase::Ready(_))),
+        "{:?}",
+        run_phase(&mut app)
+    );
+    let missed = app.read(|state, _| {
+        state
+            .plugin_run()
+            .and_then(|run| run.drive.as_ref())
+            .map(|drive| drive.missed)
+    });
+    assert_eq!(missed, Some(false), "connected in the end");
+}
+
+#[gpui::test]
+fn a_run_nobody_allows_drive_access_for_stops_the_runtime_it_started(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
+    let _fixture = open_drive_form(&mut app);
+    app.click(RUN_DRIVE);
+    app.click(RUN_START);
+    let Some(RunPhase::Failed(error)) = run_phase(&mut app) else {
+        panic!("expected a failure, got {:?}", run_phase(&mut app));
+    };
+    assert!(error.is(ErrorKind::DriveNotConnected), "{error:?}");
+    assert!(app.shown("error-run"));
+    assert!(app.shown(&format!("{RUN_DRIVE_STEP} ended")));
+    let left = app.mock.runtimes(&CancelToken::new()).expect("listing");
+    assert!(left.runtimes.is_empty(), "nothing bills: {left:?}");
 }
 
 const FIXTURE_MANIFEST: &str = r#"api = 1

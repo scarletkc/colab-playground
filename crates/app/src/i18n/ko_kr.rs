@@ -1374,4 +1374,44 @@ pub(super) const MESSAGES: Messages = &[
         "Colab Playground는 무료 오픈 소스 소프트웨어입니다. GitHub에서 후원하면 개발을 계속 이어 가는 데 도움이 됩니다.",
     ),
     (SETTINGS_SPONSOR, "GitHub에서 후원하기"),
+    (PLUGIN_NEEDS_DRIVE, "Google 드라이브(배포할 때 연결한 경우)"),
+    (RUN_DRIVE_TITLE, "Google 드라이브"),
+    (RUN_DRIVE_SWITCH, "Google 드라이브 연결"),
+    (
+        RUN_DRIVE_ON,
+        "플러그인이 시작되기 전에 브라우저에서 액세스를 허용합니다. 런타임이 중지될 때까지 그 위의 모든 코드(이 플러그인 포함)가 드라이브의 모든 항목을 읽고, 변경하고, 삭제할 수 있습니다.",
+    ),
+    (
+        RUN_DRIVE_ON_CONNECTED,
+        "이 세션에는 이미 드라이브가 연결되어 있어서, 플러그인이 다시 묻지 않고 폴더를 받습니다.",
+    ),
+    (RUN_DRIVE_OFF, "플러그인이 Google 드라이브 없이 실행됩니다."),
+    (
+        RUN_TARGET_DRIVE,
+        "{name}에 Google 드라이브가 연결되어 있습니다. 중지될 때까지 그 위의 모든 코드(이 플러그인 포함)가 드라이브의 모든 항목을 읽고, 변경하고, 삭제할 수 있습니다.",
+    ),
+    (RUN_DRIVE_CONNECTING, "Google 드라이브를 연결하는 중…"),
+    (
+        RUN_DRIVE_CONSENT,
+        "승인 페이지를 열어 {email}(으)로 액세스를 허용한 다음, 여기로 돌아와 [계속]을 클릭하세요. Colab은 약 2분 동안 기다립니다.",
+    ),
+    (
+        RUN_DRIVE_MISSED,
+        "Colab이 드라이브 액세스 권한을 받지 못했습니다. 승인 페이지에서 {email}(으)로 액세스를 허용한 다음 [계속]을 클릭하세요.",
+    ),
+    (RUN_DRIVE_OPEN, "승인 페이지 열기"),
+    (RUN_DRIVE_CONTINUE, "계속"),
+    (
+        RUN_DRIVE_CONNECTED,
+        "런타임이 중지될 때까지 연결됩니다. 플러그인은 {folder}에서 파일을 찾습니다.",
+    ),
+    (RUNTIME_DRIVE, "드라이브 연결됨"),
+    (
+        RUNTIME_DRIVE_HINT,
+        "이 런타임에는 중지될 때까지 Google 드라이브가 연결되어 있습니다. 그 위의 모든 코드가 드라이브의 모든 항목을 읽고, 변경하고, 삭제할 수 있습니다.",
+    ),
+    (
+        ERR_DRIVE_NOT_CONNECTED,
+        "Google 드라이브를 연결하지 못했습니다.",
+    ),
 ];

@@ -16,9 +16,11 @@ use std::time::{Duration, Instant};
 
 use colab_playground_core::accounts::{Account, AccountId, Helper};
 use colab_playground_core::backend::{
-    Backend, PluginRunEvent, RunTarget, Runtime, RuntimeRef, StopOptions,
+    Backend, PluginRunEvent, PluginRunOutcome, PluginRunSpec, RunTarget, Runtime, RuntimeRef,
+    StopOptions,
 };
 use colab_playground_core::cli::Cli;
+use colab_playground_core::drive::DriveStep;
 use colab_playground_core::guard::GuardPolicy;
 use colab_playground_core::http::NoHttp;
 use colab_playground_core::paths::HostPath;
@@ -63,6 +65,15 @@ fn install(src: &Path, dst: &Path, exec: bool) {
     }
 }
 
+/// The fake CLI interpreter at `python`, with the modules it loads from its own folder.
+fn install_fake_python(fake: &Path, python: &Path) {
+    install(&fake.join("python_shim.py"), python, true);
+    let folder = python.parent().unwrap();
+    for module in ["fake_common.py", "fake_automation.py"] {
+        install(&fake.join(module), &folder.join(module), false);
+    }
+}
+
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_path_buf();
@@ -72,13 +83,8 @@ fn fixture() -> Fixture {
     let bin = root.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     install(&fake.join("colab.py"), &bin.join("colab"), true);
-    install(&fake.join("python_shim.py"), &bin.join("fake-python"), true);
+    install_fake_python(&fake, &bin.join("fake-python"));
     install(&fake.join("ssh.py"), &bin.join("ssh"), true);
-    install(
-        &fake.join("fake_common.py"),
-        &bin.join("fake_common.py"),
-        false,
-    );
     let state = root.join("state");
     let home = root.join("home");
     std::fs::create_dir_all(&state).unwrap();
@@ -941,6 +947,276 @@ fn plugin_run_cancelled_while_its_last_log_lines_are_read_ends_as_cancelled() {
         f.assignments("alice").is_empty(),
         "the runtime started for the run is stopped"
     );
+}
+
+const DRIVE_PLUGIN: &str = "api = 1\nid = \"drive-demo\"\nversion = \"0.1.0\"\nneeds = [\"drive\"]\n\
+                            [name]\nen = \"Drive demo\"\n[run]\nscript = \"main.py\"\n";
+const DRIVE_FOLDER: &str = "/content/drive/MyDrive";
+
+impl Fixture {
+    fn install_drive_plugin(&self) {
+        let src = self.root.join("drive-plugin");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("plugin.toml"), DRIVE_PLUGIN).unwrap();
+        std::fs::write(src.join("main.py"), "print('hi')\n").unwrap();
+        let preview = self.b.inspect_plugin_folder(&src).unwrap();
+        self.b.install_plugin(&preview).unwrap();
+    }
+
+    fn drive_run(&self, connect: bool, target: Option<&str>) -> PluginRunSpec {
+        let mut spec = self.b.plugin_run_template("drive-demo").unwrap();
+        spec.drive = connect;
+        if let Some(name) = target {
+            spec.target = RunTarget::Existing { name: name.into() };
+        }
+        spec
+    }
+
+    /// The argv of every `colab drivemount`.
+    fn drivemounts(&self) -> Vec<Vec<String>> {
+        self.calls()
+            .into_iter()
+            .filter_map(|c| serde_json::from_value::<Vec<String>>(c["argv"].clone()).ok())
+            .filter(|argv| argv.iter().any(|a| a == "drivemount"))
+            .collect()
+    }
+
+    /// What the kernel of `session`'s runtime was answered each time it asked for the consent.
+    fn drive_answers(&self, session: &str) -> Value {
+        let (_, a) = self
+            .assignments("alice")
+            .into_iter()
+            .find(|(_, a)| a["session"] == session)
+            .unwrap();
+        a["drive"]["answers"].clone()
+    }
+}
+
+/// Runs `spec`, calling `on_consent` with the count, account and session each time it shows a
+/// Google Drive consent page; returns its result and events.
+fn run_answering(
+    f: &Fixture,
+    spec: PluginRunSpec,
+    cancel: &CancelToken,
+    mut on_consent: impl FnMut(usize, &AccountId, &str),
+) -> (
+    colab_playground_core::Result<PluginRunOutcome>,
+    Vec<PluginRunEvent>,
+) {
+    let (tx, rx) = channel();
+    let (b, token) = (f.b.clone(), cancel.clone());
+    let run = std::thread::spawn(move || b.run_plugin(spec, tx, &token));
+    let mut events = Vec::new();
+    let mut consents = 0;
+    // Ends when the run does, which drops its sender.
+    for event in rx {
+        if let PluginRunEvent::Drive {
+            account,
+            session,
+            step: DriveStep::Consent { .. },
+        } = &event
+        {
+            consents += 1;
+            on_consent(consents, account, session.as_str());
+        }
+        events.push(event);
+    }
+    (run.join().unwrap(), events)
+}
+
+fn no_runs(f: &Fixture) -> bool {
+    f.server()["runs"]
+        .as_object()
+        .is_none_or(|runs| runs.is_empty())
+}
+
+fn drive_steps(events: &[PluginRunEvent]) -> Vec<DriveStep> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            PluginRunEvent::Drive { step, .. } => Some(step.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn consent_page() -> DriveStep {
+    DriveStep::Consent {
+        url: "https://accounts.google.com/o/oauth2/auth?client_id=fake-drive&scope=drive".into(),
+    }
+}
+
+fn connected() -> DriveStep {
+    DriveStep::Connected {
+        folder: DRIVE_FOLDER.into(),
+    }
+}
+
+#[test]
+fn drive_is_connected_once_the_user_allows_access_and_its_folder_reaches_the_script() {
+    let f = fixture();
+    let alice = f.adopt_alice();
+    f.install_drive_plugin();
+    let (result, events) = run_answering(&f, f.drive_run(true, None), &nc(), |_, account, s| {
+        assert_eq!(account, &alice.id);
+        // Allowed in the browser, then said so in the app.
+        f.knob("drive_consent", json!(true));
+        f.b.confirm_drive_access(account, s).unwrap();
+    });
+    let out = result.unwrap();
+    assert_eq!(out.status.state, RunState::Ready);
+    use DriveStep::Connecting;
+    assert_eq!(
+        drive_steps(&events),
+        [Connecting, consent_page(), Connecting, connected()]
+    );
+    let run = &f.server()["runs"][&out.run_id];
+    assert_eq!(run["env"]["PLUGIN_DRIVE_DIR"], DRIVE_FOLDER);
+    assert_eq!(f.drive_answers(&out.session), json!(["ok"]));
+    let state = f.state_file(&alice.id).to_string_lossy().into_owned();
+    assert_eq!(
+        f.drivemounts(),
+        [vec![
+            "--config".to_owned(),
+            state,
+            "drivemount".into(),
+            "-s".into(),
+            out.session.clone()
+        ]],
+        "the CLI ran once, with the account's own state file"
+    );
+    assert!(
+        f.b.confirm_drive_access(&alice.id, &out.session).is_err(),
+        "nothing waits now"
+    );
+    let listed = f.b.runtimes(&nc()).unwrap();
+    let runtime = listed
+        .runtimes
+        .iter()
+        .find(|r| r.id.name.as_deref() == Some(out.session.as_str()))
+        .unwrap();
+    assert!(
+        runtime
+            .tracked
+            .as_ref()
+            .unwrap()
+            .drive_connected_at
+            .is_some()
+    );
+
+    // On the same runtime Drive is found connected: no consent page, no `drivemount`.
+    let (result, events) = run_answering(
+        &f,
+        f.drive_run(true, Some(&out.session)),
+        &nc(),
+        |_, _, _| panic!("asked again"),
+    );
+    let again = result.unwrap();
+    assert_eq!(drive_steps(&events), [Connecting, connected()]);
+    assert_eq!(
+        f.server()["runs"][&again.run_id]["env"]["PLUGIN_DRIVE_DIR"],
+        DRIVE_FOLDER
+    );
+    assert_eq!(f.drivemounts().len(), 1);
+
+    // Without the switch it is neither connected nor passed on.
+    let (result, events) = run_answering(&f, f.drive_run(false, None), &nc(), |_, _, _| {
+        panic!("asked")
+    });
+    let plain = result.unwrap();
+    assert!(drive_steps(&events).is_empty());
+    assert!(
+        f.server()["runs"][&plain.run_id]["env"]
+            .get("PLUGIN_DRIVE_DIR")
+            .is_none()
+    );
+    assert_eq!(f.drivemounts().len(), 1);
+}
+
+#[test]
+fn a_consent_colab_did_not_get_is_asked_for_again_without_keeping_the_kernel_waiting() {
+    let f = fixture();
+    f.adopt_alice();
+    f.install_drive_plugin();
+    let (result, events) = run_answering(&f, f.drive_run(true, None), &nc(), |n, account, s| {
+        // The first time the user says so before allowing access.
+        if n == 2 {
+            f.knob("drive_consent", json!(true));
+        }
+        f.b.confirm_drive_access(account, s).unwrap();
+    });
+    let out = result.unwrap();
+    use DriveStep::{Connecting, Missed};
+    assert_eq!(
+        drive_steps(&events),
+        [
+            Connecting,
+            consent_page(),
+            Connecting,
+            Missed,
+            Connecting,
+            consent_page(),
+            Connecting,
+            connected()
+        ]
+    );
+    // The CLI left the kernel without an answer the first time; the wrapper answered no.
+    assert_eq!(f.drive_answers(&out.session), json!(["error", "ok"]));
+    assert_eq!(
+        f.server()["runs"][&out.run_id]["env"]["PLUGIN_DRIVE_DIR"],
+        DRIVE_FOLDER
+    );
+}
+
+#[test]
+fn cancelling_at_the_consent_page_answers_the_kernel_and_gives_back_a_new_runtime() {
+    let f = fixture();
+    f.adopt_alice();
+    f.install_drive_plugin();
+    f.provision("drv1", Accelerator::None);
+    let cancel = CancelToken::new();
+    let (result, _) = run_answering(&f, f.drive_run(true, Some("drv1")), &cancel, |_, _, _| {
+        cancel.cancel();
+    });
+    assert!(result.unwrap_err().is(ErrorKind::Cancelled));
+    assert_eq!(
+        f.drive_answers("drv1"),
+        json!(["error"]),
+        "the kernel waits no more"
+    );
+    assert!(no_runs(&f), "the script never started");
+    assert_eq!(
+        f.assignments("alice").len(),
+        1,
+        "a runtime the run did not start stays"
+    );
+
+    let cancel = CancelToken::new();
+    let (result, _) = run_answering(&f, f.drive_run(true, None), &cancel, |_, _, _| {
+        cancel.cancel();
+    });
+    assert!(result.unwrap_err().is(ErrorKind::Cancelled));
+    assert_eq!(
+        f.assignments("alice").len(),
+        1,
+        "the runtime started for the run is stopped"
+    );
+}
+
+#[test]
+fn a_cli_the_drive_wrapper_cannot_take_over_is_reported_not_run() {
+    let f = fixture();
+    f.adopt_alice();
+    f.install_drive_plugin();
+    f.provision("drv1", Accelerator::None);
+    f.knob("cli_api_broken", json!(true));
+    let (result, _) = run_answering(&f, f.drive_run(true, Some("drv1")), &nc(), |_, _, _| {
+        panic!("no consent page")
+    });
+    let error = result.unwrap_err();
+    assert!(error.is(ErrorKind::UnsupportedCliVersion), "{error}");
+    assert!(f.drivemounts().is_empty(), "the CLI never got to run");
+    assert!(no_runs(&f));
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {
@@ -2113,12 +2389,7 @@ fn probe_uses_configured_colab_path_instead_of_path_binary() {
         .join("tests")
         .join("fake");
     let custom_py = custom.join("python");
-    install(&fake.join("python_shim.py"), &custom_py, true);
-    install(
-        &fake.join("fake_common.py"),
-        &custom.join("fake_common.py"),
-        false,
-    );
+    install_fake_python(&fake, &custom_py);
     let custom_colab = custom.join("colab");
     std::fs::write(
         &custom_colab,

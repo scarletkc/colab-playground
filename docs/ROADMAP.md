@@ -21,9 +21,9 @@ A stopped runtime is wiped, and the guards stop runtimes on their own. A session
 
 - Triggers: manual "Save now"; before every app-initiated stop; optionally every N minutes; and
   VM-side during the watchdog's wind-down.
-- Drive: `colab drivemount` prints a consent URL and waits for Enter, so the app can drive it
-  like login. Mounting exposes the whole Drive to code on the VM, third-party plugins included:
-  off by default, per session, with a warning that says exactly that.
+- Drive: the app connects it for a plugin that asks for it, when the user chooses to
+  ([PLUGINS.md](PLUGINS.md#google-drive)). The keep plan adds copying the paths into it, and
+  pushing what is written there to Drive before an app-initiated stop.
 - Tokens: the CLI already passes values to the VM with `colab exec --env KEY=VALUE` (in memory,
   not on disk); that is how a Hugging Face token reaches a plugin. Colab's notebook "Secrets"
   (`google.colab.userdata`) are not exposed by the CLI.

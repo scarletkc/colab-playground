@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Fake "CLI interpreter" for the account helper and the tunnel's proxy guard in integration tests.
+"""Fake "CLI interpreter" for the account helper, the tunnel's proxy guard and the Drive wrapper
+in integration tests.
 
 Invoked exactly like the real one (``<python> -c <loader> <op> [args...]`` for the
-helper, ``<python> -P -c <loader> <guard> [args...]`` in a ProxyCommand), it installs
+helper, ``<python> -P -c <loader> <script> [args...]`` for the others), it installs
 fake ``keyring`` / ``google-auth`` / ``requests`` / ``colab_cli`` modules and then
-runs the loader, which executes the *real* ``account_helper.py`` read from stdin or
-the real ``proxy_guard.py`` passed in base64. Never resolves the system's packages
-(see fake_common).
+runs the loader, which executes the *real* ``account_helper.py`` read from stdin, or
+the real ``proxy_guard.py`` or ``drive_mount.py`` passed in base64. Never resolves the
+system's packages (see fake_common).
 """
 
 import os
