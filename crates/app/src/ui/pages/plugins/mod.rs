@@ -47,6 +47,10 @@ pub fn remove_selector(id: &str) -> String {
 pub fn enable_selector(id: &str) -> String {
     format!("plugin-enabled {id}")
 }
+/// Selector of a plugin's "Show on Overview" switch: `plugin-overview <id>`.
+pub fn overview_selector(id: &str) -> String {
+    format!("plugin-overview {id}")
+}
 /// Selector of the card of a folder that failed to load: `plugin-failed <folder>`.
 pub fn failed_selector(folder: &str) -> String {
     format!("plugin-failed {folder}")
@@ -171,6 +175,19 @@ fn plugin_card(
             state.set_plugin_enabled(toggle_id.clone(), on, cx)
         })
     });
+    let on_overview = {
+        let (handle, id) = (handle.clone(), id.clone());
+        Switch::new(
+            SharedString::from(format!("plugin-overview-{id}")),
+            state.shown_on_overview(&id),
+        )
+        .name(tr(cx, keys::PLUGIN_ON_OVERVIEW))
+        .on_change(move |on, _, cx| {
+            handle.update(cx, |state, cx| {
+                state.set_shown_on_overview(id.clone(), on, cx)
+            })
+        })
+    };
     let remove = {
         let (handle, id) = (handle.clone(), id.clone());
         let button = Button::new(
@@ -235,6 +252,18 @@ fn plugin_card(
                                 div()
                                     .text_size(theme.text_size(TextSize::Sm))
                                     .child(tr(cx, keys::PLUGIN_ENABLED)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(tagged(overview_selector(&id), on_overview))
+                            .child(
+                                div()
+                                    .text_size(theme.text_size(TextSize::Sm))
+                                    .child(tr(cx, keys::PLUGIN_ON_OVERVIEW)),
                             ),
                     )
                     .child(tagged(remove_selector(&id), remove)),

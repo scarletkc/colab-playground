@@ -970,6 +970,7 @@ pub(super) const MESSAGES: Messages = &[
     (PLUGIN_OFF, "無効"),
     (PLUGIN_UNLOADABLE, "読み込み失敗"),
     (PLUGIN_ENABLED, "有効"),
+    (PLUGIN_ON_OVERVIEW, "概要に表示"),
     (PLUGIN_OPEN, "開く"),
     (
         PLUGIN_BUILT_IN_REMOVE,
@@ -1152,10 +1153,10 @@ pub(super) const MESSAGES: Messages = &[
         "推定値です。最終的な選択は、割り当てられた GPU に応じてランタイムが行います。",
     ),
     // Overview quick deploy
-    (DEPLOY_TITLE, "モデルをデプロイ"),
+    (DEPLOY_TITLE, "クイックデプロイ"),
     (
         DEPLOY_SUBTITLE,
-        "ランタイムの開始からモデルの提供までを一度に行います。",
+        "ランタイムの開始から準備までを一度に行います。",
     ),
     (DEPLOY_ACTION, "デプロイ"),
     // Fix round

@@ -404,11 +404,7 @@ pub const MOCK_UNADOPTED_EMAIL: &str = "pat@example.com";
 pub const UNLOADABLE_PLUGIN: &str = "image-studio";
 
 fn unloadable_plugin() -> PluginFailure {
-    let error = Manifest::parse(
-        "api = 2
-",
-    )
-    .expect_err("api 2 is newer than this build");
+    let error = Manifest::parse("api = 2\n").expect_err("api 2 is newer than this build");
     PluginFailure {
         folder: UNLOADABLE_PLUGIN.to_owned(),
         path: PathBuf::from(UNLOADABLE_PLUGIN),

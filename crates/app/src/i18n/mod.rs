@@ -458,6 +458,7 @@ catalog_keys! {
     PLUGIN_NEEDS_HF_TOKEN => "app.b2.plugin_needs_hf_token",
     PLUGIN_OFF => "app.b2.plugin_off",
     PLUGIN_OFFERS => "app.b2.plugin_offers",
+    PLUGIN_ON_OVERVIEW => "app.b2.plugin_on_overview",
     PLUGIN_OPEN => "app.b2.plugin_open",
     PLUGIN_RECEIVES => "app.b2.plugin_receives",
     PLUGIN_RECEIVES_NOTHING => "app.b2.plugin_receives_nothing",

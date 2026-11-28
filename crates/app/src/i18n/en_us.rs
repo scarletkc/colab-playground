@@ -895,6 +895,7 @@ pub(super) const MESSAGES: Messages = &[
     (PLUGIN_OFF, "Off"),
     (PLUGIN_UNLOADABLE, "Failed to load"),
     (PLUGIN_ENABLED, "Enabled"),
+    (PLUGIN_ON_OVERVIEW, "Show on Overview"),
     (PLUGIN_OPEN, "Open"),
     (
         PLUGIN_BUILT_IN_REMOVE,
@@ -1068,10 +1069,10 @@ pub(super) const MESSAGES: Messages = &[
         "An estimate; the runtime makes the final choice from the GPU it gets.",
     ),
     // Overview quick deploy
-    (DEPLOY_TITLE, "Deploy a model"),
+    (DEPLOY_TITLE, "Quick deploy"),
     (
         DEPLOY_SUBTITLE,
-        "Start a runtime and serve a model in one go.",
+        "Start a runtime and get it ready in one go.",
     ),
     (DEPLOY_ACTION, "Deploy"),
     // Fix round

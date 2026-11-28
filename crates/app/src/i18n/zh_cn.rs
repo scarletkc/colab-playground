@@ -742,6 +742,7 @@ pub(super) const MESSAGES: Messages = &[
     (PLUGIN_OFF, "已关闭"),
     (PLUGIN_UNLOADABLE, "加载失败"),
     (PLUGIN_ENABLED, "启用"),
+    (PLUGIN_ON_OVERVIEW, "显示在概览"),
     (PLUGIN_OPEN, "打开"),
     (PLUGIN_BUILT_IN_REMOVE, "内置插件可以关闭，但不能移除。"),
     (PLUGIN_VERSION_SHORT, "v{version}"),
@@ -897,8 +898,8 @@ pub(super) const MESSAGES: Messages = &[
         "这是估算；最终由运行时根据分到的 GPU 决定。",
     ),
     // 概览快速部署
-    (DEPLOY_TITLE, "部署模型"),
-    (DEPLOY_SUBTITLE, "一步启动运行时并提供模型服务。"),
+    (DEPLOY_TITLE, "快速部署"),
+    (DEPLOY_SUBTITLE, "一步启动运行时并准备就绪。"),
     (DEPLOY_ACTION, "部署"),
     // 修正轮
     (FMT_HOURS, "{h} 小时"),

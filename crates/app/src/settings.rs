@@ -10,6 +10,7 @@
 //! in the other copy stays.
 
 use std::{
+    collections::BTreeSet,
     ffi::OsString,
     fs, io,
     path::{Path, PathBuf},
@@ -167,6 +168,14 @@ pub struct Settings {
     /// together with `allow_cli_control`.
     #[serde(default, deserialize_with = "lenient")]
     pub allow_cli_changes: bool,
+    /// Plugins (by id) the user took off the Overview. Every other enabled plugin has a card
+    /// there, so one installed later shows without asking.
+    #[serde(
+        default,
+        deserialize_with = "lenient",
+        skip_serializing_if = "BTreeSet::is_empty"
+    )]
+    pub overview_hidden: BTreeSet<String>,
 }
 
 /// A switch that is on unless the user turned it off.

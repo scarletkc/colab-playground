@@ -118,7 +118,7 @@ and Settings → About → Backend must read "Colab CLI".
    "No attempt got the requested hardware (2 tries)." with nothing left running. Only then, if
    wanted, the real lottery: "NVIDIA A100", minimum 70 GB, 3 attempts; stop it as soon as it is
    ready.
-9. **llama.cpp plugin, small model.** Overview → "Deploy a model". Model repository
+9. **llama.cpp plugin, small model.** Overview → "Deploy" on "Deploy a GGUF model". Model repository
    `unsloth/Qwen3-0.6B-GGUF`, quantisation `auto`; change the hardware from A100 to T4, auto-stop
    30 minutes, keep "Stop the new session if this fails" on, "Deploy". Expect the stages "Check the
    GPU", "Choose a quantisation", "Download the model", "Start the server", "Warm up", then "Ready.

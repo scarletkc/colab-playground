@@ -121,8 +121,8 @@ pub fn deploy_selector(id: &str) -> String {
     format!("deploy {id}")
 }
 
-/// Built-in plugins as "Deploy a model" cards; one click opens the run form. Shown once the
-/// checklist is complete.
+/// The enabled plugins left on the Overview, as cards; one click opens the run form. Shown once
+/// the checklist is complete.
 fn quick_deploy(state: &AppState, handle: &Entity<AppState>, cx: &App) -> Option<AnyElement> {
     if !state.checklist().complete() {
         return None;
