@@ -203,7 +203,8 @@ or runs `colab`.
 3. Call the program you start the app with, followed by `ctl`: "Program to run", below the two
    switches, shows its path and copies it. The app does not add it to `PATH`, so in these
    examples `colab-playground` stands for that path (from source, use
-   `cargo run -p colab-playground -- ctl status`):
+   `cargo run -p colab-playground -- ctl status`). A path with spaces, as the macOS one has, goes
+   in double quotes, and in PowerShell after `&` (`& "C:\Users\Jane Doe\…" ctl status`):
 
    ```sh
    colab-playground ctl status      # what the app shows at a glance, and what it is busy with
