@@ -414,10 +414,18 @@ pub(super) const MESSAGES: Messages = &[
         SWITCH_SESSIONS,
         "次のランタイムは、自動で停止するまで実行と課金が続きます：",
     ),
+    (
+        SWITCH_SESSIONS_UNWATCHED,
+        "次のランタイムは、自動停止なしで実行と課金が続きます：",
+    ),
     (SWITCH_SESSION, "{name}（{hardware}）"),
     (
         SWITCH_SESSION_DEADLINE,
         "{name}（{hardware}）、残り {time} で自動停止",
+    ),
+    (
+        SWITCH_SESSION_DEADLINE_APP_ONLY,
+        "{name}（{hardware}）、残り {time} で自動停止（このアプリが開いている間のみ適用）",
     ),
     (SWITCH_CONFIRM, "アカウントを切り替え"),
     (SWITCH_DONE, "{email} を使用しています"),

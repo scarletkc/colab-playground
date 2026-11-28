@@ -333,10 +333,18 @@ pub(super) const MESSAGES: Messages = &[
         SWITCH_SESSIONS,
         "以下运行时会继续运行并计费，直到自动停止：",
     ),
+    (
+        SWITCH_SESSIONS_UNWATCHED,
+        "以下运行时会继续运行并计费，且不会自动停止：",
+    ),
     (SWITCH_SESSION, "{name}（{hardware}）"),
     (
         SWITCH_SESSION_DEADLINE,
         "{name}（{hardware}），{time}后自动停止",
+    ),
+    (
+        SWITCH_SESSION_DEADLINE_APP_ONLY,
+        "{name}（{hardware}），{time}后自动停止（仅在本应用打开时有效）",
     ),
     (SWITCH_CONFIRM, "切换账号"),
     (SWITCH_DONE, "已切换到 {email}"),

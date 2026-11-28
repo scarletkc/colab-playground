@@ -29,10 +29,20 @@ use crate::{
 };
 
 pub const SWITCH_NOTHING_SELECTOR: &str = "switch-nothing";
+pub const SWITCH_SESSIONS_WATCHED_SELECTOR: &str = "switch-sessions-watched";
+pub const SWITCH_SESSIONS_UNWATCHED_SELECTOR: &str = "switch-sessions-unwatched";
 pub const SWITCH_UNMANAGED_UNKNOWN_SELECTOR: &str = "switch-unmanaged-unknown";
 
 pub fn switch_session_selector(name: &str) -> String {
     format!("switch-session {name}")
+}
+
+pub fn switch_session_deadline_selector(name: &str) -> String {
+    format!("switch-session-deadline {name}")
+}
+
+pub fn switch_session_app_only_selector(name: &str) -> String {
+    format!("switch-session-app-only {name}")
 }
 
 pub fn render(
@@ -282,32 +292,68 @@ fn impact_list(impact: &SwitchImpact, now: SystemTime, state: &AppState, cx: &Ap
                 ))
             }));
     }
-    if !impact.sessions_left_running.is_empty() {
+    // Switching leaves the app open, so the guard keeps enforcing app-side limits on every account.
+    let mut watched = Vec::new();
+    let mut unwatched = Vec::new();
+    for session in &impact.sessions_left_running {
+        if let Some(deadline) = session.auto_stop_at() {
+            watched.push((session, deadline));
+        } else {
+            unwatched.push(session);
+        }
+    }
+    if !watched.is_empty() {
         list = list
-            .child(Paragraph::new(tr(cx, keys::SWITCH_SESSIONS)))
-            .children(impact.sessions_left_running.iter().map(|session| {
+            .child(tagged(
+                SWITCH_SESSIONS_WATCHED_SELECTOR,
+                Paragraph::new(tr(cx, keys::SWITCH_SESSIONS)),
+            ))
+            .children(watched.into_iter().map(|(session, deadline)| {
                 let hardware = tr(cx, format::accelerator_key(session.accelerator)).to_string();
-                let deadline = session
+                let left = deadline.duration_since(now).unwrap_or_default();
+                let armed = session
                     .watchdog
                     .as_ref()
-                    .and_then(|watchdog| watchdog.deadline)
-                    .and_then(|deadline| deadline.duration_since(now).ok());
-                let row = item(match deadline {
-                    Some(left) => tr_args(
-                        cx,
-                        keys::SWITCH_SESSION_DEADLINE,
-                        &[
-                            ("name", &session.name),
-                            ("hardware", &hardware),
-                            ("time", &format::duration(cx, left)),
-                        ],
-                    ),
-                    None => tr_args(
-                        cx,
-                        keys::SWITCH_SESSION,
-                        &[("name", &session.name), ("hardware", &hardware)],
-                    ),
-                });
+                    .and_then(|watchdog| watchdog.enforced_deadline())
+                    .is_some();
+                let key = if armed {
+                    keys::SWITCH_SESSION_DEADLINE
+                } else {
+                    keys::SWITCH_SESSION_DEADLINE_APP_ONLY
+                };
+                let row = item(tr_args(
+                    cx,
+                    key,
+                    &[
+                        ("name", &session.name),
+                        ("hardware", &hardware),
+                        ("time", &format::duration(cx, left)),
+                    ],
+                ));
+                let row = if armed {
+                    row
+                } else {
+                    tagged(switch_session_app_only_selector(&session.name), row)
+                };
+                tagged(
+                    switch_session_selector(&session.name),
+                    tagged(switch_session_deadline_selector(&session.name), row),
+                )
+            }));
+    }
+    if !unwatched.is_empty() {
+        list = list
+            .child(tagged(
+                SWITCH_SESSIONS_UNWATCHED_SELECTOR,
+                Paragraph::new(tr(cx, keys::SWITCH_SESSIONS_UNWATCHED)),
+            ))
+            .children(unwatched.into_iter().map(|session| {
+                let hardware = tr(cx, format::accelerator_key(session.accelerator)).to_string();
+                let row = item(tr_args(
+                    cx,
+                    keys::SWITCH_SESSION,
+                    &[("name", &session.name), ("hardware", &hardware)],
+                ));
                 tagged(switch_session_selector(&session.name), row)
             }));
     }

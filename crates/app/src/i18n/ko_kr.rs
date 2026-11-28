@@ -372,10 +372,18 @@ pub(super) const MESSAGES: Messages = &[
         SWITCH_SESSIONS,
         "다음 런타임은 자동으로 중지될 때까지 계속 실행되며 과금됩니다:",
     ),
+    (
+        SWITCH_SESSIONS_UNWATCHED,
+        "다음 런타임은 자동 중지 없이 계속 실행되며 과금됩니다:",
+    ),
     (SWITCH_SESSION, "{name} ({hardware})"),
     (
         SWITCH_SESSION_DEADLINE,
         "{name} ({hardware}), 자동 중지까지 {time}",
+    ),
+    (
+        SWITCH_SESSION_DEADLINE_APP_ONLY,
+        "{name} ({hardware}), 자동 중지까지 {time} (이 앱이 열려 있는 동안에만 적용)",
     ),
     (SWITCH_CONFIRM, "계정 전환"),
     (SWITCH_DONE, "이제 {email} 계정을 사용합니다"),
