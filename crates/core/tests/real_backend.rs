@@ -65,6 +65,15 @@ fn install(src: &Path, dst: &Path, exec: bool) {
     }
 }
 
+/// The fake CLI interpreter at `python`, with the modules it loads from its own folder.
+fn install_fake_python(fake: &Path, python: &Path) {
+    install(&fake.join("python_shim.py"), python, true);
+    let folder = python.parent().unwrap();
+    for module in ["fake_common.py", "fake_automation.py"] {
+        install(&fake.join(module), &folder.join(module), false);
+    }
+}
+
 fn fixture() -> Fixture {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_path_buf();
@@ -74,18 +83,8 @@ fn fixture() -> Fixture {
     let bin = root.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     install(&fake.join("colab.py"), &bin.join("colab"), true);
-    install(&fake.join("python_shim.py"), &bin.join("fake-python"), true);
+    install_fake_python(&fake, &bin.join("fake-python"));
     install(&fake.join("ssh.py"), &bin.join("ssh"), true);
-    install(
-        &fake.join("fake_common.py"),
-        &bin.join("fake_common.py"),
-        false,
-    );
-    install(
-        &fake.join("fake_automation.py"),
-        &bin.join("fake_automation.py"),
-        false,
-    );
     let state = root.join("state");
     let home = root.join("home");
     std::fs::create_dir_all(&state).unwrap();
@@ -2390,12 +2389,7 @@ fn probe_uses_configured_colab_path_instead_of_path_binary() {
         .join("tests")
         .join("fake");
     let custom_py = custom.join("python");
-    install(&fake.join("python_shim.py"), &custom_py, true);
-    install(
-        &fake.join("fake_common.py"),
-        &custom.join("fake_common.py"),
-        false,
-    );
+    install_fake_python(&fake, &custom_py);
     let custom_colab = custom.join("colab");
     std::fs::write(
         &custom_colab,
