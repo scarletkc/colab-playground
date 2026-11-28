@@ -227,7 +227,10 @@ then whenever `/slots` reports a request in progress.
   and so are input values (types, options, ranges, `owner/name` repo ids).
 - **No privileges.** A plugin gets no access to the user's accounts, tokens or
   files. It only receives the inputs the user typed and the capabilities it
-  declared; for `drive`, the user's Google Drive, only when the user connects it.
+  declared. Google Drive is the exception: once the user connects it for a run
+  of a plugin that declares `drive`, every process on that runtime can read,
+  change and delete it until the runtime stops, later runs of plugins that do
+  not declare `drive` included ([Google Drive](#google-drive)).
 
 ## Testing a plugin
 
