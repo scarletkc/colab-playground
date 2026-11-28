@@ -757,6 +757,7 @@ pub(super) const MESSAGES: Messages = &[
     (PLUGINS_LOADING, "正在載入外掛程式…"),
     (PLUGIN_BUILT_IN, "內建"),
     (PLUGIN_OFF, "已關閉"),
+    (PLUGIN_UNLOADABLE, "載入失敗"),
     (PLUGIN_ENABLED, "啟用"),
     (PLUGIN_ON_OVERVIEW, "顯示在總覽"),
     (PLUGIN_OPEN, "開啟"),

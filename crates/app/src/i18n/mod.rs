@@ -471,6 +471,7 @@ catalog_keys! {
     PLUGIN_SCRIPT_VALUE => "app.b2.plugin_script_value",
     PLUGIN_SOURCE => "app.b2.plugin_source",
     PLUGIN_SOURCE_PLACEHOLDER => "app.b2.plugin_source_placeholder",
+    PLUGIN_UNLOADABLE => "app.b2.plugin_unloadable",
     PLUGIN_VERSION => "app.b2.plugin_version",
     PLUGIN_VERSION_SHORT => "app.b2.plugin_version_short",
     PROVISION_READY_TOAST => "app.b2.provision_ready_toast",

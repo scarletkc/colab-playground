@@ -1,6 +1,6 @@
 //! Plugins over the headless mock: quick deploy to a ready endpoint, a run failing at a stage,
-//! installing from a fixture folder (with the confirmation), choosing what the Overview shows,
-//! and secrets staying secret.
+//! installing from a fixture folder (with the confirmation), a folder that fails to load,
+//! choosing what the Overview shows, and secrets staying secret.
 
 use std::path::PathBuf;
 
@@ -16,8 +16,9 @@ use colab_playground::{
         pages::{
             overview::{INSTALL_SELECTOR, QUICK_DEPLOY_SELECTOR, deploy_selector},
             plugins::{
-                ENDPOINT_SELECTOR, INSTALL_CHECK, RUN_START, RUN_STOP, hf_result_selector,
-                overview_selector, plugin_selector,
+                ENDPOINT_SELECTOR, INSTALL_CHECK, RUN_START, RUN_STOP, check_failed_selector,
+                failed_selector, hf_result_selector, overview_selector, plugin_selector,
+                remove_failed_selector,
             },
         },
     },
@@ -25,7 +26,7 @@ use colab_playground::{
 use colab_playground_core::{
     CancelToken, ErrorKind,
     backend::{Backend, PluginRunEvent, RuntimeRef},
-    mock::{MockFailures, MockRuntime, MockScenario},
+    mock::{MockFailures, MockRuntime, MockScenario, UNLOADABLE_PLUGIN},
     sessions::Accelerator,
     tunnel::TunnelState,
 };
@@ -310,13 +311,7 @@ fn a_plugin_from_a_folder_is_installed_after_confirming(cx: &mut TestAppContext)
 fn the_overview_shows_the_enabled_plugins_left_on_it(cx: &mut TestAppContext) {
     let fixture = tempfile::tempdir().expect("a fixture folder");
     std::fs::write(fixture.path().join("plugin.toml"), FIXTURE_MANIFEST).expect("manifest");
-    std::fs::write(
-        fixture.path().join("run.sh"),
-        "#!/bin/bash
-echo hello
-",
-    )
-    .expect("script");
+    std::fs::write(fixture.path().join("run.sh"), "#!/bin/bash\necho hello\n").expect("script");
     let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
     app.click(Route::Plugins.nav_selector());
     let folder = fixture.path().display().to_string();
@@ -353,6 +348,87 @@ echo hello
     app.click(&overview_selector("hello-web"));
     app.click(Route::Overview.nav_selector());
     assert!(app.shown(&deploy_selector("hello-web")));
+}
+
+fn unloadable() -> MockFailures {
+    MockFailures {
+        plugin_unloadable: true,
+        ..MockFailures::default()
+    }
+}
+
+#[gpui::test]
+fn a_plugin_folder_that_fails_to_load_says_why_and_can_be_removed(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(
+        cx,
+        Options {
+            failures: unloadable(),
+            ..Options::default()
+        },
+    );
+    app.click(Route::Plugins.nav_selector());
+    assert!(app.shown(&failed_selector(UNLOADABLE_PLUGIN)));
+    let details = app.read(|state, _| {
+        state
+            .failed_plugins()
+            .iter()
+            .map(|failure| failure.error.detail.clone())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(
+        details,
+        ["api: unsupported api version"],
+        "the rule it broke"
+    );
+
+    app.click(&remove_failed_selector(UNLOADABLE_PLUGIN));
+    app.click(colab_playground::ui::overlays::REMOVE_CONFIRM);
+    assert!(app.read(|state, _| state.overlay().is_none()));
+    assert!(!app.shown(&failed_selector(UNLOADABLE_PLUGIN)));
+    let removed = app.cx.update(|_, cx| {
+        colab_playground::i18n::tr_args(cx, keys::PLUGIN_REMOVED, &[("name", UNLOADABLE_PLUGIN)])
+    });
+    assert!(app.toasts().contains(&removed), "{:?}", app.toasts());
+    assert!(
+        app.shown(&plugin_selector("llama-cpp")),
+        "the plugins that load stay"
+    );
+}
+
+#[gpui::test]
+fn a_read_asked_for_while_one_runs_follows_it(cx: &mut TestAppContext) {
+    let mut app = TestApp::new(cx);
+    let before = app.mock.plugin_listings();
+    app.update(|state, cx| {
+        state.refresh_plugins(cx);
+        state.refresh_plugins(cx);
+        state.refresh_plugins(cx);
+    });
+    app.settle();
+    assert_eq!(
+        app.mock.plugin_listings() - before,
+        2,
+        "one more read after the running one, however many were asked for meanwhile"
+    );
+}
+
+#[gpui::test]
+fn the_plugins_folder_is_read_again_when_plugins_opens_and_on_check_again(cx: &mut TestAppContext) {
+    let mut app = TestApp::new(cx);
+    app.click(Route::Plugins.nav_selector());
+    assert!(!app.shown(&failed_selector(UNLOADABLE_PLUGIN)));
+
+    // A folder put there while another page is open shows once Plugins opens.
+    app.click(Route::Overview.nav_selector());
+    app.set_failures(unloadable());
+    app.click(Route::Plugins.nav_selector());
+    assert!(app.shown(&failed_selector(UNLOADABLE_PLUGIN)));
+
+    // Fixed while the page is open, it goes on "Check again".
+    app.set_failures(MockFailures::default());
+    assert!(app.shown(&failed_selector(UNLOADABLE_PLUGIN)));
+    app.click(&check_failed_selector(UNLOADABLE_PLUGIN));
+    assert!(!app.shown(&failed_selector(UNLOADABLE_PLUGIN)));
 }
 
 /// The copies the mock backend has staged of the plugin `id`. Tests share its staging folder,

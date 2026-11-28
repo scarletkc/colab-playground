@@ -18,7 +18,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::guard::Decision;
 use crate::hf::HfModel;
 use crate::host::{Line, ProbeReport};
-use crate::plugins::{InputValue, PluginInfo, PluginPreview, ResolvedEndpoint};
+use crate::plugins::{InputValue, PluginInfo, PluginList, PluginPreview, ResolvedEndpoint};
 use crate::provision::{ProvisionEvent, ProvisionOutcome, ProvisionSpec};
 use crate::quant::GgufListing;
 use crate::sessions::{Accelerator, HardwareRate, StopReason, TrackedSession, WatchdogInfo};
@@ -414,7 +414,9 @@ pub trait Backend: Send + Sync {
     fn tunnels(&self) -> Vec<TunnelInfo>;
 
     // ---- plugins
-    fn plugins(&self) -> Vec<PluginInfo>;
+    /// Reads the plugins directory again and lists what it holds, the folders that failed to
+    /// load included.
+    fn plugins(&self) -> Result<PluginList>;
     /// A run request pre-filled from the manifest and [`Defaults`] (fresh
     /// session with a generated name).
     fn plugin_run_template(&self, plugin: &str) -> Result<PluginRunSpec>;
@@ -429,6 +431,8 @@ pub trait Backend: Send + Sync {
     fn set_plugin_enabled(&self, id: &str, enabled: bool) -> Result<()>;
     /// Removes a user plugin.
     fn remove_plugin(&self, id: &str) -> Result<()>;
+    /// Deletes a folder of the plugins directory that failed to load.
+    fn remove_failed_plugin(&self, folder: &str) -> Result<()>;
     /// Runs a plugin until it reports `ready` (or fails / is cancelled).
     fn run_plugin(
         &self,

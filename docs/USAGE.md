@@ -140,8 +140,9 @@ cargo run -p colab-playground -- --mock-scenario signed-out --mock-fail cli-miss
   an auto-stop again after cancelling it cannot put the stop back on the runtime), `runtimes-fail`
   (runtimes cannot be listed), `update-available` and `update-check-fails` (the update check),
   `update-unsupported` (this copy cannot update itself), `update-download-fails`,
-  `update-unverified` (the download fails its check) and `update-install-fails` (installing an
-  update; add `update-available`).
+  `update-unverified` (the download fails its check), `update-install-fails` (installing an
+  update; add `update-available`) and `plugin-unloadable` (the plugins folder holds a plugin made
+  for a newer version of the app).
 - Both accept `--flag value` or `--flag=value` and apply only when the mock is selected (add
   `--mock` to a release build of your own). A simulated A100 has 40 GB first and 80 GB on the next
   attempt: set a minimum GPU memory of 70 GB to watch the retry. Git plugin installs are not
