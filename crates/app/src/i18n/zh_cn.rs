@@ -82,12 +82,17 @@ pub(super) const MESSAGES: Messages = &[
     (SETTINGS_CONTROL_TITLE, "允许通过命令行控制"),
     (
         SETTINGS_CONTROL_DESCRIPTION,
-        "开启后，你在这台电脑上运行的程序可以用 colab-playground ctl 命令读取账号、运行时和用量，内容与此窗口显示的一致。只开启这一项时，它们无法更改任何内容。",
+        "开启后，你在这台电脑上运行的程序可以用本应用的 ctl 命令读取账号、运行时和用量，内容与此窗口显示的一致。只开启这一项时，它们无法更改任何内容。",
     ),
     (SETTINGS_CONTROL_CHANGES_TITLE, "同时允许更改"),
     (
         SETTINGS_CONTROL_CHANGES_DESCRIPTION,
         "开启后，这些程序可以在当前账号上启动运行时、延长其自动停止时间、转发其端口，也可以停止任何已保存账号上的运行时。运行时在停止前会一直消耗计算单元。你的默认值和限制依然适用，且只能在此窗口中更改。",
+    ),
+    (SETTINGS_CONTROL_PROGRAM_TITLE, "要运行的程序"),
+    (
+        SETTINGS_CONTROL_PROGRAM_DESCRIPTION,
+        "脚本和 AI 智能体运行这个文件，后接 ctl 和一个命令，例如 ctl status。移动应用后，这个路径会改变。",
     ),
     (
         CONTROL_OFF,

@@ -83,6 +83,8 @@ catalog_keys! {
     SETTINGS_CONTROL_DESCRIPTION => "app.settings.control.description",
     SETTINGS_CONTROL_CHANGES_TITLE => "app.settings.control.changes.title",
     SETTINGS_CONTROL_CHANGES_DESCRIPTION => "app.settings.control.changes.description",
+    SETTINGS_CONTROL_PROGRAM_TITLE => "app.settings.control.program.title",
+    SETTINGS_CONTROL_PROGRAM_DESCRIPTION => "app.settings.control.program.description",
     CONTROL_OFF => "app.control.off",
     CONTROL_CHANGES_OFF => "app.control.changes_off",
     CTL_STARTING_TOAST => "app.control.starting_toast",

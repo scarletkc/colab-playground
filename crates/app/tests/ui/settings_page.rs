@@ -6,7 +6,7 @@ use colab_playground::{
         metrics::WINDOW_MIN_SIZE,
         pages::settings::{
             APPEARANCE_SELECTOR, FILE_PATH_SELECTOR, FILE_SELECTOR, LANGUAGE_SELECTOR,
-            OPEN_FOLDER_SELECTOR,
+            OPEN_FOLDER_SELECTOR, PROGRAM_COPY_SELECTOR, PROGRAM_PATH_SELECTOR, PROGRAM_SELECTOR,
         },
         root::PAGE_SELECTOR,
     },
@@ -280,6 +280,31 @@ fn the_settings_file_path_fits_the_row_at_the_minimum_window_size(cx: &mut TestA
             "some of the path still shows"
         );
     }
+}
+
+#[gpui::test]
+fn the_command_line_section_copies_the_program_to_run(cx: &mut TestAppContext) {
+    let mut app = open_settings(cx, Options::default());
+    app.resize(WINDOW_MIN_SIZE);
+    let page = app.bounds(PAGE_SELECTOR).expect("the page area");
+    let control = app.bounds(PROGRAM_SELECTOR).expect("the program control");
+    let path = app.bounds(PROGRAM_PATH_SELECTOR).expect("the path");
+    let copy = app.bounds(PROGRAM_COPY_SELECTOR).expect("the copy button");
+    assert!(
+        control.right() <= page.right(),
+        "the control ends at {:?}, past the page's {:?}",
+        control.right(),
+        page.right()
+    );
+    assert!(copy.right() <= control.right() && copy.left() > path.right());
+
+    app.click(PROGRAM_COPY_SELECTOR);
+    let program = colab_playground_core::host::current_program().expect("this test's program");
+    assert_eq!(
+        app.cx.read_from_clipboard().and_then(|item| item.text()),
+        Some(program.display().to_string()),
+        "the whole path, however much of it shows"
+    );
 }
 
 #[gpui::test]

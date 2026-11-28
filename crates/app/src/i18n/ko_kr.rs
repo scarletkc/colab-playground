@@ -88,12 +88,17 @@ pub(super) const MESSAGES: Messages = &[
     (SETTINGS_CONTROL_TITLE, "명령줄에서 제어 허용"),
     (
         SETTINGS_CONTROL_DESCRIPTION,
-        "켜면 이 컴퓨터에서 직접 실행하는 프로그램이 colab-playground ctl 명령으로 계정, 런타임, 사용량을 이 창에 표시된 그대로 읽을 수 있습니다. 이것만으로는 아무것도 변경할 수 없습니다.",
+        "켜면 이 컴퓨터에서 직접 실행하는 프로그램이 이 앱의 ctl 명령으로 계정, 런타임, 사용량을 이 창에 표시된 그대로 읽을 수 있습니다. 이것만으로는 아무것도 변경할 수 없습니다.",
     ),
     (SETTINGS_CONTROL_CHANGES_TITLE, "변경도 허용"),
     (
         SETTINGS_CONTROL_CHANGES_DESCRIPTION,
         "켜면 해당 프로그램이 활성 계정에서 런타임을 시작하고 자동 중지를 연장하며 포트를 포워딩할 수 있고, 저장된 모든 계정의 런타임을 중지할 수 있습니다. 런타임은 중지될 때까지 컴퓨팅 단위를 사용합니다. 기본값과 한도는 그대로 적용되며, 이를 변경할 수 있는 곳은 이 창뿐입니다.",
+    ),
+    (SETTINGS_CONTROL_PROGRAM_TITLE, "실행할 프로그램"),
+    (
+        SETTINGS_CONTROL_PROGRAM_DESCRIPTION,
+        "스크립트와 AI 에이전트는 이 파일에 ctl과 명령을 붙여 실행합니다(예: ctl status). 앱을 옮기면 이 경로도 바뀝니다.",
     ),
     (
         CONTROL_OFF,

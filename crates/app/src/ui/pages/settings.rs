@@ -12,7 +12,7 @@ use ely_gpui_component::{
     typography::{Caption, MiddleEllipsis},
 };
 use gpui::{
-    App, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
+    App, Div, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, prelude::FluentBuilder,
 };
 
@@ -24,7 +24,7 @@ use crate::{
     route::Route,
     settings::LanguagePref,
     state::{AppState, SettingsFocus, appearance_pref, ely_appearance},
-    ui::{Inputs, overlays::unsupported_reason, tagged},
+    ui::{Inputs, metrics, overlays::unsupported_reason, tagged},
 };
 
 pub const LANGUAGE_SELECTOR: &str = "settings-language";
@@ -71,11 +71,17 @@ pub fn render(state: &AppState, handle: &Entity<AppState>, inputs: &Inputs, cx: 
 
 pub const CONTROL_SELECTOR: &str = "settings-cli-control";
 pub const CONTROL_CHANGES_SELECTOR: &str = "settings-cli-changes";
+/// Selector around the program row's control (path and copy).
+pub const PROGRAM_SELECTOR: &str = "settings-cli-program";
+pub const PROGRAM_PATH_SELECTOR: &str = "settings-cli-program-path";
+pub const PROGRAM_COPY_SELECTOR: &str = "settings-cli-program-copy";
 
 /// Whether `colab-playground ctl` may read what the app shows, and whether it may also start
-/// and stop runtimes: a second step, off while reading is.
+/// and stop runtimes: a second step, off while reading is. Then the file to run it with, since
+/// nothing puts a `colab-playground` command on `PATH`.
 fn control(state: &AppState, handle: &Entity<AppState>, cx: &App) -> impl IntoElement {
     let (toggle, toggle_changes) = (handle.clone(), handle.clone());
+    let program = colab_playground_core::host::current_program().ok();
     SettingsSection::new(tr(cx, keys::SETTINGS_CONTROL_SECTION_TITLE))
         .description(tr(cx, keys::SETTINGS_CONTROL_SECTION_DESCRIPTION))
         .row(
@@ -103,6 +109,24 @@ fn control(state: &AppState, handle: &Entity<AppState>, cx: &App) -> impl IntoEl
                         }),
                 )),
         )
+        .when_some(program, |section, program| {
+            section.row(
+                SettingsRow::new(tr(cx, keys::SETTINGS_CONTROL_PROGRAM_TITLE))
+                    .description(tr(cx, keys::SETTINGS_CONTROL_PROGRAM_DESCRIPTION))
+                    .control(tagged(
+                        PROGRAM_SELECTOR,
+                        path_with_copy(
+                            PROGRAM_PATH_SELECTOR,
+                            PROGRAM_COPY_SELECTOR,
+                            program.display().to_string(),
+                            cx,
+                        )
+                        // As wide as the other path fields in Settings, so the description keeps
+                        // room beside a path as long as a download's.
+                        .max_w(metrics::path_field_width(cx.theme())),
+                    )),
+            )
+        })
 }
 
 fn general(state: &AppState, handle: &Entity<AppState>, cx: &App) -> impl IntoElement {
@@ -180,33 +204,14 @@ fn about(state: &AppState, handle: &Entity<AppState>, cx: &App) -> impl IntoElem
         .row(SettingsRow::new(tr(cx, keys::SETTINGS_FILE_TITLE)).control(file))
 }
 
-/// The settings file's path cut in the middle to the room there is (whole on hover), with
-/// copy and "Open folder". It drops under the row's title when the row is narrow.
+/// The settings file's path with copy and "Open folder". It drops under the row's title when the
+/// row is narrow.
 fn settings_file(path: String, handle: &Entity<AppState>, cx: &App) -> impl IntoElement {
-    let theme = cx.theme();
     let open = handle.clone();
     tagged(
         FILE_SELECTOR,
-        div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .max_w(theme.container_width(ContainerSize::Sm))
-            .child(
-                div()
-                    .id(FILE_PATH_SELECTOR)
-                    .debug_selector(|| FILE_PATH_SELECTOR.into())
-                    .min_w_0()
-                    .font_family(theme.mono_family.clone())
-                    .text_size(theme.text_size(TextSize::Sm))
-                    .tooltip(Tooltip::text(path.clone()))
-                    .child(MiddleEllipsis::new(path.clone())),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .child(CopyButton::new("settings-file-copy", path)),
-            )
+        path_with_copy(FILE_PATH_SELECTOR, "settings-file-copy", path, cx)
+            .max_w(cx.theme().container_width(ContainerSize::Sm))
             .child(
                 tagged(
                     OPEN_FOLDER_SELECTOR,
@@ -221,6 +226,32 @@ fn settings_file(path: String, handle: &Entity<AppState>, cx: &App) -> impl Into
                 .flex_none(),
             ),
     )
+}
+
+/// A path cut in the middle to the room there is (whole on hover), then a button that copies
+/// all of it. The caller caps its width.
+fn path_with_copy(
+    path_selector: &'static str,
+    copy_selector: &'static str,
+    path: String,
+    cx: &App,
+) -> Div {
+    let theme = cx.theme();
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .child(
+            div()
+                .id(path_selector)
+                .debug_selector(|| path_selector.into())
+                .min_w_0()
+                .font_family(theme.mono_family.clone())
+                .text_size(theme.text_size(TextSize::Sm))
+                .tooltip(Tooltip::text(path.clone()))
+                .child(MiddleEllipsis::new(path.clone())),
+        )
+        .child(tagged(copy_selector, CopyButton::new(copy_selector, path)).flex_none())
 }
 
 pub const UPDATE_CHECK_SELECTOR: &str = "update-check";

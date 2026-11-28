@@ -100,12 +100,17 @@ pub(super) const MESSAGES: Messages = &[
     (SETTINGS_CONTROL_TITLE, "コマンド ラインからの操作を許可"),
     (
         SETTINGS_CONTROL_DESCRIPTION,
-        "オンにすると、このコンピューターであなたが実行するプログラムが colab-playground ctl コマンドで、アカウント、ランタイム、使用量をこのウィンドウの表示どおりに読み取れます。これだけでは何も変更できません。",
+        "オンにすると、このコンピューターであなたが実行するプログラムがこのアプリの ctl コマンドで、アカウント、ランタイム、使用量をこのウィンドウの表示どおりに読み取れます。これだけでは何も変更できません。",
     ),
     (SETTINGS_CONTROL_CHANGES_TITLE, "変更も許可"),
     (
         SETTINGS_CONTROL_CHANGES_DESCRIPTION,
         "オンにすると、それらのプログラムが使用中のアカウントでランタイムを開始し、その自動停止を延長し、ポートを転送できるほか、保存済みのどのアカウントのランタイムも停止できます。ランタイムは停止するまでコンピューティング ユニットを消費します。既定値と上限はそのまま適用され、変更できるのはこのウィンドウだけです。",
+    ),
+    (SETTINGS_CONTROL_PROGRAM_TITLE, "実行するプログラム"),
+    (
+        SETTINGS_CONTROL_PROGRAM_DESCRIPTION,
+        "スクリプトや AI エージェントは、このファイルに ctl とコマンドを付けて実行します（例：ctl status）。アプリを移動すると、このパスも変わります。",
     ),
     (
         CONTROL_OFF,

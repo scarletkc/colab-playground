@@ -91,7 +91,8 @@ implementation of the `Backend` trait beside the CLI one and the mock.
   Windows, a DMG for macOS, a `.deb`, an AppImage or a Flatpak for Linux. The portable files stay
   ([RELEASING.md](RELEASING.md#the-downloads)). Each format needs its own step in `package.yml`
   (for example WiX for an MSI, `hdiutil` for a DMG) and a decision on what uninstalling does with
-  the settings and data.
+  the settings and data. An installer would also be the place to put a `colab-playground` command
+  on `PATH` for [`ctl`](USAGE.md#control-from-the-command-line).
 - **Code signing and notarisation** are deliberately not planned for now, so Windows SmartScreen and
   macOS Gatekeeper ask users to confirm the first launch ([USAGE.md](USAGE.md#install-a-release)).
   Windows would need an Authenticode certificate or a signing service and a `signtool` step; macOS
