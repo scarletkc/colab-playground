@@ -56,6 +56,8 @@ pub fn failed_op(folder: &str) -> Op {
 pub struct PluginsState {
     pub(crate) list: Load<Vec<PluginInfo>>,
     pub(crate) failed: Vec<PluginFailure>,
+    /// A read was asked for while one ran, which may have read the folder before a change.
+    pub(crate) read_again: bool,
     pub(crate) hf_token: Load<bool>,
 }
 
@@ -108,6 +110,10 @@ impl AppState {
 
     /// Reads the plugins directory again, so what was changed there shows without a restart.
     pub fn refresh_plugins(&mut self, cx: &mut Context<Self>) {
+        if self.ops.is_running(Op::Plugins) {
+            self.plugins.read_again = true;
+            return;
+        }
         self.plugins.list.begin();
         self.run_backend(
             Op::Plugins,
@@ -123,6 +129,9 @@ impl AppState {
                         state.plugins.list = Load::Failed(error);
                         state.plugins.failed.clear();
                     }
+                }
+                if std::mem::take(&mut state.plugins.read_again) {
+                    state.refresh_plugins(cx);
                 }
                 cx.notify();
             },

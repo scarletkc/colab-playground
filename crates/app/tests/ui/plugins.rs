@@ -352,6 +352,23 @@ fn a_plugin_folder_that_fails_to_load_says_why_and_can_be_removed(cx: &mut TestA
 }
 
 #[gpui::test]
+fn a_read_asked_for_while_one_runs_follows_it(cx: &mut TestAppContext) {
+    let mut app = TestApp::new(cx);
+    let before = app.mock.plugin_listings();
+    app.update(|state, cx| {
+        state.refresh_plugins(cx);
+        state.refresh_plugins(cx);
+        state.refresh_plugins(cx);
+    });
+    app.settle();
+    assert_eq!(
+        app.mock.plugin_listings() - before,
+        2,
+        "one more read after the running one, however many were asked for meanwhile"
+    );
+}
+
+#[gpui::test]
 fn the_plugins_folder_is_read_again_when_plugins_opens_and_on_check_again(cx: &mut TestAppContext) {
     let mut app = TestApp::new(cx);
     app.click(Route::Plugins.nav_selector());

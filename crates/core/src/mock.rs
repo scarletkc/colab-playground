@@ -14,7 +14,7 @@
 //! [`MockFailures`] injects each failure the UI must handle.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
@@ -392,6 +392,7 @@ struct World {
     login_live: bool,
     update_checks: u32,
     runtime_listings: u32,
+    plugin_listings: u32,
     update_installs: u32,
     update_relaunches: u32,
 }
@@ -410,6 +411,7 @@ fn unloadable_plugin() -> PluginFailure {
     .expect_err("api 2 is newer than this build");
     PluginFailure {
         folder: UNLOADABLE_PLUGIN.to_owned(),
+        path: PathBuf::from(UNLOADABLE_PLUGIN),
         error,
     }
 }
@@ -730,6 +732,7 @@ impl MockBackend {
             login_live: false,
             update_checks: 0,
             runtime_listings: 0,
+            plugin_listings: 0,
             update_installs: 0,
             update_relaunches: 0,
         };
@@ -795,6 +798,11 @@ impl MockBackend {
     /// How many times the runtimes were listed for the app (`Backend::runtimes`).
     pub fn runtime_listings(&self) -> u32 {
         self.w().runtime_listings
+    }
+
+    /// How many times the plugins were listed for the app (`Backend::plugins`).
+    pub fn plugin_listings(&self) -> u32 {
+        self.w().plugin_listings
     }
 
     /// How many simulated updates completed (nothing is ever downloaded or replaced).
@@ -1822,7 +1830,9 @@ impl Backend for MockBackend {
     }
 
     fn plugins(&self) -> Result<PluginList> {
-        self.w().plugins.refresh()
+        let mut w = self.w();
+        w.plugin_listings += 1;
+        w.plugins.refresh()
     }
 
     fn plugin_run_template(&self, plugin: &str) -> Result<PluginRunSpec> {

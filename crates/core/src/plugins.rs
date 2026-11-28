@@ -692,6 +692,8 @@ pub struct PluginInfo {
 pub struct PluginFailure {
     /// The folder's name.
     pub folder: String,
+    /// Where the folder is: a name that is not UTF-8 lost bytes in `folder`.
+    pub(crate) path: PathBuf,
     pub error: Error,
 }
 
@@ -943,14 +945,24 @@ impl PluginStore {
         {
             store.flags = serde_json::from_str(&text).unwrap_or_default();
         }
-        if let Some(dir) = &store.dir
-            && let Ok(entries) = std::fs::read_dir(dir)
-        {
-            let mut dirs: Vec<PathBuf> = entries
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| p.is_dir())
-                .collect();
+        if let Some(dir) = &store.dir {
+            // A folder that cannot be read is an error, not an empty one: a refresh would
+            // otherwise drop every user plugin. The folder is made by the first install.
+            let unreadable = |e: std::io::Error| {
+                Error::new(ErrorKind::Io).detail(format!("{}: {e}", dir.display()))
+            };
+            let entries = match std::fs::read_dir(dir) {
+                Ok(entries) => Some(entries),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(unreadable(e)),
+            };
+            let mut dirs: Vec<PathBuf> = Vec::new();
+            for entry in entries.into_iter().flatten() {
+                let path = entry.map_err(unreadable)?.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                }
+            }
             dirs.sort();
             for d in dirs {
                 let folder = d
@@ -977,7 +989,11 @@ impl PluginStore {
                         script,
                         source: PluginSource::User,
                     }),
-                    Err(error) => store.failures.push(PluginFailure { folder, error }),
+                    Err(error) => store.failures.push(PluginFailure {
+                        folder,
+                        path: d,
+                        error,
+                    }),
                 }
             }
         }
@@ -997,15 +1013,15 @@ impl PluginStore {
         })
     }
 
-    /// Deletes a folder that the last read could not load. Only such a folder: the name comes
-    /// back from the UI. Its enabled flag stays, since the folder may be named after a bundled
-    /// plugin, whose flag it is.
+    /// Deletes a folder that the last read could not load, at the path that read found. Only
+    /// such a folder: the name comes back from the UI. Its enabled flag stays, since the folder
+    /// may be named after a bundled plugin, whose flag it is.
     pub fn remove_failed(&mut self, folder: &str) -> Result<()> {
         let Some(at) = self.failures.iter().position(|f| f.folder == folder) else {
             return Err(Error::new(ErrorKind::PluginNotFound).with("plugin", folder));
         };
-        if let Some(dir) = &self.dir {
-            match std::fs::remove_dir_all(dir.join(folder)) {
+        if self.dir.is_some() {
+            match std::fs::remove_dir_all(&self.failures[at].path) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
                 _ => {}
             }
@@ -1104,6 +1120,9 @@ impl PluginStore {
             script,
             source: PluginSource::User,
         });
+        // The install replaced the folder of that name, so a failure read from it is gone, and
+        // removing it as one would delete what was just installed.
+        self.failures.retain(|f| f.folder != manifest.id);
         self.flags.remove(&manifest.id);
         self.save_flags()?;
         Ok(PluginInfo {
@@ -1519,6 +1538,51 @@ kind = "openai"
         assert!(store.get("demo").is_none());
         let folders: Vec<&str> = listed.failed.iter().map(|f| f.folder.as_str()).collect();
         assert_eq!(folders, ["demo"]);
+    }
+
+    #[test]
+    fn an_unreadable_plugins_directory_is_an_error_and_a_refresh_keeps_the_last_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugins = tmp.path().join("plugins");
+        let flags = tmp.path().join("plugins.json");
+        put_plugin(&plugins, "demo", MINIMAL);
+        let mut store = PluginStore::load(Some(&plugins), Some(&flags)).unwrap();
+        assert!(store.get("demo").is_some());
+
+        // Something that is not a folder stands where the plugins folder was.
+        std::fs::remove_dir_all(&plugins).unwrap();
+        std::fs::write(&plugins, "not a folder").unwrap();
+        let error = store
+            .refresh()
+            .expect_err("an unreadable folder is not an empty one");
+        assert_eq!(error.kind, ErrorKind::Io);
+        assert!(store.get("demo").is_some(), "the last read is kept");
+        assert!(PluginStore::load(Some(&plugins), Some(&flags)).is_err());
+
+        // A folder that does not exist yet holds no plugins, which is no error.
+        std::fs::remove_file(&plugins).unwrap();
+        store.refresh().unwrap();
+        assert!(store.get("demo").is_none());
+    }
+
+    #[test]
+    fn installing_over_a_folder_that_failed_to_load_clears_its_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (src, staging, mut store) = folder_and_store(tmp.path(), MINIMAL);
+        let plugins = tmp.path().join("data").join("plugins");
+        put_plugin(&plugins, "demo", &MINIMAL.replace("api = 1", "api = 2"));
+        assert_eq!(store.refresh().unwrap().failed.len(), 1);
+
+        let preview = store
+            .inspect_folder(&src, &staging, folder_origin(&src))
+            .unwrap();
+        store.install(&preview).unwrap();
+        assert!(store.get("demo").is_some());
+        assert!(
+            store.remove_failed("demo").is_err(),
+            "what was just installed is not deleted as a failure"
+        );
+        assert!(plugins.join("demo").join("plugin.toml").exists());
     }
 
     #[test]
