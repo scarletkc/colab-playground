@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.6.0](https://github.com/scarletkc/colab-playground/compare/v0.5.0...v0.6.0) (2026-11-28)
+
+
+### Added
+
+* **app:** add a GitHub Sponsors link to Settings → About ([#116](https://github.com/scarletkc/colab-playground/issues/116)) ([09d4a4c](https://github.com/scarletkc/colab-playground/commit/09d4a4c21856e0958f82da2a3439073c80f592ee))
+* **app:** choose which plugins the Overview shows, installed ones included ([#122](https://github.com/scarletkc/colab-playground/issues/122)) ([d4297de](https://github.com/scarletkc/colab-playground/commit/d4297de4c38d657ca76298ec730f61a49d277368))
+* **app:** extend auto-stops and forward ports from the command line ([#117](https://github.com/scarletkc/colab-playground/issues/117)) ([208ddb5](https://github.com/scarletkc/colab-playground/commit/208ddb54f9c50d8ee69cfcfe9b831206c3e5a336))
+* **app:** read the running app's accounts, runtimes and usage from the command line ([#108](https://github.com/scarletkc/colab-playground/issues/108)) ([c18197b](https://github.com/scarletkc/colab-playground/commit/c18197b31400639084f79c5593d333758f0abd2b))
+* **app:** start and stop runtimes from the command line ([#115](https://github.com/scarletkc/colab-playground/issues/115)) ([0401608](https://github.com/scarletkc/colab-playground/commit/0401608e3e1b428b1e9cb4f87bba29f1d5c7d6cd))
+* show the country and region each runtime runs in ([#104](https://github.com/scarletkc/colab-playground/issues/104)) ([3a13e56](https://github.com/scarletkc/colab-playground/commit/3a13e5646bd3e4d5b6548731518cdccb6bbe12d8))
+
+
+### Changed
+
+* **app:** bring the running window forward instead of starting a second copy ([c18197b](https://github.com/scarletkc/colab-playground/commit/c18197b31400639084f79c5593d333758f0abd2b))
+* **app:** check for updates at every start ([#107](https://github.com/scarletkc/colab-playground/issues/107)) ([35ebe12](https://github.com/scarletkc/colab-playground/commit/35ebe125476f8c7c0770f5f5c432004a65b89601))
+* **app:** open forms for a problem or an idea from "Give feedback" ([#114](https://github.com/scarletkc/colab-playground/issues/114)) ([9cd914e](https://github.com/scarletkc/colab-playground/commit/9cd914e7c527b2a3159f376c7b956d6f2f2825c5))
+
+
+### Removed
+
+* drop demo data from release downloads ([#109](https://github.com/scarletkc/colab-playground/issues/109)) ([fce4a4b](https://github.com/scarletkc/colab-playground/commit/fce4a4bf42cf765bd82b46ca37391aa4ce2826d9))
+
+
+### Fixed
+
+* **app:** show plugins that fail to load and what changed in the plugins folder without a restart ([#121](https://github.com/scarletkc/colab-playground/issues/121)) ([190e341](https://github.com/scarletkc/colab-playground/commit/190e341597738aea181f71efaba4edf0a966c077))
+* **app:** stop two copies of the app from undoing each other's settings ([#112](https://github.com/scarletkc/colab-playground/issues/112)) ([38cb95c](https://github.com/scarletkc/colab-playground/commit/38cb95c27200bcc826abff018bac72f8a69402b7))
+* **core:** keep a port forward opened during a stop from starting a new runtime ([#105](https://github.com/scarletkc/colab-playground/issues/105)) ([a3af373](https://github.com/scarletkc/colab-playground/commit/a3af373717e4e8e0c71acc20ad720857bee79254))
+* **core:** keep a shell notice from hiding why a port forward failed on macOS ([#110](https://github.com/scarletkc/colab-playground/issues/110)) ([ffc16b1](https://github.com/scarletkc/colab-playground/commit/ffc16b1b278f6394a3ca07b54145d611af56ccbd))
+* **core:** keep port forwards working when a path contains % ([00b4c4d](https://github.com/scarletkc/colab-playground/commit/00b4c4d8f3ce5107c35318786854614afd51d3c3))
+* **core:** never let a port forward's ProxyCommand create a runtime ([#106](https://github.com/scarletkc/colab-playground/issues/106)) ([6bd1306](https://github.com/scarletkc/colab-playground/commit/6bd130692b38968ab6c4e2c15d06f1b6c5c5d7e1))
+
 ## [0.5.0](https://github.com/scarletkc/colab-playground/compare/v0.4.0...v0.5.0) (2026-11-26)
 
 
