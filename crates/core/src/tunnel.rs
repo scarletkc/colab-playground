@@ -137,10 +137,11 @@ const PROXY_GUARD_PY: &str = include_str!("../assets/proxy_guard.py");
 const PROXY_REFUSED: &str = "[colab-playground] refused to create a runtime";
 const PROXY_UNSUPPORTED: &str = "[colab-playground] unsupported colab CLI";
 
-/// The `python -c` program that runs [`PROXY_GUARD_PY`], which follows it base64-encoded. Neither
-/// holds a quote, backslash, `%` or newline: OpenSSH splits the `-o` value by quoting rules of its
-/// own and expands `%` tokens in it, and then the user's shell, which can be fish, runs it.
-const PROXY_LOADER: &str = "import sys,base64;exec(base64.b64decode(sys.argv.pop(1)))";
+/// The `python -c` program that runs a script that follows it base64-encoded ([`PROXY_GUARD_PY`],
+/// and `crate::drive`'s). Neither holds a quote, backslash, `%` or newline: OpenSSH splits the
+/// `-o` value by quoting rules of its own and expands `%` tokens in it, and then the user's shell,
+/// which can be fish, runs it.
+pub(crate) const PYTHON_LOADER: &str = "import sys,base64;exec(base64.b64decode(sys.argv.pop(1)))";
 
 /// `colab --config <state> ssh --proxy-mode -s <name>` under [`PROXY_GUARD_PY`], run by `python`
 /// (the CLI's interpreter), as a shell string for OpenSSH's `ProxyCommand` (which expands `%`
@@ -150,7 +151,7 @@ pub fn proxy_command(python: &str, state_file: &HostPath, session: &str) -> Stri
     format!(
         "{} -P -c {} {} --config {} ssh --proxy-mode -s {}",
         shell_quote(python),
-        shell_quote(PROXY_LOADER),
+        shell_quote(PYTHON_LOADER),
         B64.encode(PROXY_GUARD_PY),
         shell_quote(state_file.as_str()),
         shell_quote(session)
@@ -861,8 +862,8 @@ mod tests {
     #[test]
     fn the_guard_reaches_python_whole_and_prints_what_the_tunnel_matches() {
         assert!(
-            !PROXY_LOADER.contains(['\'', '"', '\\', '%', '\n', '#', '$']),
-            "{PROXY_LOADER}"
+            !PYTHON_LOADER.contains(['\'', '"', '\\', '%', '\n', '#', '$']),
+            "{PYTHON_LOADER}"
         );
         let p = proxy_command("/p", &HostPath::new("/s.json"), "s1");
         let (_, rest) = p.split_once(LOADER_QUOTED).unwrap();

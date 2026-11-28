@@ -47,6 +47,7 @@ runtime to your computer and runs plugins on the runtime. Written in Rust with G
 - **Plugins.** A manifest plus one script that runs only on the Colab runtime, never on your
   computer. Bundled: "Deploy a GGUF model" serves a Hugging Face GGUF model with llama.cpp
   (OpenAI-compatible API plus web chat) and picks the best quantisation that fits the GPU it gets.
+  A plugin can ask for your Google Drive, which you connect for a run if you choose to.
   Write your own with [docs/PLUGINS.md](docs/PLUGINS.md) and get it listed for others in
   [docs/COMMUNITY_PLUGINS.md](docs/COMMUNITY_PLUGINS.md).
 - **Command line for scripts and AI agents.** Once you allow it in Settings,
@@ -91,6 +92,8 @@ Requirements, backend flags, demo scenarios and where settings are stored:
 - Runtimes the app did not start (for example opened in the browser) get no auto-stop from it;
   they are listed so you can stop them.
 - A plugin runs its script on your paid runtime. Install only plugins you trust.
+- Google Drive connected to a runtime stays connected until the runtime stops, and any code on it
+  can read, change and delete everything in your Drive.
 - Unknown usage is never shown as zero: it is marked unknown or outdated, and the guards report
   that they cannot check a limit while usage is unknown.
 

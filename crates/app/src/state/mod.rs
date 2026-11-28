@@ -57,8 +57,8 @@ pub use plugins::{HF_TOKEN, InstallPrompt, RemovePrompt, failed_op, is_git_sourc
 pub use provision::{LimitReached, NewSession, ProvisionPhase, ProvisionProgress};
 pub use quit::{Billing, QuitPrompt};
 pub use runs::{
-    HF_RESULTS, HfLookup, PluginRun, PluginView, RUN_LOG_LINES_KEPT, RunForm, RunLog, RunPhase,
-    TargetLost,
+    DriveProgress, HF_RESULTS, HfLookup, PluginRun, PluginView, RUN_LOG_LINES_KEPT, RunForm,
+    RunLog, RunPhase, TargetLost,
 };
 pub use sessions::{EndReason, Ended, StopPrompt, runtime_label};
 pub use tunnels::{FORWARD_START_PORT, ForwardForm, local_url};

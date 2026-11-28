@@ -240,6 +240,7 @@ fn the_answers_carry_what_the_window_shows(cx: &mut TestAppContext) {
     ] {
         assert!(a100.get(field).is_some(), "{field} is in {a100}");
     }
+    assert_eq!(a100.get("drive_connected_at"), Some(&Value::Null));
     let unmanaged = runtimes
         .iter()
         .find(|runtime| runtime["managed"] == false)

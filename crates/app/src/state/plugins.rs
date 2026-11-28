@@ -430,4 +430,24 @@ impl AppState {
     pub fn wants_hf_token(info: &PluginInfo) -> bool {
         info.manifest.needs.contains(&Capability::HfToken)
     }
+
+    /// The plugin asks for the user's Google Drive (connected only when the user chooses to).
+    pub fn wants_drive(info: &PluginInfo) -> bool {
+        info.manifest.needs.contains(&Capability::Drive)
+    }
+
+    /// Whether the app connected the user's Google Drive to `name`, a session of the active
+    /// account, as listed.
+    pub fn drive_connected_on(&self, name: &str) -> bool {
+        self.runtimes().ready().is_some_and(|view| {
+            view.runtimes.iter().any(|runtime| {
+                runtime.on_active_account
+                    && runtime.id.name.as_deref() == Some(name)
+                    && runtime
+                        .tracked
+                        .as_ref()
+                        .is_some_and(|t| t.drive_connected_at.is_some())
+            })
+        })
+    }
 }

@@ -743,6 +743,22 @@ catalog_keys! {
     SETTINGS_SPONSOR_TITLE => "app.b14.settings_sponsor_title",
     SETTINGS_SPONSOR_DESCRIPTION => "app.b14.settings_sponsor_description",
     SETTINGS_SPONSOR => "app.b14.settings_sponsor",
+    PLUGIN_NEEDS_DRIVE => "app.b15.plugin_needs_drive",
+    RUN_DRIVE_TITLE => "app.b15.run_drive_title",
+    RUN_DRIVE_SWITCH => "app.b15.run_drive_switch",
+    RUN_DRIVE_ON => "app.b15.run_drive_on",
+    RUN_DRIVE_ON_CONNECTED => "app.b15.run_drive_on_connected",
+    RUN_DRIVE_OFF => "app.b15.run_drive_off",
+    RUN_TARGET_DRIVE => "app.b15.run_target_drive",
+    RUN_DRIVE_CONNECTING => "app.b15.run_drive_connecting",
+    RUN_DRIVE_CONSENT => "app.b15.run_drive_consent",
+    RUN_DRIVE_MISSED => "app.b15.run_drive_missed",
+    RUN_DRIVE_OPEN => "app.b15.run_drive_open",
+    RUN_DRIVE_CONTINUE => "app.b15.run_drive_continue",
+    RUN_DRIVE_CONNECTED => "app.b15.run_drive_connected",
+    RUNTIME_DRIVE => "app.b15.runtime_drive",
+    RUNTIME_DRIVE_HINT => "app.b15.runtime_drive_hint",
+    ERR_DRIVE_NOT_CONNECTED => "app.b15.err_drive_not_connected",
 }
 
 /// A message table: `(key, message)` pairs; `{name}` marks an argument.

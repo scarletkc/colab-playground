@@ -146,6 +146,10 @@ pub(super) struct RuntimeAnswer<'a> {
     /// `None`: nothing on the runtime stops it, so the stop holds only while the app is open.
     #[serde(serialize_with = "serde_secs::option::serialize")]
     auto_stop_on_runtime_at: Option<SystemTime>,
+    /// When the app connected the user's Google Drive to it. `None` says only that the app did
+    /// not, not that nothing else did.
+    #[serde(serialize_with = "serde_secs::option::serialize")]
+    drive_connected_at: Option<SystemTime>,
     policy: Option<&'a GuardPolicy>,
     stopping: bool,
     warnings: &'a [Concern],
@@ -430,6 +434,7 @@ impl AppState {
             auto_stop_on_runtime_at: tracked
                 .and_then(|t| t.watchdog.as_ref())
                 .and_then(|w| w.enforced_deadline()),
+            drive_connected_at: tracked.and_then(|t| t.drive_connected_at),
             policy: tracked.map(|t| &t.policy),
             stopping: self.is_stopping(&runtime.id),
             warnings: self.guard_warnings(&runtime.id),
@@ -438,7 +443,7 @@ impl AppState {
         }
     }
 
-    pub(super) fn account_email(&self, id: &AccountId) -> Option<&str> {
+    pub(crate) fn account_email(&self, id: &AccountId) -> Option<&str> {
         self.accounts
             .ready()?
             .accounts

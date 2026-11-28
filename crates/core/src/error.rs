@@ -95,6 +95,8 @@ pub enum ErrorKind {
     PluginNotFound,
     /// A plugin run reported `failed`. Params: `stage`, `message`.
     PluginRunFailed,
+    /// The user's Google Drive could not be connected to the runtime; `detail` says why.
+    DriveNotConnected,
     /// A plugin's endpoint did not answer its health probe.
     HealthCheckFailed,
     /// `git clone` failed. Param: `url`.
@@ -137,7 +139,9 @@ impl ErrorKind {
             K::AuthRequired | K::LoginVerificationFailed | K::LegacyTokenPresent => {
                 NextStep::SignInAgain
             }
-            K::LoginInvalidCode | K::LoginCancelled | K::AddInProgress => NextStep::TryAgain,
+            K::LoginInvalidCode | K::LoginCancelled | K::AddInProgress | K::DriveNotConnected => {
+                NextStep::TryAgain
+            }
             K::NotEntitled | K::ProvisionExhausted | K::AllocationTimeout => {
                 NextStep::ChooseOtherAccelerator
             }

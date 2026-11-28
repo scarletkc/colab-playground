@@ -3,8 +3,8 @@
 Everything lives under the directory named by ``CPG_FAKE_STATE`` (a test's
 temporary directory). Nothing here ever imports the real ``keyring``,
 ``google-auth`` or ``colab_cli``: the fake interpreter installs stand-ins for
-those modules in ``sys.modules`` before running the real account helper or the
-tunnel's real proxy guard.
+those modules in ``sys.modules`` before running the real account helper, the
+tunnel's real proxy guard or the real Drive wrapper.
 
 Files:
   keyring.json   {"<service>\\u0000<user>": "<value>"}  (fake OS keyring)
@@ -51,6 +51,7 @@ DEFAULT_KNOBS = {
     "watchdog_start_fails": False,  # a started watchdog exits at once
     "keyring_locked": False,        # keyring reads fail
     "cli_api_broken": False,        # colab_cli cannot be imported
+    "drive_consent": False,         # the user allowed access to Google Drive (fake_automation)
     "keyring_during_refresh": None,  # {"<service>\u0000<user>": value or null}, applied by the next token refresh
 }
 
@@ -265,7 +266,8 @@ class _FakeKeyringBackend:
 
 
 def install_fake_modules():
-    """Stand-ins for keyring, google-auth, requests, colab_cli.client and colab_cli.cli."""
+    """Stand-ins for keyring, google-auth, requests, colab_cli.client, colab_cli.cli and
+    colab_cli.commands.automation."""
 
     errors = types.ModuleType("keyring.errors")
 
@@ -393,9 +395,9 @@ def install_fake_modules():
     if knob("cli_api_broken"):
         # `None` in sys.modules makes `import colab_cli` raise ImportError, so
         # a real installation can never be picked up instead.
-        modules["colab_cli"] = None
-        modules["colab_cli.client"] = None
-        modules["colab_cli.cli"] = None
+        for name in ("colab_cli", "colab_cli.client", "colab_cli.cli", "colab_cli.commands",
+                     "colab_cli.commands.automation"):
+            modules[name] = None
     else:
         colab_cli = types.ModuleType("colab_cli")
         client = types.ModuleType("colab_cli.client")
@@ -403,10 +405,27 @@ def install_fake_modules():
         client.Prod = Prod
         cli = types.ModuleType("colab_cli.cli")
         cli.main = run_cli
+        commands = types.ModuleType("colab_cli.commands")
+        commands.automation = _load_automation()
         colab_cli.client = client
         colab_cli.cli = cli
+        colab_cli.commands = commands
         modules["colab_cli"] = colab_cli
         modules["colab_cli.client"] = client
         modules["colab_cli.cli"] = cli
+        modules["colab_cli.commands"] = commands
+        modules["colab_cli.commands.automation"] = commands.automation
 
     sys.modules.update(modules)
+
+
+def _load_automation():
+    """`fake_automation.py` as `colab_cli.commands.automation`: a module of its own, as the real one
+    is, so what the drive wrapper replaces in it is what its functions read."""
+    import importlib.util  # noqa: PLC0415
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_automation.py")
+    spec = importlib.util.spec_from_file_location("colab_cli.commands.automation", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

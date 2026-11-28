@@ -211,13 +211,17 @@ pub enum Capability {
     /// The user's saved Hugging Face token, passed as `PLUGIN_HF_TOKEN`
     /// when one is stored (optional for the plugin).
     HfToken,
+    /// The user's Google Drive, connected to the runtime when the user chooses to for a run;
+    /// its folder is passed as `PLUGIN_DRIVE_DIR` (optional for the plugin).
+    Drive,
 }
 
 impl Capability {
-    /// Vault secret name holding the value.
-    pub fn secret_name(self) -> &'static str {
+    /// Vault secret name holding the value, for a capability that is a saved secret.
+    pub fn secret_name(self) -> Option<&'static str> {
         match self {
-            Capability::HfToken => "hf_token",
+            Capability::HfToken => Some("hf_token"),
+            Capability::Drive => None,
         }
     }
 
@@ -225,6 +229,7 @@ impl Capability {
     pub fn env_key(self) -> &'static str {
         match self {
             Capability::HfToken => "PLUGIN_HF_TOKEN",
+            Capability::Drive => "PLUGIN_DRIVE_DIR",
         }
     }
 }
@@ -1304,6 +1309,10 @@ script = "main.py"
         assert!(Manifest::parse(&top("needs = [\"hf_token\", \"hf_token\"]")).is_err());
         let m = Manifest::parse(&ok).unwrap();
         assert_eq!(m.keep[0].path, "/content/out");
+        let m = Manifest::parse(&top("needs = [\"drive\", \"hf_token\"]")).unwrap();
+        assert_eq!(m.needs, [Capability::Drive, Capability::HfToken]);
+        assert_eq!(Capability::Drive.secret_name(), None);
+        assert_eq!(Capability::Drive.env_key(), "PLUGIN_DRIVE_DIR");
     }
 
     #[test]

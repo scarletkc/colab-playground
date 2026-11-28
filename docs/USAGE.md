@@ -141,8 +141,9 @@ cargo run -p colab-playground -- --mock-scenario signed-out --mock-fail cli-miss
   (runtimes cannot be listed), `update-available` and `update-check-fails` (the update check),
   `update-unsupported` (this copy cannot update itself), `update-download-fails`,
   `update-unverified` (the download fails its check), `update-install-fails` (installing an
-  update; add `update-available`) and `plugin-unloadable` (the plugins folder holds a plugin made
-  for a newer version of the app).
+  update; add `update-available`), `plugin-unloadable` (the plugins folder holds a plugin made
+  for a newer version of the app) and `drive-consent-missed` (Colab does not get the first consent
+  a run connecting Google Drive asks for, so the run asks again).
 - Both accept `--flag value` or `--flag=value` and apply only when the mock is selected (add
   `--mock` to a release build of your own). A simulated A100 has 40 GB first and 80 GB on the next
   attempt: set a minimum GPU memory of 70 GB to watch the retry. Git plugin installs are not
@@ -300,7 +301,8 @@ What the answers hold:
   `auto_stop_at` (the earliest stop the app or the runtime will make),
   `auto_stop_on_runtime_at` (when the runtime stops itself, also with the app closed; `null`
   when nothing on the runtime does, so the stop holds only while the app runs; it can be a
-  little later than `auto_stop_at`), `policy` (`max_runtime`, `max_spend_cu`,
+  little later than `auto_stop_at`), `drive_connected_at` (when the app connected the user's
+  Google Drive to it, for a plugin; `null` when the app did not), `policy` (`max_runtime`, `max_spend_cu`,
   `min_balance_cu`, `idle_timeout`), `stopping`, `warnings` (limits close to being reached),
   `stop_failure` (the cost guard could not stop it: it is still billing) and `tunnels` (each with
   its `spec`, `state` and `healthy`).

@@ -249,6 +249,10 @@ pub struct TrackedSession {
     /// the account's only runtime: what its hardware burns, not an estimate.
     #[serde(default)]
     pub measured_rate: Option<RateReading>,
+    /// When the app connected the user's Google Drive to it, which stays connected until the
+    /// runtime stops. `None` says only that the app did not.
+    #[serde(default, with = "serde_secs::option")]
+    pub drive_connected_at: Option<SystemTime>,
 }
 
 impl TrackedSession {
@@ -616,6 +620,7 @@ mod tests {
                 }),
                 stopped: None,
                 measured_rate: None,
+                drive_connected_at: None,
             })
             .unwrap();
         let again = Ledger::load(&path).unwrap();
@@ -641,6 +646,7 @@ mod tests {
             watchdog: None,
             stopped: None,
             measured_rate: None,
+            drive_connected_at: None,
         }
     }
 
@@ -834,6 +840,7 @@ mod tests {
             watchdog: Some(wd),
             stopped: None,
             measured_rate: None,
+            drive_connected_at: None,
         };
         assert_eq!(s.auto_stop_at(), Some(t0 + Duration::from_secs(600)));
         s.watchdog = Some(dead);
