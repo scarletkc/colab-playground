@@ -94,12 +94,17 @@ pub(super) const MESSAGES: Messages = &[
     ),
     (
         SETTINGS_CONTROL_DESCRIPTION,
-        "Programs you run on this computer can then read your accounts, runtimes and usage with the command colab-playground ctl, as this window shows them. With only this on, they cannot change anything.",
+        "Programs you run on this computer can then read your accounts, runtimes and usage with this app's ctl command, as this window shows them. With only this on, they cannot change anything.",
     ),
     (SETTINGS_CONTROL_CHANGES_TITLE, "Also allow changes"),
     (
         SETTINGS_CONTROL_CHANGES_DESCRIPTION,
         "Those programs can then start runtimes on the active account, extend their auto-stop and forward their ports, and stop runtimes on any saved account. Runtimes use compute units until they stop. Your defaults and limits still apply, and only this window can change them.",
+    ),
+    (SETTINGS_CONTROL_PROGRAM_TITLE, "Program to run"),
+    (
+        SETTINGS_CONTROL_PROGRAM_DESCRIPTION,
+        "Scripts and AI agents run this file with ctl and a command, such as ctl status. If you move the app, this path changes.",
     ),
     (
         CONTROL_OFF,

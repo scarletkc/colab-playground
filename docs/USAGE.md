@@ -200,8 +200,11 @@ or runs `colab`.
    and extending runtimes, and opening and closing port forwards. A runtime started or extended
    this way uses compute units like any other. Until you do, every command that takes `--yes`
    answers `changes_off`; turning the first switch off turns this one off as well.
-3. Call the program you start the app with (the downloaded `.exe` on Windows;
-   `cargo run -p colab-playground -- ctl status` from source):
+3. Call the program you start the app with, followed by `ctl`: "Program to run", below the two
+   switches, shows its path and copies it. The app does not add it to `PATH`, so in these
+   examples `colab-playground` stands for that path (from source, use
+   `cargo run -p colab-playground -- ctl status`). A path with spaces, as the macOS one has, goes
+   in double quotes, and in PowerShell after `&` (`& "C:\Users\Jane Doe\…" ctl status`):
 
    ```sh
    colab-playground ctl status      # what the app shows at a glance, and what it is busy with

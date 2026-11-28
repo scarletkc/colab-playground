@@ -87,12 +87,17 @@ pub(super) const MESSAGES: Messages = &[
     (SETTINGS_CONTROL_TITLE, "允許從命令列控制"),
     (
         SETTINGS_CONTROL_DESCRIPTION,
-        "開啟後，你在這台電腦上執行的程式可以用 colab-playground ctl 指令讀取帳號、執行階段和用量，內容與此視窗顯示的相同。只開啟這一項時，它們無法變更任何內容。",
+        "開啟後，你在這台電腦上執行的程式可以用本應用程式的 ctl 指令讀取帳號、執行階段和用量，內容與此視窗顯示的相同。只開啟這一項時，它們無法變更任何內容。",
     ),
     (SETTINGS_CONTROL_CHANGES_TITLE, "同時允許變更"),
     (
         SETTINGS_CONTROL_CHANGES_DESCRIPTION,
         "開啟後，這些程式可以在目前帳號上啟動執行階段、延長其自動停止時間、轉送其連接埠，也可以停止任何已儲存帳號上的執行階段。執行階段在停止前會一直消耗運算單元。你的預設值和限制仍然適用，且只能在此視窗中變更。",
+    ),
+    (SETTINGS_CONTROL_PROGRAM_TITLE, "要執行的程式"),
+    (
+        SETTINGS_CONTROL_PROGRAM_DESCRIPTION,
+        "指令碼和 AI 代理程式執行這個檔案，後接 ctl 和一個指令，例如 ctl status。移動應用程式後，這個路徑會改變。",
     ),
     (
         CONTROL_OFF,
