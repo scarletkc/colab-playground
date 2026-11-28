@@ -758,6 +758,7 @@ pub(super) const MESSAGES: Messages = &[
     (PLUGIN_BUILT_IN, "內建"),
     (PLUGIN_OFF, "已關閉"),
     (PLUGIN_ENABLED, "啟用"),
+    (PLUGIN_ON_OVERVIEW, "顯示在總覽"),
     (PLUGIN_OPEN, "開啟"),
     (PLUGIN_BUILT_IN_REMOVE, "內建外掛程式可以關閉，但不能移除。"),
     (PLUGIN_VERSION_SHORT, "v{version}"),
@@ -916,8 +917,8 @@ pub(super) const MESSAGES: Messages = &[
         "這是估算；最終由執行階段依分到的 GPU 決定。",
     ),
     // 總覽快速部署
-    (DEPLOY_TITLE, "部署模型"),
-    (DEPLOY_SUBTITLE, "一步啟動執行階段並提供模型服務。"),
+    (DEPLOY_TITLE, "快速部署"),
+    (DEPLOY_SUBTITLE, "一步啟動執行階段並準備就緒。"),
     (DEPLOY_ACTION, "部署"),
     // 修正輪
     (FMT_HOURS, "{h} 小時"),

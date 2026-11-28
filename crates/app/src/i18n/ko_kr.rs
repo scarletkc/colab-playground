@@ -894,6 +894,7 @@ pub(super) const MESSAGES: Messages = &[
     (PLUGIN_BUILT_IN, "기본 제공"),
     (PLUGIN_OFF, "사용 안 함"),
     (PLUGIN_ENABLED, "사용"),
+    (PLUGIN_ON_OVERVIEW, "개요에 표시"),
     (PLUGIN_OPEN, "열기"),
     (
         PLUGIN_BUILT_IN_REMOVE,
@@ -1067,10 +1068,10 @@ pub(super) const MESSAGES: Messages = &[
         "추정치입니다. 최종 선택은 할당받은 GPU에 따라 런타임이 합니다.",
     ),
     // Overview quick deploy
-    (DEPLOY_TITLE, "모델 배포"),
+    (DEPLOY_TITLE, "빠른 배포"),
     (
         DEPLOY_SUBTITLE,
-        "런타임 시작부터 모델 서비스까지 한 번에 진행합니다.",
+        "런타임 시작부터 준비까지 한 번에 진행합니다.",
     ),
     (DEPLOY_ACTION, "배포"),
     // Fix round

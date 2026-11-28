@@ -1,5 +1,6 @@
 //! Plugins over the headless mock: quick deploy to a ready endpoint, a run failing at a stage,
-//! installing from a fixture folder (with the confirmation), and secrets staying secret.
+//! installing from a fixture folder (with the confirmation), choosing what the Overview shows,
+//! and secrets staying secret.
 
 use std::path::PathBuf;
 
@@ -13,10 +14,10 @@ use colab_playground::{
     ui::{
         overlays::INSTALL_CONFIRM,
         pages::{
-            overview::{INSTALL_SELECTOR, deploy_selector},
+            overview::{INSTALL_SELECTOR, QUICK_DEPLOY_SELECTOR, deploy_selector},
             plugins::{
                 ENDPOINT_SELECTOR, INSTALL_CHECK, RUN_START, RUN_STOP, hf_result_selector,
-                plugin_selector,
+                overview_selector, plugin_selector,
             },
         },
     },
@@ -303,6 +304,55 @@ fn a_plugin_from_a_folder_is_installed_after_confirming(cx: &mut TestAppContext)
     app.click("plugin-remove hello-web");
     app.click(colab_playground::ui::overlays::REMOVE_CONFIRM);
     assert!(app.read(|state, _| state.plugin("hello-web").is_none()));
+}
+
+#[gpui::test]
+fn the_overview_shows_the_enabled_plugins_left_on_it(cx: &mut TestAppContext) {
+    let fixture = tempfile::tempdir().expect("a fixture folder");
+    std::fs::write(fixture.path().join("plugin.toml"), FIXTURE_MANIFEST).expect("manifest");
+    std::fs::write(
+        fixture.path().join("run.sh"),
+        "#!/bin/bash
+echo hello
+",
+    )
+    .expect("script");
+    let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
+    app.click(Route::Plugins.nav_selector());
+    let folder = fixture.path().display().to_string();
+    app.fill(|inputs| inputs.plugin_source.clone(), &folder);
+    app.click(INSTALL_CHECK);
+    app.click(INSTALL_CONFIRM);
+
+    // An installed plugin shows on the Overview without being asked to, beside the built-in one.
+    app.click(Route::Overview.nav_selector());
+    assert!(app.shown(&deploy_selector("hello-web")));
+    assert!(app.shown(&deploy_selector("llama-cpp")));
+
+    // Taken off, it is still on the Plugins page, and the choice is saved.
+    app.click(Route::Plugins.nav_selector());
+    app.click(&overview_selector("hello-web"));
+    assert!(app.shown(&plugin_selector("hello-web")));
+    app.click(Route::Overview.nav_selector());
+    assert!(!app.shown(&deploy_selector("hello-web")));
+    assert!(app.shown(&deploy_selector("llama-cpp")));
+    let hidden = app
+        .saved_settings()
+        .map(|settings| settings.overview_hidden.into_iter().collect::<Vec<_>>());
+    assert_eq!(hidden, Some(vec!["hello-web".to_owned()]));
+
+    // The built-in one comes off without being turned off; with no card left, no section.
+    app.click(Route::Plugins.nav_selector());
+    app.click(&overview_selector("llama-cpp"));
+    app.click(Route::Overview.nav_selector());
+    assert!(!app.shown(QUICK_DEPLOY_SELECTOR));
+    assert!(app.read(|state, _| state.plugin("llama-cpp").is_some_and(|p| p.enabled)));
+
+    // Put back, it shows again.
+    app.click(Route::Plugins.nav_selector());
+    app.click(&overview_selector("hello-web"));
+    app.click(Route::Overview.nav_selector());
+    assert!(app.shown(&deploy_selector("hello-web")));
 }
 
 /// The copies the mock backend has staged of the plugin `id`. Tests share its staging folder,

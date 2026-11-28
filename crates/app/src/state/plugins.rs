@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use colab_playground_core::{
     Error,
-    plugins::{Capability, PluginInfo, PluginPreview, PluginSource},
+    plugins::{Capability, PluginInfo, PluginPreview},
 };
 use gpui::{AppContext, Context};
 
@@ -58,17 +58,32 @@ impl AppState {
             .find(|plugin| plugin.manifest.id == id)
     }
 
-    /// Bundled, enabled plugins (the Overview's quick-deploy cards).
+    /// The Overview's quick-deploy cards: enabled plugins the user left on it.
     pub fn quick_deploys(&self) -> Vec<&PluginInfo> {
         self.plugins
             .list
             .ready()
             .map(|list| {
                 list.iter()
-                    .filter(|p| p.enabled && p.source == PluginSource::Bundled)
+                    .filter(|p| p.enabled && self.shown_on_overview(&p.manifest.id))
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Whether the plugin `id` has a card on the Overview while it is enabled.
+    pub fn shown_on_overview(&self, id: &str) -> bool {
+        !self.settings.overview_hidden.contains(id)
+    }
+
+    pub fn set_shown_on_overview(&mut self, id: String, shown: bool, cx: &mut Context<Self>) {
+        if shown {
+            self.settings.overview_hidden.remove(&id);
+        } else {
+            self.settings.overview_hidden.insert(id);
+        }
+        self.persist_settings(cx);
+        cx.notify();
     }
 
     /// Whether a Hugging Face token is stored.
