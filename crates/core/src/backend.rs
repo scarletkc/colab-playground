@@ -363,8 +363,8 @@ pub trait Backend: Send + Sync {
     /// [`Backend::extend_session`] for a caller that can ask again and again, such as a
     /// program: refused with [`ErrorKind::ExtensionNotDue`] while more than `by` is still left
     /// before the auto-stop ([`extension_due`]), before anything is changed. A caller that
-    /// keeps asking keeps the runtime running, and once it stops asking the runtime stops
-    /// within twice `by`: the runtime limit may be the only cost guard the user has on.
+    /// keeps asking keeps the runtime running, but never puts its auto-stop more than twice
+    /// `by` away: the runtime limit may be the only cost guard the user has on.
     ///
     /// The time left is the one `extend_session` reads inside the call, so an extension the
     /// caller's listing does not show yet counts.

@@ -341,9 +341,9 @@ Changing things:
   No option chooses another amount, and the other limits (spending cap, balance floor, idle stop)
   still apply. Unlike Extend in the window, it is refused with `extension_not_due` while more time
   is left before the auto-stop than one extension adds: a program that keeps asking keeps the
-  runtime running, and once it stops asking, the runtime stops within two runtime limits. Right
-  after an extension, until `sessions` shows its new `auto_stop_at`, the refusal can come as an
-  operation that ends `failed` with the error `extension_not_due` instead of at once.
+  runtime running, but never puts its auto-stop more than two extensions away. Right after an
+  extension, until `sessions` shows its new `auto_stop_at`, the refusal can come as an operation
+  that ends `failed` with the error `extension_not_due` instead of at once.
   `<runtime>` and `--account` name it as for `stop`, and only a runtime with an auto-stop can be
   extended. The preview holds `runtime` (as in `sessions`) and `extend_by`, not the new time: the
   app reads the time left from the runtime as it extends. Once the operation succeeded, its

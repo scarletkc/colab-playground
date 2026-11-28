@@ -137,8 +137,8 @@ pub struct StopArgs {
 
 /// Moves a runtime's auto-stop later by what the window's Extend adds; the caller chooses no
 /// amount, so no extension goes beyond what a click would. It is refused while more than that
-/// is left, so extensions do not pile up: a caller that stops asking leaves the runtime to stop
-/// within two runtime limits.
+/// is left, so extensions do not pile up: no caller puts an auto-stop more than two extensions
+/// away.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtendArgs {
