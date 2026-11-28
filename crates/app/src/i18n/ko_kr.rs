@@ -893,6 +893,7 @@ pub(super) const MESSAGES: Messages = &[
     (PLUGINS_LOADING, "플러그인을 불러오는 중…"),
     (PLUGIN_BUILT_IN, "기본 제공"),
     (PLUGIN_OFF, "사용 안 함"),
+    (PLUGIN_UNLOADABLE, "불러오기 실패"),
     (PLUGIN_ENABLED, "사용"),
     (PLUGIN_OPEN, "열기"),
     (

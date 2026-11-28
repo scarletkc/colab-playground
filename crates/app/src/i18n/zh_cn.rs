@@ -740,6 +740,7 @@ pub(super) const MESSAGES: Messages = &[
     (PLUGINS_LOADING, "正在加载插件…"),
     (PLUGIN_BUILT_IN, "内置"),
     (PLUGIN_OFF, "已关闭"),
+    (PLUGIN_UNLOADABLE, "加载失败"),
     (PLUGIN_ENABLED, "启用"),
     (PLUGIN_OPEN, "打开"),
     (PLUGIN_BUILT_IN_REMOVE, "内置插件可以关闭，但不能移除。"),

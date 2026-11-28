@@ -737,7 +737,9 @@ fn staged_plugin_copies_do_not_outlive_their_preview() {
     let preview = f.b.inspect_plugin_folder(&src).unwrap();
     f.b.install_plugin(&preview).unwrap();
     assert!(staged().is_empty());
-    assert!(f.b.plugins().iter().any(|p| p.manifest.id == "demo"));
+    let listed = f.b.plugins().unwrap();
+    assert!(listed.plugins.iter().any(|p| p.manifest.id == "demo"));
+    assert!(listed.failed.is_empty());
 }
 
 #[test]

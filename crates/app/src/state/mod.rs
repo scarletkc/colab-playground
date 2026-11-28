@@ -53,7 +53,7 @@ pub use feedback::{
 };
 pub use operations::ENDED_OPERATIONS_KEPT;
 pub use ops::{Op, key_of};
-pub use plugins::{HF_TOKEN, InstallPrompt, RemovePrompt, is_git_source};
+pub use plugins::{HF_TOKEN, InstallPrompt, RemovePrompt, failed_op, is_git_source};
 pub use provision::{LimitReached, NewSession, ProvisionPhase, ProvisionProgress};
 pub use quit::{Billing, QuitPrompt};
 pub use runs::{
@@ -440,6 +440,9 @@ impl AppState {
             self.route = route;
             if route != Route::Settings {
                 self.settings_focus = None;
+            }
+            if route == Route::Plugins {
+                self.refresh_plugins(cx);
             }
             cx.notify();
         }

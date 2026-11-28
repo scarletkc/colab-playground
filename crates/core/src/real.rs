@@ -34,7 +34,7 @@ use crate::hostfs::HostFs;
 use crate::http::HttpClient;
 use crate::paths::{DataLayout, HostPath};
 use crate::plugins::{
-    PluginInfo, PluginOrigin, PluginPreview, PluginStore, clear_staging, clone_git,
+    PluginInfo, PluginList, PluginOrigin, PluginPreview, PluginStore, clear_staging, clone_git,
     contains_secret, discard_preview, redact, redact_json, resolve_endpoints, resolve_inputs,
 };
 use crate::provision::{
@@ -1849,8 +1849,8 @@ impl Backend for RealBackend {
         self.inner.tunnels.list()
     }
 
-    fn plugins(&self) -> Vec<PluginInfo> {
-        self.inner.st().plugins.list()
+    fn plugins(&self) -> Result<PluginList> {
+        self.inner.st().plugins.refresh()
     }
 
     fn plugin_run_template(&self, plugin: &str) -> Result<PluginRunSpec> {
@@ -1904,6 +1904,10 @@ impl Backend for RealBackend {
 
     fn remove_plugin(&self, id: &str) -> Result<()> {
         self.inner.st().plugins.remove(id)
+    }
+
+    fn remove_failed_plugin(&self, folder: &str) -> Result<()> {
+        self.inner.st().plugins.remove_failed(folder)
     }
 
     fn run_plugin(

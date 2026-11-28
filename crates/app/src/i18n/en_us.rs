@@ -893,6 +893,7 @@ pub(super) const MESSAGES: Messages = &[
     (PLUGINS_LOADING, "Loading plugins…"),
     (PLUGIN_BUILT_IN, "Built in"),
     (PLUGIN_OFF, "Off"),
+    (PLUGIN_UNLOADABLE, "Failed to load"),
     (PLUGIN_ENABLED, "Enabled"),
     (PLUGIN_OPEN, "Open"),
     (
