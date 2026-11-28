@@ -1,11 +1,11 @@
-//! The Plugins page: the installed list (built-in ones marked), enable / disable / remove,
-//! install from a folder or Git URL, the Hugging Face token, and — in place of the list — the
-//! run form and the run view.
+//! The Plugins page: the installed list (built-in ones marked), enable / disable / remove, the
+//! folders that failed to load, install from a folder or Git URL, the Hugging Face token, and —
+//! in place of the list — the run form and the run view.
 
 mod form;
 mod run;
 
-use colab_playground_core::plugins::{PluginInfo, PluginSource};
+use colab_playground_core::plugins::{PluginFailure, PluginInfo, PluginSource};
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     data_display::{Badge, Tone},
@@ -22,9 +22,10 @@ use gpui::{
 };
 
 use crate::{
+    errors,
     i18n::{keys, tr, tr_args},
     route::Route,
-    state::{AppState, Load, Op, PluginView, RunPhase},
+    state::{AppState, Load, Op, PluginView, RunPhase, failed_op},
     ui::{Inputs, error_view, tagged},
 };
 
@@ -45,6 +46,16 @@ pub fn remove_selector(id: &str) -> String {
 }
 pub fn enable_selector(id: &str) -> String {
     format!("plugin-enabled {id}")
+}
+/// Selector of the card of a folder that failed to load: `plugin-failed <folder>`.
+pub fn failed_selector(folder: &str) -> String {
+    format!("plugin-failed {folder}")
+}
+pub fn check_failed_selector(folder: &str) -> String {
+    format!("plugin-failed-check {folder}")
+}
+pub fn remove_failed_selector(folder: &str) -> String {
+    format!("plugin-failed-remove {folder}")
 }
 
 pub fn render(state: &AppState, handle: &Entity<AppState>, inputs: &Inputs, cx: &App) -> Page {
@@ -97,9 +108,14 @@ fn list(state: &AppState, handle: &Entity<AppState>, inputs: &Inputs, cx: &App) 
         );
     }
     page = match state.plugins() {
-        Load::Ready(list) => {
-            page.children(list.iter().map(|info| plugin_card(info, state, handle, cx)))
-        }
+        Load::Ready(list) => page
+            .children(list.iter().map(|info| plugin_card(info, state, handle, cx)))
+            .children(
+                state
+                    .failed_plugins()
+                    .iter()
+                    .map(|failure| failed_card(failure, state, handle, cx)),
+            ),
         Load::Failed(error) => {
             page.child(error_view::alert("plugins", None, error, None, handle, cx))
         }
@@ -222,6 +238,73 @@ fn plugin_card(
                             ),
                     )
                     .child(tagged(remove_selector(&id), remove)),
+            ),
+    )
+    .w_full()
+    .into_any_element()
+}
+
+/// A folder of the plugins directory that holds no plugin this version can load: why, a way to
+/// read it again once fixed, and a way to delete it.
+fn failed_card(
+    failure: &PluginFailure,
+    state: &AppState,
+    handle: &Entity<AppState>,
+    cx: &App,
+) -> AnyElement {
+    let theme = cx.theme();
+    let folder = failure.folder.clone();
+    let explained = errors::explain(&failure.error, false, cx);
+    let title = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+            div()
+                .text_size(theme.text_size(TextSize::Lg))
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(folder.clone()),
+        )
+        .child(Badge::new(tr(cx, keys::PLUGIN_UNLOADABLE)).tone(Tone::Danger));
+    let check = {
+        let handle = handle.clone();
+        Button::new(
+            SharedString::from(format!("check-failed-{folder}")),
+            tr(cx, keys::ACTION_CHECK_AGAIN),
+        )
+        .size(ControlSize::Sm)
+        .icon(IconName::RefreshCw)
+        .on_click(move |_, _, cx| handle.update(cx, |state, cx| state.refresh_plugins(cx)))
+    };
+    let remove = {
+        let (handle, folder) = (handle.clone(), folder.clone());
+        Button::new(
+            SharedString::from(format!("remove-failed-{folder}")),
+            tr(cx, keys::ACTION_REMOVE),
+        )
+        .variant(ButtonVariant::Ghost)
+        .size(ControlSize::Sm)
+        .disabled(state.is_busy(failed_op(&folder)))
+        .on_click(move |_, _, cx| {
+            handle.update(cx, |state, cx| {
+                state.request_remove_failed_plugin(folder.clone(), cx)
+            })
+        })
+    };
+    tagged(
+        failed_selector(&folder),
+        Card::new()
+            .child(title)
+            .child(InlineMessage::new(Severity::Danger, explained.message))
+            .children(explained.detail.map(Caption::new))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_3()
+                    .child(tagged(check_failed_selector(&folder), check))
+                    .child(tagged(remove_failed_selector(&folder), remove)),
             ),
     )
     .w_full()

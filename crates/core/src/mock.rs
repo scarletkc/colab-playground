@@ -28,8 +28,8 @@ use crate::guard::{Decision, GuardPolicy, SpendMeter, evaluate};
 use crate::hf::HfModel;
 use crate::host::{Host, Line, ProbeReport, Stream};
 use crate::plugins::{
-    PluginInfo, PluginOrigin, PluginPreview, PluginStore, discard_preview, resolve_endpoints,
-    resolve_inputs,
+    Manifest, PluginFailure, PluginInfo, PluginList, PluginOrigin, PluginPreview, PluginStore,
+    discard_preview, resolve_endpoints, resolve_inputs,
 };
 use crate::provision::{
     self, Hardware, ProvisionEvent, ProvisionOps, ProvisionOutcome, ProvisionSpec,
@@ -117,6 +117,9 @@ pub struct MockFailures {
     pub update_relaunch_fails: bool,
     /// `switch_impact` cannot list the unmanaged runtimes either.
     pub runtimes_listing_fails: bool,
+    /// The plugins directory holds [`UNLOADABLE_PLUGIN`], a folder whose manifest is for a newer
+    /// `api` than this build. Applied at construction and whenever the switch changes.
+    pub plugin_unloadable: bool,
     /// Accounts (by email) whose runtimes cannot be listed: listings leave their runtimes out
     /// and report each account in `RuntimesView::errors`. Leaving such an account affects
     /// `switch_impact` as `runtimes_listing_fails` does.
@@ -149,6 +152,7 @@ impl Default for MockFailures {
             update_relaunch: false,
             update_relaunch_fails: false,
             runtimes_listing_fails: false,
+            plugin_unloadable: false,
             unlisted_accounts: vec![],
         }
     }
@@ -395,6 +399,21 @@ struct World {
 /// Email of the credential `MockFailures::unadopted_slot` puts in the slot.
 pub const MOCK_UNADOPTED_EMAIL: &str = "pat@example.com";
 
+/// The folder [`MockFailures::plugin_unloadable`] puts in the plugins directory.
+pub const UNLOADABLE_PLUGIN: &str = "image-studio";
+
+fn unloadable_plugin() -> PluginFailure {
+    let error = Manifest::parse(
+        "api = 2
+",
+    )
+    .expect_err("api 2 is newer than this build");
+    PluginFailure {
+        folder: UNLOADABLE_PLUGIN.to_owned(),
+        error,
+    }
+}
+
 impl World {
     /// Applies switches that model state (rather than being read on use)
     /// when they change from `old`.
@@ -417,6 +436,11 @@ impl World {
             let previous = self.active.take();
             self.pending_add = Some(previous);
             self.tunnels.clear();
+        }
+        if new.plugin_unloadable && !old.plugin_unloadable {
+            self.plugins.add_failure(unloadable_plugin());
+        } else if !new.plugin_unloadable && old.plugin_unloadable {
+            let _ = self.plugins.remove_failed(UNLOADABLE_PLUGIN);
         }
     }
 
@@ -1797,8 +1821,8 @@ impl Backend for MockBackend {
         self.w().tunnels.values().cloned().collect()
     }
 
-    fn plugins(&self) -> Vec<PluginInfo> {
-        self.w().plugins.list()
+    fn plugins(&self) -> Result<PluginList> {
+        self.w().plugins.refresh()
     }
 
     fn plugin_run_template(&self, plugin: &str) -> Result<PluginRunSpec> {
@@ -1846,6 +1870,10 @@ impl Backend for MockBackend {
 
     fn remove_plugin(&self, id: &str) -> Result<()> {
         self.w().plugins.remove(id)
+    }
+
+    fn remove_failed_plugin(&self, folder: &str) -> Result<()> {
+        self.w().plugins.remove_failed(folder)
     }
 
     fn run_plugin(

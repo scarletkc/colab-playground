@@ -968,6 +968,7 @@ pub(super) const MESSAGES: Messages = &[
     (PLUGINS_LOADING, "プラグインを読み込んでいます…"),
     (PLUGIN_BUILT_IN, "組み込み"),
     (PLUGIN_OFF, "無効"),
+    (PLUGIN_UNLOADABLE, "読み込み失敗"),
     (PLUGIN_ENABLED, "有効"),
     (PLUGIN_OPEN, "開く"),
     (

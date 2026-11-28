@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use colab_playground_core::{
     Error,
-    plugins::{Capability, PluginInfo, PluginPreview, PluginSource},
+    plugins::{Capability, PluginFailure, PluginInfo, PluginPreview, PluginSource},
 };
 use gpui::{AppContext, Context};
 
@@ -28,14 +28,34 @@ pub enum InstallPrompt {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RemovePrompt {
+    /// The plugin's id, or the folder's name for a folder that failed to load.
     pub id: String,
     pub name: String,
+    /// A folder of the plugins directory that failed to load, not an installed plugin.
+    pub failed: bool,
     pub error: Option<Error>,
+}
+
+impl RemovePrompt {
+    fn op(&self) -> Op {
+        if self.failed {
+            failed_op(&self.id)
+        } else {
+            Op::PluginChange(key_of(&self.id))
+        }
+    }
+}
+
+/// The call that removes the folder `folder`, which failed to load. Its key differs from a
+/// plugin's: the folder may be named after one that loaded, such as a bundled plugin.
+pub fn failed_op(folder: &str) -> Op {
+    Op::PluginChange(key_of(&("failed", folder)))
 }
 
 #[derive(Default)]
 pub struct PluginsState {
     pub(crate) list: Load<Vec<PluginInfo>>,
+    pub(crate) failed: Vec<PluginFailure>,
     pub(crate) hf_token: Load<bool>,
 }
 
@@ -48,6 +68,11 @@ pub fn is_git_source(text: &str) -> bool {
 impl AppState {
     pub fn plugins(&self) -> &Load<Vec<PluginInfo>> {
         &self.plugins.list
+    }
+
+    /// Folders of the plugins directory that failed to load, as of the last read.
+    pub fn failed_plugins(&self) -> &[PluginFailure] {
+        &self.plugins.failed
     }
 
     pub fn plugin(&self, id: &str) -> Option<&PluginInfo> {
@@ -77,20 +102,31 @@ impl AppState {
     }
 
     pub fn load_plugins(&mut self, cx: &mut Context<Self>) {
+        self.refresh_plugins(cx);
+        self.check_hf_token(cx);
+    }
+
+    /// Reads the plugins directory again, so what was changed there shows without a restart.
+    pub fn refresh_plugins(&mut self, cx: &mut Context<Self>) {
         self.plugins.list.begin();
         self.run_backend(
             Op::Plugins,
             cx,
-            |backend, _| Ok(backend.plugins()),
+            |backend, _| backend.plugins(),
             |state, result, cx| {
-                state.plugins.list = match result {
-                    Ok(list) => Load::Ready(list),
-                    Err(error) => Load::Failed(error),
-                };
+                match result {
+                    Ok(listed) => {
+                        state.plugins.list = Load::Ready(listed.plugins);
+                        state.plugins.failed = listed.failed;
+                    }
+                    Err(error) => {
+                        state.plugins.list = Load::Failed(error);
+                        state.plugins.failed.clear();
+                    }
+                }
                 cx.notify();
             },
         );
-        self.check_hf_token(cx);
     }
 
     fn check_hf_token(&mut self, cx: &mut Context<Self>) {
@@ -288,6 +324,18 @@ impl AppState {
         self.overlay = Some(Overlay::RemovePlugin(RemovePrompt {
             id,
             name,
+            failed: false,
+            error: None,
+        }));
+        cx.notify();
+    }
+
+    /// Asks before deleting a folder of the plugins directory that failed to load.
+    pub fn request_remove_failed_plugin(&mut self, folder: String, cx: &mut Context<Self>) {
+        self.overlay = Some(Overlay::RemovePlugin(RemovePrompt {
+            id: folder.clone(),
+            name: folder,
+            failed: true,
             error: None,
         }));
         cx.notify();
@@ -297,12 +345,19 @@ impl AppState {
         let Some(Overlay::RemovePlugin(prompt)) = &self.overlay else {
             return;
         };
-        let (id, name) = (prompt.id.clone(), prompt.name.clone());
-        let work_id = id.clone();
+        let (op, failed) = (prompt.op(), prompt.failed);
+        let name = prompt.name.clone();
+        let work_id = prompt.id.clone();
         self.run_backend(
-            Op::PluginChange(key_of(&id)),
+            op,
             cx,
-            move |backend, _| backend.remove_plugin(&work_id),
+            move |backend, _| {
+                if failed {
+                    backend.remove_failed_plugin(&work_id)
+                } else {
+                    backend.remove_plugin(&work_id)
+                }
+            },
             move |state, result, cx| {
                 match result {
                     Ok(()) => {
