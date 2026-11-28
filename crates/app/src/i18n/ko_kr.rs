@@ -529,6 +529,10 @@ pub(super) const MESSAGES: Messages = &[
         ERR_SESSION_LIMIT,
         "이 계정은 이미 허용된 최대 개수인 {limit}개의 런타임을 실행하고 있습니다.",
     ),
+    (
+        ERR_EXTENSION_NOT_DUE,
+        "연장되지 않았습니다. 명령줄에서는 남은 시간이 한 번 연장하는 시간 이하일 때만 자동 중지를 연장할 수 있습니다. 지금 시간을 늘리려면 런타임의 [연장]을 사용하십시오.",
+    ),
     (ERR_BUSY, "다른 계정 작업이 실행 중입니다."),
     (
         ERR_PROVISION_EXHAUSTED,

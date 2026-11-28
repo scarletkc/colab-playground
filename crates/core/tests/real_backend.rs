@@ -643,6 +643,60 @@ fn extend_adds_to_the_stop_the_session_has_at_that_moment() {
     assert_eq!(f.watchdog_starts().len(), 2);
 }
 
+/// An extension a program may ask for again and again waits until no more than one
+/// extension's worth is left, and a refused one sends nothing that moves the deadline.
+#[test]
+fn an_extension_when_due_is_refused_without_moving_the_runtimes_deadline() {
+    let f = fixture();
+    f.adopt_alice();
+    let spec = ProvisionSpec::new("due", Accelerator::T4, &Defaults::default());
+    let (tx, _rx) = channel();
+    f.b.provision(spec, tx, &nc()).unwrap();
+    let limit = Defaults::default().max_runtime.unwrap();
+    let deadline_sends = |f: &Fixture| {
+        f.calls()
+            .iter()
+            .filter(|c| {
+                c["argv"].as_array().is_some_and(|argv| {
+                    argv.iter().any(|a| {
+                        a.as_str()
+                            .is_some_and(|a| a.starts_with("CPG_WD_DEADLINE_S="))
+                    })
+                })
+            })
+            .count()
+    };
+    let vm = |f: &Fixture| f.assignments("alice").values().next().unwrap()["watchdog"].clone();
+
+    // A fresh runtime has a little less than one runtime limit left (the fake VM's clock
+    // runs), so it extends once; after that about two limits are left.
+    let (rt, _) = f.listed_watchdog("due");
+    let set = f.b.extend_session_if_due(&rt.id, limit, &nc()).unwrap();
+    assert!(set.watchdog.armed);
+
+    let (rt, wd) = f.listed_watchdog("due");
+    let (sent, on_vm) = (deadline_sends(&f), vm(&f));
+    let error = f.b.extend_session_if_due(&rt.id, limit, &nc()).unwrap_err();
+    assert!(error.is(ErrorKind::ExtensionNotDue), "{error}");
+    assert_eq!(
+        deadline_sends(&f),
+        sent,
+        "nothing was sent to move the deadline"
+    );
+    assert_eq!(vm(&f), on_vm, "the watchdog on the runtime is as it was");
+    assert_eq!(f.watchdog_starts().len(), 1);
+    let (after, wd_after) = f.listed_watchdog("due");
+    assert_eq!(wd_after, wd, "the ledger keeps the watchdog it had");
+    let policy = |rt: &Runtime| rt.tracked.as_ref().map(|t| t.policy.clone());
+    assert_eq!(policy(&after), policy(&rt), "and the runtime limit");
+    assert_eq!(after.auto_stop_at, rt.auto_stop_at);
+
+    // The window's own extension still adds.
+    let set = f.b.extend_session(&rt.id, limit, &nc()).unwrap();
+    assert!(set.watchdog.armed);
+    assert!(deadline_sends(&f) > sent);
+}
+
 #[test]
 fn staged_plugin_copies_do_not_outlive_their_preview() {
     let mut f = fixture();

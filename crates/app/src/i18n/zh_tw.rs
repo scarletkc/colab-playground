@@ -462,6 +462,10 @@ pub(super) const MESSAGES: Messages = &[
         ERR_SESSION_LIMIT,
         "這個帳號已執行 {limit} 個執行階段，已達上限。",
     ),
+    (
+        ERR_EXTENSION_NOT_DUE,
+        "未延長：只有剩餘時間不超過一次延長所加的時長時，命令列才能延長自動停止。若要現在加時，請使用執行階段上的「延長」。",
+    ),
     (ERR_BUSY, "另一個帳號工作正在進行。"),
     (
         ERR_PROVISION_EXHAUSTED,

@@ -19,7 +19,7 @@ use colab_playground::{
         overlays::UPDATE_CONFIRM,
         pages::{
             UPDATE_NOTICE_INSTALL,
-            sessions::{NEW_SESSION_SELECTOR, PROVISIONING_SELECTOR},
+            sessions::{NEW_SESSION_SELECTOR, PROVISIONING_SELECTOR, extend_selector},
             settings::{CONTROL_CHANGES_SELECTOR, CONTROL_SELECTOR},
         },
     },
@@ -1216,6 +1216,129 @@ fn an_extension_the_runtime_could_not_take_says_so(cx: &mut TestAppContext) {
         Value::Null,
         "the stop holds only while the app runs, and the answer says so"
     );
+}
+
+/// Seconds from the app's clock to `label`'s auto-stop, from one `sessions` answer.
+fn seconds_left(app: &mut TestApp<'_>, label: &str) -> u64 {
+    let answer = data(ask(app, Command::Sessions));
+    let now = answer["now"].as_u64().expect("the app's clock");
+    let runtime = answer["runtimes"]
+        .as_array()
+        .expect("listed")
+        .iter()
+        .find(|runtime| runtime["label"] == label)
+        .unwrap_or_else(|| panic!("{label} is listed"));
+    runtime["auto_stop_at"].as_u64().expect("an auto-stop") - now
+}
+
+fn set_runtime_limit(app: &mut TestApp<'_>, limit: Duration) {
+    app.update(|state, cx| {
+        state.update_defaults(|defaults| defaults.max_runtime = Some(limit), cx)
+    });
+}
+
+#[gpui::test]
+fn an_extension_waits_until_no_more_than_one_is_left(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, changes_allowed(CHANGES_ALLOWED, MockScenario::demo()));
+    on_sessions(&mut app);
+    let left = seconds_left(&mut app, "a100-7f3a");
+    let second = Duration::from_secs(1);
+
+    // Extend adds the runtime limit; a second less than what is left is less than one
+    // extension's worth.
+    set_runtime_limit(&mut app, Duration::from_secs(left) - second);
+    assert_eq!(
+        refusal(ask(&mut app, extend("a100-7f3a", None, false))),
+        Code::ExtensionNotDue,
+        "the preview is refused as the change would be"
+    );
+    let refused = ask(&mut app, extend("a100-7f3a", None, true));
+    assert_eq!(
+        serde_json::to_value(&refused).expect("an answer")["error"]["code"],
+        "extension_not_due",
+        "the word of the error kind a failed operation carries"
+    );
+    assert_eq!(refusal(refused), Code::ExtensionNotDue);
+    app.settle();
+    assert_eq!(seconds_left(&mut app, "a100-7f3a"), left, "nothing moved");
+
+    // Exactly what is left is one extension's worth.
+    set_runtime_limit(&mut app, Duration::from_secs(left));
+    let preview = data(ask(&mut app, extend("a100-7f3a", None, false)));
+    assert_eq!(preview["preview"]["extend_by"], left);
+    let (_, id) = followed(ask(&mut app, extend("a100-7f3a", None, true)));
+    app.settle();
+    let (ended, _) = followed(ask(&mut app, operation(&id)));
+    assert_eq!(ended["state"], "succeeded", "{ended}");
+    assert_eq!(seconds_left(&mut app, "a100-7f3a"), 2 * left);
+
+    assert_eq!(
+        refusal(ask(&mut app, extend("a100-7f3a", None, true))),
+        Code::ExtensionNotDue,
+        "two extensions' worth is left now"
+    );
+    app.click(&extend_selector("a100-7f3a"));
+    assert_eq!(
+        seconds_left(&mut app, "a100-7f3a"),
+        3 * left,
+        "the window's own Extend adds however much is left"
+    );
+}
+
+/// Runs pending work one task at a time until operation `id` has ended, and no further, so
+/// what its end set going (the listing an extension asks for) has not run yet.
+fn run_until_ended(app: &mut TestApp<'_>, id: &str) -> Value {
+    const MOST_TASKS: usize = 1000;
+    for _ in 0..MOST_TASKS {
+        let (now, _) = followed(ask(app, operation(id)));
+        if now["state"] != "running" {
+            return now;
+        }
+        assert!(
+            app.cx.executor().tick(),
+            "nothing is left to run, and {id} still runs"
+        );
+    }
+    panic!("{id} still runs after {MOST_TASKS} tasks");
+}
+
+/// The listing is read again only after an extension succeeds, so a second one asked before
+/// that passes the check at the request; core reads the time left again and refuses it.
+#[gpui::test]
+fn an_extension_the_listing_does_not_show_yet_still_counts(cx: &mut TestAppContext) {
+    let mut app = TestApp::with(cx, changes_allowed(CHANGES_ALLOWED, MockScenario::demo()));
+    let at = listed_runtime(&mut app, "a100-7f3a")["auto_stop_at"]
+        .as_u64()
+        .expect("an auto-stop");
+    let listings = app.mock.runtime_listings();
+    let (_, first) = followed(ask(&mut app, extend("a100-7f3a", None, true)));
+    let ended = run_until_ended(&mut app, &first);
+    assert_eq!(ended["state"], "succeeded", "{ended}");
+    let moved = ended["outcome"]["auto_stop_at"]
+        .as_u64()
+        .expect("the new auto-stop");
+    assert_eq!(moved, at + 7200);
+    assert_eq!(
+        app.mock.runtime_listings(),
+        listings,
+        "the runtimes are not listed again yet"
+    );
+    assert_eq!(listed_runtime(&mut app, "a100-7f3a")["auto_stop_at"], at);
+
+    let (asked, second) = followed(ask(&mut app, extend("a100-7f3a", None, true)));
+    assert_eq!(asked["state"], "running", "the old listing lets it through");
+    app.settle();
+    let (ended, _) = followed(ask(&mut app, operation(&second)));
+    assert_eq!(ended["state"], "failed", "{ended}");
+    assert_eq!(ended["error"]["kind"], "extension_not_due", "{ended}");
+    assert_eq!(ended["outcome"], Value::Null);
+    assert_eq!(
+        listed_runtime(&mut app, "a100-7f3a")["auto_stop_at"],
+        moved,
+        "where the first extension put it"
+    );
+    let message = app.text(keys::ERR_EXTENSION_NOT_DUE);
+    assert!(app.toasts().contains(&message), "{:?}", app.toasts());
 }
 
 #[gpui::test]

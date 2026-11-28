@@ -601,6 +601,10 @@ pub(super) const MESSAGES: Messages = &[
         ERR_SESSION_LIMIT,
         "このアカウントでは、すでに上限の {limit} 件のランタイムが実行されています。",
     ),
+    (
+        ERR_EXTENSION_NOT_DUE,
+        "延長されませんでした。コマンド ラインから自動停止を延長できるのは、残り時間が 1 回の延長分以下のときだけです。今すぐ延長するには、ランタイムの「延長」を使用してください。",
+    ),
     (ERR_BUSY, "別のアカウント操作を実行中です。"),
     (
         ERR_PROVISION_EXHAUSTED,
