@@ -40,7 +40,7 @@ use crate::sessions::{
 };
 use crate::tunnel::{TunnelEvent, TunnelId, TunnelInfo, TunnelSpec, TunnelState};
 use crate::updater::{Installed, SelfUpdate, Unsupported, UpdateProgress};
-use crate::usage::{AccountUsage, RateReading, Usage, poll_due};
+use crate::usage::{AccountUsage, Usage, poll_due};
 use crate::vm::{RunState, RunStatus};
 
 // A release download runs only the real backend. The workflow marks a download and leaves out
@@ -621,16 +621,8 @@ impl World {
         let entry = self.usage.entry(id.clone()).or_default();
         match (fails, reading) {
             (false, Some(u)) => {
-                entry.record_success(u, now, &live, verified);
-                if verified && let Some(name) = u.sole_session(&live) {
-                    let reading = RateReading {
-                        cu_per_hour: u.rate_cu_per_hour,
-                        at: now,
-                    };
-                    let _ = self
-                        .ledger
-                        .update(id, name, |e| e.measured_rate = Some(reading));
-                }
+                let update = entry.record_success(u, now, &live, verified);
+                entry.apply_measured_rate(&mut self.ledger, id, update);
             }
             _ => entry.record_failure(
                 Error::new(ErrorKind::Http).detail("simulated usage failure"),
@@ -2516,6 +2508,13 @@ mod tests {
         assert!(m.measured_rates().is_empty());
         let t4 = start(Accelerator::T4);
         m.refresh_usage(&[], &nc()).unwrap();
+        assert_eq!(
+            rate(Accelerator::T4),
+            None,
+            "a first reading has not held for MEASURE_HOLD yet"
+        );
+        clock.advance(crate::usage::MEASURE_HOLD);
+        m.refresh_usage(&[], &nc()).unwrap();
         let measured = rate(Accelerator::T4).unwrap();
         assert_eq!(measured.cu_per_hour, mock_rate(Accelerator::T4));
         // A guard round reads usage too, and keeps what it measured.
@@ -2531,7 +2530,7 @@ mod tests {
         assert_eq!(rate(Accelerator::T4), before);
         assert_eq!(rate(Accelerator::A100), None);
 
-        // The stopped session's reading stays; the one left alone is measured.
+        // The stopped session's reading stays; the one left alone is measured once held.
         let t4 = m
             .runtimes(&nc())
             .unwrap()
@@ -2541,6 +2540,9 @@ mod tests {
             .unwrap();
         m.stop_session(&t4.id, StopOptions::default(), &nc())
             .unwrap();
+        m.guard_poll(&nc()).unwrap();
+        assert_eq!(rate(Accelerator::A100), None);
+        clock.advance(crate::usage::MEASURE_HOLD);
         m.guard_poll(&nc()).unwrap();
         assert_eq!(rate(Accelerator::T4), before);
         assert_eq!(

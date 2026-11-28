@@ -168,7 +168,7 @@ RATES = {"NONE": 0.08, "T4": 1.76, "L4": 4.82, "G4": 8.2, "A100": 11.77, "H100":
 
 def usage_of(s, name):
     a = account_state(s, name)
-    rate = sum(RATES.get(x["accelerator"], 1.0) for x in a["assignments"].values())
+    rate = a["rate"] if "rate" in a else sum(RATES.get(x["accelerator"], 1.0) for x in a["assignments"].values())
     return {"currentBalance": a["balance"], "consumptionRateHourly": rate, "assignmentsCount": len(a["assignments"])}
 
 

@@ -46,7 +46,7 @@ use crate::sessions::{
 };
 use crate::tunnel::{TunnelCtx, TunnelEvent, TunnelId, TunnelInfo, TunnelManager, TunnelSpec};
 use crate::updater::{self, Installed, SelfUpdate, UpdateProgress};
-use crate::usage::{AccountUsage, RateReading, poll_due};
+use crate::usage::{AccountUsage, poll_due};
 use crate::vm::{self, RunState, RunStatus};
 use crate::watchdog;
 
@@ -926,23 +926,15 @@ impl Inner {
         for (id, res) in results {
             let live = self.live_names(&id);
             let mut st = self.st();
+            let st = &mut *st;
             let entry = st.usage.entry(id.clone()).or_default();
             match res {
                 Ok(u) => {
-                    entry.record_success(u, now, &live, verified.contains(&id));
+                    let update = entry.record_success(u, now, &live, verified.contains(&id));
                     let snap = entry.snapshot;
+                    entry.apply_measured_rate(&mut st.ledger, &id, update);
                     if let Some(s) = snap {
                         let _ = st.accounts.set_usage(&id, s);
-                    }
-                    if verified.contains(&id)
-                        && let Some(name) = u.sole_session(&live)
-                    {
-                        let reading = RateReading {
-                            cu_per_hour: u.rate_cu_per_hour,
-                            at: now,
-                        };
-                        st.ledger
-                            .change(&id, name, |e| e.measured_rate = Some(reading));
                     }
                 }
                 Err(e) => entry.record_failure(e, now),

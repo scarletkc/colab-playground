@@ -1250,7 +1250,10 @@ fn a_typed_name_survives_a_hardware_change(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_form_shows_what_the_chosen_hardware_burns(cx: &mut TestAppContext) {
     use colab_playground::{format, ui::provision_form::rate_selector};
-    use colab_playground_core::{mock::mock_rate, usage::published_rate};
+    use colab_playground_core::{
+        mock::mock_rate,
+        usage::{MEASURE_HOLD, published_rate},
+    };
     let mut app = TestApp::with(cx, Options::scenario(MockScenario::single()));
     let pick = |app: &mut TestApp<'_>, accelerator, high_mem| {
         app.update(|state, cx| {
@@ -1280,9 +1283,11 @@ fn the_form_shows_what_the_chosen_hardware_burns(cx: &mut TestAppContext) {
     app.click(NEW_SESSION_START);
     assert!(matches!(phase(&mut app), Some(ProvisionPhase::Ready(_))));
     app.update(|state, cx| state.close_overlay(cx));
+    app.advance(MEASURE_HOLD);
+    app.update(|state, cx| state.refresh_usage(true, cx));
 
-    // The T4 is the account's only runtime, so the account's burn rate is its own and
-    // replaces the published figure; hardware that never ran keeps the published one.
+    // Once the T4's sole rate holds for MEASURE_HOLD, it replaces the published figure;
+    // hardware that never ran keeps the published one.
     open_new_session(&mut app);
     pick(&mut app, Accelerator::T4, false);
     shows(&mut app, mock_rate(Accelerator::T4));
