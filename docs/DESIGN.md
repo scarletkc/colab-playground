@@ -138,7 +138,9 @@ Properties the code must keep. A change that breaks one is wrong even if every t
   something answers with what it would do and changes nothing unless `--yes` is given. No option
   loosens a cost guard: a runtime it starts gets the Defaults and the limits, which only the
   window changes, and an extension adds what the window's Extend adds, nothing a caller chooses
-  beyond that. A change that cannot happen now (the app busy starting, closing, updating or
+  beyond that. An extension it asks for is refused while more than that is left before the
+  auto-stop, so extensions never pile up: the command line never puts an auto-stop more than two
+  extensions away. A change that cannot happen now (the app busy starting, closing, updating or
   changing accounts) is refused, not queued. A request whose client stopped waiting before the
   app began on it is left undone. Once an operation has begun, a client that goes away cancels
   nothing: it ends on its own or when it is cancelled by name.

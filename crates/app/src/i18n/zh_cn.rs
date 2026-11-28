@@ -454,6 +454,10 @@ pub(super) const MESSAGES: Messages = &[
         ERR_SESSION_LIMIT,
         "此账号已运行 {limit} 个运行时，已达上限。",
     ),
+    (
+        ERR_EXTENSION_NOT_DUE,
+        "未延长：只有剩余时间不超过一次延长所加的时长时，命令行才能延长自动停止。如需现在加时，请使用运行时上的“延长”。",
+    ),
     (ERR_BUSY, "另一个账号任务正在进行。"),
     (
         ERR_PROVISION_EXHAUSTED,

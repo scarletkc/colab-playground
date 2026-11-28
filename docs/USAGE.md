@@ -253,6 +253,7 @@ or runs `colab`.
 | `account_not_active` | `extend` and `forward` act only on runtimes of the active account, as the window does; accounts are switched in the window. |
 | `no_auto_stop` | `extend` named a runtime without an auto-stop: one opened in the browser or another tool, or one whose auto-stop is off because it was started without one or cancelled (the window can set one). |
 | `auto_stop_changing` | That runtime's auto-stop is being extended, set or cancelled already. |
+| `extension_not_due` | `extend` named a runtime with more time left before its auto-stop than one extension adds; ask again once that much or less is left. Right after an extension it can come as a failed operation instead. |
 | `unnamed_runtime` | `forward` named a runtime opened in the browser, which has no session name to reach it by. |
 | `port_in_use` | Another forward of the app listens on that port of this computer. |
 | `already_forwarding` | That port of that runtime is being forwarded already. |
@@ -315,7 +316,8 @@ Changing things:
   counts the runtime like any other, and the same limits apply.
 - **Refused, not queued.** A change that cannot happen now (another start under way, an account
   being switched, the limit reached, the app closing, that runtime's auto-stop or forward being
-  changed already) is refused with its code, and nothing waits to happen later.
+  changed already, an extension that is not due yet) is refused with its code, and nothing waits
+  to happen later.
 - **`start`** starts a runtime on the active account. `--hardware` is `CPU`, `T4`, `L4`, `G4`,
   `A100`, `H100`, `V5E1` or `V6E1` (any case), `--name` a session name; everything else comes from
   Settings → Defaults, as the New session dialog fills it in. No option changes a limit (the
@@ -336,13 +338,17 @@ Changing things:
   it has any.
 - **`extend <runtime>`** moves the auto-stop of a runtime on the active account later by what the
   window's "Extend by …" adds: the runtime limit in Settings → Defaults, or two hours without one.
-  No option chooses another amount. Each extension adds that much again, as each click in the window does, and the other
-  limits (spending cap, balance floor, idle stop) still apply. `<runtime>` and `--account` name it
-  as for `stop`, and only a runtime with an auto-stop can be extended. The preview holds `runtime`
-  (as in `sessions`) and `extend_by`, not the new time: the app reads the time left from the
-  runtime as it extends. Once the operation succeeded, its `outcome` holds `auto_stop_at`, the new
-  auto-stop, and `auto_stop_on_runtime_at`, when the runtime stops itself also with the app closed
-  (`null`: the stop holds only while the app runs).
+  No option chooses another amount, and the other limits (spending cap, balance floor, idle stop)
+  still apply. Unlike Extend in the window, it is refused with `extension_not_due` while more time
+  is left before the auto-stop than one extension adds: a program that keeps asking keeps the
+  runtime running, but never puts its auto-stop more than two extensions away. Right after an
+  extension, until `sessions` shows its new `auto_stop_at`, the refusal can come as an operation
+  that ends `failed` with the error `extension_not_due` instead of at once.
+  `<runtime>` and `--account` name it as for `stop`, and only a runtime with an auto-stop can be
+  extended. The preview holds `runtime` (as in `sessions`) and `extend_by`, not the new time: the
+  app reads the time left from the runtime as it extends. Once the operation succeeded, its
+  `outcome` holds `auto_stop_at`, the new auto-stop, and `auto_stop_on_runtime_at`, when the
+  runtime stops itself also with the app closed (`null`: the stop holds only while the app runs).
 - **`forward <runtime>`** forwards a port of a runtime on the active account to this computer, as
   the window's "Forward a port" does. `--port` is the port on the runtime (8000 when left out, as
   in the dialog; never 8080, which Colab keeps), `--local-port` the port on this computer (the

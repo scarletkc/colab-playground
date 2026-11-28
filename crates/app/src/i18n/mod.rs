@@ -325,6 +325,7 @@ catalog_keys! {
     ERR_WSL_UNAVAILABLE => "app.err.wsl_unavailable",
     ERR_COMMAND_TOO_LONG => "app.err.command_too_long",
     ERR_SESSION_LIMIT => "app.err.session_limit",
+    ERR_EXTENSION_NOT_DUE => "app.err.extension_not_due",
     ERR_BUSY => "app.err.busy",
     ERR_PROVISION_EXHAUSTED => "app.err.provision_exhausted",
     ERR_ORPHAN_SUSPECTED => "app.err.orphan_suspected",

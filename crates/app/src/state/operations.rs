@@ -6,9 +6,11 @@
 //! change would get. A start goes through the New session dialog's provision, and the rest
 //! through what the Sessions page's buttons call, so the window shows them, the quit prompt
 //! knows about them and the same limits hold. No argument loosens a cost guard; those stay with
-//! the person at the window, and an extension adds what the window's Extend adds. A change that
-//! would get in the way of what the window is doing (closing, updating, changing accounts, a
-//! start under way, the New session dialog holding what someone entered) is refused, not queued.
+//! the person at the window. An extension adds what the window's Extend adds, and only once no
+//! more than that is left: a program in a loop could otherwise pile up time without end, and
+//! the runtime limit can be the only cost guard the user has on. A change that would get in the
+//! way of what the window is doing (closing, updating, changing accounts, a start under way, the
+//! New session dialog holding what someone entered) is refused, not queued.
 //!
 //! Each change gets an operation id: every one waits on a backend call, which the owner, which
 //! answers one request at a time, never waits for. The record keeps the outcome itself, because
@@ -25,7 +27,9 @@ use std::{
 use colab_playground_core::{
     Error, ErrorKind,
     accounts::AccountId,
-    backend::{Extension, Runtime, RuntimeRef, accelerator_prefix, generate_session_name},
+    backend::{
+        Extension, Runtime, RuntimeRef, accelerator_prefix, extension_due, generate_session_name,
+    },
     clock::{serde_dur, serde_secs},
     guard::GuardPolicy,
     provision::{ProvisionEvent, ProvisionOutcome, ProvisionSpec},
@@ -785,7 +789,8 @@ impl AppState {
         self.operation_reply(&id)
     }
 
-    /// `extend`: moves a runtime's auto-stop later by what the card's Extend adds.
+    /// `extend`: moves a runtime's auto-stop later by what the card's Extend adds, once no more
+    /// than that is left.
     pub(super) fn control_extend(
         &mut self,
         args: ExtendArgs,
@@ -820,6 +825,26 @@ impl AppState {
                 "no runtime limit is set to extend by",
             ));
         };
+        // From the listing, which can be older than the last extension: core checks again with
+        // the time it reads as it extends, and the operation fails with `extension_not_due`.
+        let left = runtime
+            .auto_stop_at
+            .zip(self.backend_now())
+            .map(|(at, now)| at.duration_since(now).unwrap_or_default());
+        if let Some(left) = left
+            && !extension_due(left, by)
+        {
+            return Err(Refusal::new(
+                Code::ExtensionNotDue,
+                format!(
+                    "{label} still has {} seconds before its auto-stop, more than the {} an \
+                     extension adds; ask again once {} seconds or less are left",
+                    left.as_secs_f64().ceil(),
+                    by.as_secs(),
+                    by.as_secs()
+                ),
+            ));
+        }
         if !args.yes {
             let preview = ExtendPreview {
                 runtime: self.runtime_answer(runtime),

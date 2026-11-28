@@ -1681,7 +1681,16 @@ impl Backend for RealBackend {
         by: Duration,
         cancel: &CancelToken,
     ) -> Result<Extension> {
-        self.move_auto_stop(target, |left| left + by, cancel)
+        self.move_auto_stop(target, |left| Ok(left + by), cancel)
+    }
+
+    fn extend_session_if_due(
+        &self,
+        target: &RuntimeRef,
+        by: Duration,
+        cancel: &CancelToken,
+    ) -> Result<Extension> {
+        self.move_auto_stop(target, |left| extend_if_due(left, by), cancel)
     }
 
     fn set_auto_stop(
@@ -1690,7 +1699,7 @@ impl Backend for RealBackend {
         runtime: Duration,
         cancel: &CancelToken,
     ) -> Result<WatchdogInfo> {
-        self.move_auto_stop(target, |_| runtime, cancel)
+        self.move_auto_stop(target, |_| Ok(runtime), cancel)
             .map(|set| set.watchdog)
     }
 
@@ -2108,7 +2117,7 @@ impl RealBackend {
     fn move_auto_stop(
         &self,
         target: &RuntimeRef,
-        runtime_from_time_left: impl FnOnce(Duration) -> Duration,
+        runtime_from_time_left: impl FnOnce(Duration) -> Result<Duration>,
         cancel: &CancelToken,
     ) -> Result<Extension> {
         let name = target
@@ -2134,7 +2143,9 @@ impl RealBackend {
         let time_left = stop_at
             .and_then(|at| at.duration_since(self.inner.now()).ok())
             .unwrap_or_default();
-        let runtime = runtime_from_time_left(time_left);
+        // Before anything is sent to the runtime or recorded: a refusal leaves the deadline on
+        // the runtime, the watchdog and the ledger as they were.
+        let runtime = runtime_from_time_left(time_left)?;
         if reply.info.armed {
             let env = vec![(
                 watchdog::ENV_DEADLINE.to_owned(),
