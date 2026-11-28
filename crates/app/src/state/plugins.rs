@@ -12,7 +12,7 @@ use colab_playground_core::{
 };
 use gpui::{AppContext, Context};
 
-use super::{AppState, InputSlot, Load, Op, Overlay, ops::key_of};
+use super::{AppState, InputSlot, Load, Op, Overlay, PluginView, ops::key_of};
 use crate::i18n::{keys, tr_args};
 
 /// The Hugging Face token's name in the vault.
@@ -139,6 +139,7 @@ impl AppState {
                     Ok(listed) => {
                         state.plugins.list = Load::Ready(listed.plugins);
                         state.plugins.failed = listed.failed;
+                        state.close_orphaned_run_form();
                     }
                     Err(error) => {
                         state.plugins.list = Load::Failed(error);
@@ -151,6 +152,21 @@ impl AppState {
                 cx.notify();
             },
         );
+    }
+
+    /// A run form whose plugin a read no longer finds (its folder was removed or broken) has
+    /// nothing to draw, and it would stand in for the list that says why.
+    fn close_orphaned_run_form(&mut self) {
+        let orphaned = self
+            .run_form
+            .as_ref()
+            .is_some_and(|form| self.plugin(&form.plugin).is_none());
+        if orphaned {
+            self.run_form = None;
+            if self.plugin_view == PluginView::Form {
+                self.plugin_view = PluginView::List;
+            }
+        }
     }
 
     fn check_hf_token(&mut self, cx: &mut Context<Self>) {

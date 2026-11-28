@@ -18,7 +18,7 @@ use colab_playground::{
             plugins::{
                 ENDPOINT_SELECTOR, INSTALL_CHECK, RUN_START, RUN_STOP, check_failed_selector,
                 failed_selector, hf_result_selector, overview_selector, plugin_selector,
-                remove_failed_selector,
+                remove_failed_selector, run_selector,
             },
         },
     },
@@ -393,6 +393,29 @@ fn a_plugin_folder_that_fails_to_load_says_why_and_can_be_removed(cx: &mut TestA
         app.shown(&plugin_selector("llama-cpp")),
         "the plugins that load stay"
     );
+}
+
+#[gpui::test]
+fn a_run_form_whose_plugin_is_gone_gives_way_to_the_list(cx: &mut TestAppContext) {
+    let fixture = tempfile::tempdir().expect("a fixture folder");
+    std::fs::write(fixture.path().join("plugin.toml"), FIXTURE_MANIFEST).expect("manifest");
+    std::fs::write(fixture.path().join("run.sh"), "#!/bin/bash\necho hello\n").expect("script");
+    let mut app = TestApp::new(cx);
+    app.click(Route::Plugins.nav_selector());
+    let folder = fixture.path().display().to_string();
+    app.fill(|inputs| inputs.plugin_source.clone(), &folder);
+    app.click(INSTALL_CHECK);
+    app.click(INSTALL_CONFIRM);
+    app.click(&run_selector("hello-web"));
+    assert_eq!(app.read(|state, _| state.plugin_view()), PluginView::Form);
+
+    // Its folder goes while another page is open, as when it is deleted or broken by hand.
+    app.click(Route::Overview.nav_selector());
+    app.mock.remove_plugin("hello-web").expect("installed");
+    app.click(Route::Plugins.nav_selector());
+    assert_eq!(app.read(|state, _| state.plugin_view()), PluginView::List);
+    assert!(app.read(|state, _| state.run_form().is_none()));
+    assert!(app.shown(&plugin_selector("llama-cpp")));
 }
 
 #[gpui::test]
